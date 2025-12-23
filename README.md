@@ -36,12 +36,7 @@ Simulation outputs are saved in the `Results/` directory.
 
 ## Contact
 
-**Lizheng Liu** (GitHub: @Zephyr-112)  
-Institute of Biopharmaceutical and Health Engineering,  
-Tsinghua Shenzhen International Graduate School,  
-Tsinghua University, Shenzhen, China  
+**Lizheng Liu** (GitHub: @Zephyr-112), Institute of Biopharmaceutical and Health Engineering, Tsinghua Shenzhen International Graduate School, Tsinghua University, Shenzhen, China  
 
-**Feiran Li** (GitHub: @feiranl)  
-Institute of Biopharmaceutical and Health Engineering,  
-Tsinghua Shenzhen International Graduate School,  
-Tsinghua University, Shenzhen, China
+**Feiran Li** (GitHub: @feiranl), Institute of Biopharmaceutical and Health Engineering, Tsinghua Shenzhen International Graduate School, Tsinghua University, Shenzhen, China
+
