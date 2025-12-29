@@ -11,10 +11,7 @@ We built on the pcSecYeast model for *Saccharomyces cerevisiae* and developed pr
 ## Model Construction
 
 Proteome-constrained secretion models were constructed from a common template model using species-specific build scripts.  
-Models for *S. cerevisiae*, *K. phaffii*, and *K. marxianus* are generated using  
-[`buildModel_pcSecYeast.m`](Code/pcSecYeast/buildModel_pcSecYeast.m),  
-[`buildModel_pcSecPichia.m`](Code/pcSecPichia/buildModel_pcSecPichia.m), and  
-[`buildModel_pcSecKmarx.m`](Code/pcSecKmarx/buildModel_pcSecKmarx.m), respectively.
+Models for *S. cerevisiae*, *K. phaffii*, and *K. marxianus* are generated using  [`buildModel_pcSecYeast.m`](Code/pcSecYeast/buildModel_pcSecYeast.m),  [`buildModel_pcSecPichia.m`](Code/pcSecPichia/buildModel_pcSecPichia.m), and  [`buildModel_pcSecKmarx.m`](Code/pcSecKmarx/buildModel_pcSecKmarx.m), respectively.
 
 ---
 
