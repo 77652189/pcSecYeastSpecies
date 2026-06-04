@@ -1,0 +1,21 @@
+# Local runtime outputs
+local_runs/
+
+# Python caches and virtual environments
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# MATLAB temporary files
+*.asv
+*.m~
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

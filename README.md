@@ -33,6 +33,62 @@ Simulation outputs are saved in the [`Results/`](Results/) directory.
 - solver [SoPlex](https://soplex.zib.de/)
 
 Please ensure that all required toolboxes and solvers are properly installed and added to the MATLAB path before running the scripts.
+
+---
+
+## Local Streamlit App
+
+This repository also includes a local Streamlit interface designed for
+non-computational biology users. The app provides a Chinese-language entry
+point for browsing processed results, checking local deployment status,
+inspecting solver outputs, and running a small verified *S. cerevisiae*
+glucose smoke simulation.
+
+Install the Python dependencies:
+
+```powershell
+pip install -r requirements.txt
+```
+
+Start the app from the repository root:
+
+```powershell
+python -m streamlit run app/ui/streamlit_app.py --server.address 0.0.0.0 --server.port 8502
+```
+
+Then open:
+
+```text
+http://localhost:8502
+```
+
+For LAN access, replace `localhost` with the workstation IP address, for
+example:
+
+```text
+http://192.168.2.174:8502
+```
+
+The app is intentionally separated into UI, service, adapter, and core layers
+under [`app/`](app/) so that the same result loading, health checks, and
+simulation services can be reused by a future FastAPI web backend.
+
+---
+
+## Local Deployment Helpers
+
+Several helper scripts are provided for local setup and smoke validation:
+
+```powershell
+.\local_preflight.ps1
+.\run_matlab_checks.ps1 -SmokeOnly
+.\run_soplex_docker.ps1 -TimeoutSeconds 300
+```
+
+The Docker-based SoPlex route is used when native Windows SoPlex is not
+installed. Generated LP files, solver outputs, figures, and other runtime
+artifacts are written under `local_runs/`, which is ignored by Git.
+
 ---
 
 ## Contact
@@ -40,4 +96,3 @@ Please ensure that all required toolboxes and solvers are properly installed and
 **Lizheng Liu** ([GitHub: @Zephyr-112](https://github.com/Zephyr-112)), Institute of Biopharmaceutical and Health Engineering, Tsinghua Shenzhen International Graduate School, Tsinghua University, Shenzhen, China  
 
 **Feiran Li** ([GitHub: @feiranl](https://github.com/feiranl)), Institute of Biopharmaceutical and Health Engineering, Tsinghua Shenzhen International Graduate School, Tsinghua University, Shenzhen, China
-

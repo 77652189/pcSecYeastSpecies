@@ -1,5 +1,5 @@
 %% writeLP
-function fileName = writeLP(model,mu,f,funmodelER,osenseStr,rxnID,enzymedata,factor_k,name,extraconstraintnum)
+function fileName = writeLPSCE(model,mu,f,funmodelER,osenseStr,rxnID,enzymedata,factor_k,name,extraconstraintnum)
 % constraintsnum 4 ermachine 5 ermembrane 6 HXTs
 % f is the fraction (g/gCDW) of the modeled proteins.
 % f_mito is the fraction (g/gCDW) of the mitochondrial proteins.
@@ -109,7 +109,8 @@ sec_enzyme_idx = find(strcmp(enzymedata.label,'Sec'));
 complex_list = enzymedata.enzyme(sec_enzyme_idx);
 compartment = enzymedata.comp(sec_enzyme_idx);
 M_Kcats_modified = enzymedata.kcat(sec_enzyme_idx);
-[~,idx]=unique(strcat(complex_list,compartment),'rows');
+complex_keys = strcat(complex_list(:), compartment(:));
+[~,idx]=unique(complex_keys);
 complex_list=complex_list(idx,:);
 compartment=compartment(idx,:);
 M_Kcats_modified = M_Kcats_modified(idx,:);

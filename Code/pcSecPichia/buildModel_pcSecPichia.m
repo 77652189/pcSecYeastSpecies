@@ -93,7 +93,7 @@ model = fitGAMforGlc(model);
 
 %% Save model
 save('pcSecPichia.mat','model');
-save('enzymedata_PP.mat','enzymedata');b 
+save('enzymedata_PP.mat','enzymedata');
 save('enzymedataSEC_PP.mat','enzymedataSEC');
 save('enzymedataMachine_PP.mat','enzymedataMachine');
 save('enzymedataDummyER_PP.mat','enzymedataDummyER');
@@ -105,4 +105,3 @@ model_excel.mets = model_excel.metNames;
 writeCbModel(model_excel,'xls','test\pcSecPichia.xls');
 clear model_excel;
 toc;
-
