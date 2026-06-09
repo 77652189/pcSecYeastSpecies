@@ -56,6 +56,16 @@ Start the app from the repository root:
 python -m streamlit run app/ui/streamlit_app.py --server.address 0.0.0.0 --server.port 8502
 ```
 
+On Windows, the LAN launcher can also be started with:
+
+```powershell
+.\start_pcSecYeastSpecies_lan.bat
+```
+
+The launcher starts the Streamlit app on port `8502` and can configure a
+Windows Firewall rule for local-subnet access when administrator approval is
+granted.
+
 Then open:
 
 ```text
