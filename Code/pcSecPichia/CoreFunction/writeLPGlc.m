@@ -1,11 +1,16 @@
-%% writeLP
-function fileName = writeLPGlc(model,mu,f,funmodelER,osenseStr,rxnID,enzymedata,factor_k,name,extraconstraintnum)
+function fileName = writeLPGlc(model,mu,f,funmodelER,osenseStr,rxnID,enzymedata,factor_k,name,extraconstraintnum,options)
+% writeLPGlc
 % f is the fraction (g/gCDW) of the modeled proteins.
 % f_mito is the fraction (g/gCDW) of the mitochondrial proteins.
 
 if ~exist('extraconstraintnum', 'var')
     extraconstraintnum = 0;
 end
+if ~exist('options', 'var') || isempty(options)
+    options = struct();
+end
+writeRibosomeConstraint = getOption(options, 'writeRibosomeConstraint', true);
+writeMisfoldingConstraints = getOption(options, 'writeMisfoldingConstraints', true);
 if exist('factor_k', 'var')
     if isempty(factor_k)
         factor_k = 1;
@@ -123,12 +128,26 @@ for i=1:numel(complex_list) %check again for 1:n
     id_syn=find(ismember(model.rxns,rxnID));
     if isempty(id_syn)
         warning([rxnID,' is missing',num2str(i)])
+        continue
     end
     %add the condition collecting collect all catalyzed reactions by this complex
     %find only the metabolic index by setting the rxn index
     %before the index of the complex formation rxn
     rxns_by_this_complex = find(endsWith(model.rxns,['_',complex_list{i}]));
     [~,idx_coef] = ismember(model.rxns(rxns_by_this_complex),rxns_coef_id);
+    valid_coef_idx = idx_coef ~= 0;
+    if ~all(valid_coef_idx)
+        warning('writeLPGlc:MissingSecCoefficient', ...
+            'Skipping %d reactions without rxnscoef for %s.', ...
+            sum(~valid_coef_idx), complex_name);
+    end
+    rxns_by_this_complex = rxns_by_this_complex(valid_coef_idx);
+    idx_coef = idx_coef(valid_coef_idx);
+    if isempty(rxns_by_this_complex)
+        warning('writeLPGlc:NoSecReactions', ...
+            'No coefficient-matched reactions found for %s.', complex_name);
+        continue
+    end
     coef_tmp = rxns_coef(idx_coef);
     %print kcat constriants in lp file
     for r=1:numel(rxns_by_this_complex)
@@ -259,46 +278,47 @@ end
 fprintf(fptr,'CM%d: %s - %.15f X%d = 0\n',k1+3,eq,coef_syn,id_syn);
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% 7) Constraint on Ribosome.
-rxnID=sprintf('Mach_Ribosome_complex_formation');
-id_syn=find(ismember(model.rxns,rxnID));
-%kcat_ribo = enzymedataMachine.kcat(ismember(enzymedataMachine.enzyme,'Ribosome'));
+if writeRibosomeConstraint
+    rxnID=sprintf('Mach_Ribosome_complex_formation');
+    id_syn=find(ismember(model.rxns,rxnID));
+    %kcat_ribo = enzymedataMachine.kcat(ismember(enzymedataMachine.enzyme,'Ribosome'));
 
-kcat_ribo = 2.06E+01*mu/(0.486+mu)*3600;
-end
+    kcat_ribo = 2.06E+01*mu/(0.486+mu)*3600;
 
-coef = kcat_ribo/mu;
+    coef = kcat_ribo/mu;
 
-trans_rxns = model.rxns(endsWith(model.rxns,'_translation'));
-for i = 1:length(trans_rxns)
-    rxn_id = trans_rxns{i};
-    comp_name = strrep(rxn_id,'_peptide_translation','');
-    comp_name = strrep(comp_name,'r_','');
-    idx = find(strcmp(model.rxns,rxn_id));
-    prot_leng = enzymedata.proteinLength(ismember(enzymedata.proteins,comp_name));
+    trans_rxns = model.rxns(endsWith(model.rxns,'_translation'));
+    for i = 1:length(trans_rxns)
+        rxn_id = trans_rxns{i};
+        comp_name = strrep(rxn_id,'_peptide_translation','');
+        comp_name = strrep(comp_name,'r_','');
+        idx = find(strcmp(model.rxns,rxn_id));
+        prot_leng = enzymedata.proteinLength(ismember(enzymedata.proteins,comp_name));
 
-    if mod(i,150) == 0
-        sep = newline;
-	else
-        sep = '';
+        if mod(i,150) == 0
+            sep = newline;
+        else
+            sep = '';
+        end
+
+        if i == 1
+            eq = sprintf('%d X%d',prot_leng(1),idx);
+        else
+            eq = sprintf('%s + %d X%d%c',eq,prot_leng(1),idx,sep);
+        end
     end
+    idx = find(strcmp(model.rxns,'translate_dummy')); % dummyER has been included by using the rxnID:
+    eq = sprintf('%s + %.15f X%d%c',eq,423,idx,sep); % 46000 is MW of dummy complex (g/mol)  the same as the protein in the biomass,423 is the protein_length
 
-	if i == 1
-        eq = sprintf('%d X%d',prot_leng(1),idx);
-	else
-        eq = sprintf('%s + %d X%d%c',eq,prot_leng(1),idx,sep);
-	end
+    idx = find(strcmp(model.rxns,'translate_dummyER')); % dummyER has been included by using the rxnID:
+    eq = sprintf('%s + %.15f X%d%c',eq,423,idx,sep);
+
+    idx = find(strcmp(model.rxnNames,'PROTEINS'));
+
+    eq = sprintf('%s + %.15f X%d%c',eq,4.23,idx,sep); % the original 460/4.23
+
+    fprintf(fptr,'CM%d: %s - %.15f X%d = 0\n',k1+1,eq,coef,id_syn);
 end
-idx = find(strcmp(model.rxns,'translate_dummy')); % dummyER has been included by using the rxnID: 
-eq = sprintf('%s + %.15f X%d%c',eq,423,idx,sep); % 46000 is MW of dummy complex (g/mol)  the same as the protein in the biomass,423 is the protein_length 
-
-idx = find(strcmp(model.rxns,'translate_dummyER')); % dummyER has been included by using the rxnID: 
-eq = sprintf('%s + %.15f X%d%c',eq,423,idx,sep);
-
-idx = find(strcmp(model.rxnNames,'PROTEINS'));
-
-eq = sprintf('%s + %.15f X%d%c',eq,4.23,idx,sep); % the original 460/4.23
-
-fprintf(fptr,'CM%d: %s - %.15f X%d = 0\n',k1+1,eq,coef,id_syn);
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% 8) Constraint on Ribosome assembly.
 k1 = k1+6;
@@ -315,20 +335,22 @@ fprintf(fptr,'CM%d: X%d - %.15f X%d = 0\n',k1,id_use,coef,id_syn);
 
 %% 9) Constraint on misfolding.
 
-misfold_list = model.rxns(contains(model.rxns,'_misfold_')& ~contains(model.rxns,'dummy'));
-for i = 1:length(misfold_list)
-    k1 = k1+1;
-    rxn_id = misfold_list{i};
-    comp_name = extractBefore(rxn_id,'_misfold_');
-    comp_id = ['r_',comp_name,'_peptide_translation'];
-    kdegratio = enzymedata.kdeg(ismember(enzymedata.proteins,comp_name));
-    idx_syn = find(strcmp(model.rxns,comp_id));
-    idx_misfold = find(strcmp(model.rxns,rxn_id));
-    %coef_misfold = kdeg/(0.36 + kdeg); % bionumber 113409
-    coef_misfold = kdegratio;
-    coef = coef_misfold;
-    fprintf(fptr,'CM%d: X%d - %.15f X%d = 0\n',k1,idx_misfold,coef,idx_syn);
+if writeMisfoldingConstraints
+    misfold_list = model.rxns(contains(model.rxns,'_misfold_')& ~contains(model.rxns,'dummy'));
+    for i = 1:length(misfold_list)
+        k1 = k1+1;
+        rxn_id = misfold_list{i};
+        comp_name = extractBefore(rxn_id,'_misfold_');
+        comp_id = ['r_',comp_name,'_peptide_translation'];
+        kdegratio = enzymedata.kdeg(ismember(enzymedata.proteins,comp_name));
+        idx_syn = find(strcmp(model.rxns,comp_id));
+        idx_misfold = find(strcmp(model.rxns,rxn_id));
+        %coef_misfold = kdeg/(0.36 + kdeg); % bionumber 113409
+        coef_misfold = kdegratio;
+        coef = coef_misfold;
+        fprintf(fptr,'CM%d: X%d - %.15f X%d = 0\n',k1,idx_misfold,coef,idx_syn);
 
+    end
 end
 
 
@@ -346,3 +368,12 @@ end
 
 fprintf(fptr,'End\n');
 fclose(fptr);
+end
+
+function value = getOption(options, fieldName, defaultValue)
+if isstruct(options) && isfield(options, fieldName)
+    value = options.(fieldName);
+else
+    value = defaultValue;
+end
+end

@@ -49,3 +49,27 @@ class ProjectPaths:
     @property
     def matlab_smoke_script(self) -> Path:
         return self.repo_root / "local_smoke_sce_glc.m"
+
+    @property
+    def opn_candidate_csv(self) -> Path:
+        return self.repo_root / "Data" / "pcSecPichia" / "TargetProtein_OPN_candidates.csv"
+
+    @property
+    def opn_candidate_meta_csv(self) -> Path:
+        return self.repo_root / "Data" / "pcSecPichia" / "TargetProtein_OPN_candidates_meta.csv"
+
+    @property
+    def opn_run_dir(self) -> Path:
+        return self.local_runs_dir / "OPN_PPA_glc_smoke"
+
+    @property
+    def opn_design_dir(self) -> Path:
+        return self.local_runs_dir / "OPN_design"
+
+    @property
+    def opn_matlab_script(self) -> Path:
+        return self.repo_root / "local_opn_pichia_glc.m"
+
+    @property
+    def pichia_clm_repo(self) -> Path:
+        return self.repo_root.parent / "PichiaCLM"
