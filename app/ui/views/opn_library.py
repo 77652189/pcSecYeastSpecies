@@ -39,7 +39,7 @@ def render_opn_workflow_overview() -> None:
     )
 
 
-def render_signal_peptide_library_manager() -> None:
+def render_signal_peptide_library_manager(*, include_external: bool = True) -> None:
     st.subheader("信号肽候选库管理")
     st.markdown(
         """
@@ -162,18 +162,28 @@ def render_signal_peptide_library_manager() -> None:
                 st.error("预检未通过，请修正后重新上传。")
                 st.write(validation.errors)
 
+    if include_external:
+        render_external_signal_peptide_screening()
+
+
+def render_external_signal_peptide_screening() -> None:
+    render_uniprot_discovery_panel()
+    render_uniprot_method_screening()
+
+
+def render_uniprot_discovery_panel() -> None:
     with st.expander("从 UniProt API 发现更多候选", expanded=True):
         st.markdown(
             """
             这一步会联网查询 UniProt 中带 `signal peptide` 注释的 Komagataella/Pichia 蛋白，
-            自动提取 N 端 signal peptide 作为候选草案。它只负责“发现候选”，不会自动加入正式模型。
+            自动提取 N 端 signal peptide 作为候选草案，并进行重复检测。它只负责“发现候选”，不会自动加入正式模型。
             """
         )
         api_left, api_mid, api_right = st.columns([1, 1, 1])
         with api_left:
             taxon_id = st.number_input("UniProt organism/taxon ID", min_value=1, value=4922, step=1)
         with api_mid:
-            size = st.number_input("最多拉取条目数", min_value=5, max_value=100, value=25, step=5)
+            size = st.number_input("最多拉取条目数", min_value=25, max_value=500, value=300, step=25)
         with api_right:
             reviewed_only = st.checkbox("只查 reviewed", value=False)
         if st.button("从 UniProt 获取候选", type="secondary"):
@@ -188,7 +198,11 @@ def render_signal_peptide_library_manager() -> None:
                     st.warning("部分结果被跳过。")
                     st.write(discovery["errors"])
                 discovered = pd.DataFrame(discovery["rows"])
-                st.success(f"发现 {len(discovered)} 条外部候选草案。")
+                st.success(
+                    f"发现 {len(discovered)} 条去重后的外部候选草案；"
+                    f"检测到 {int(discovery.get('duplicate_count', 0))} 条重复记录。"
+                )
+                st.caption(f"已持久保存到：{PATHS.opn_signal_peptides_dir}")
                 st.caption(f"来源：{discovery['source_url']}")
                 st.dataframe(
                     discovered[
@@ -227,9 +241,38 @@ def render_signal_peptide_library_manager() -> None:
                     file_name="uniprot_signal_peptide_candidates.csv",
                     mime="text/csv",
                 )
-
-    render_uniprot_method_screening()
-
+                duplicate_rows = pd.DataFrame(discovery.get("duplicate_rows", []))
+                if not duplicate_rows.empty:
+                    with st.expander("查看重复检测明细", expanded=False):
+                        st.dataframe(
+                            duplicate_rows[
+                                [
+                                    "candidate_id",
+                                    "accession",
+                                    "protein_name",
+                                    "signal_peptide_sequence",
+                                    "duplicate_reason",
+                                    "duplicate_of",
+                                ]
+                            ].rename(
+                                columns={
+                                    "candidate_id": "候选 ID",
+                                    "accession": "UniProt accession",
+                                    "protein_name": "来源蛋白",
+                                    "signal_peptide_sequence": "重复信号肽序列",
+                                    "duplicate_reason": "重复原因",
+                                    "duplicate_of": "重复于",
+                                }
+                            ),
+                            use_container_width=True,
+                            hide_index=True,
+                        )
+                        st.download_button(
+                            "下载重复记录 CSV",
+                            duplicate_rows.to_csv(index=False).encode("utf-8-sig"),
+                            file_name="uniprot_signal_peptide_duplicates.csv",
+                            mime="text/csv",
+                        )
 
 def render_uniprot_method_screening() -> None:
     with st.expander("从 UniProt 建库并比较筛选方法", expanded=True):
@@ -278,9 +321,12 @@ def render_uniprot_method_screening() -> None:
         with col_reviewed:
             reviewed_only = st.checkbox("只查 reviewed", value=False, key="method_screen_reviewed")
 
-        st.caption("默认范围是 Pichia/毕赤相关 taxon 4922；当前 UniProt 预检约 265 条带 signal peptide 注释的条目。")
+        st.caption(
+            "默认范围是 Pichia/毕赤相关 taxon 4922；当前 UniProt 预检约 265 条带 signal peptide 注释的条目。"
+            "筛选阶段会优先复用上方 UniProt 查询已保存的候选文件，避免重复联网拉取。"
+        )
         if st.button("建立候选库并比较方法", type="primary"):
-            with st.spinner("正在从 UniProt 建库，并运行规则/USPNet 对比..."):
+            with st.spinner("正在读取已保存的 UniProt 候选，并运行规则/USPNet 对比..."):
                 st.session_state["method_screening_result"] = service.screen_uniprot_candidates(
                     taxon_id=int(taxon_id),
                     max_records=int(max_records),
@@ -288,10 +334,21 @@ def render_uniprot_method_screening() -> None:
                 )
 
         result = st.session_state.get("method_screening_result")
+        loaded_from_disk = False
         if result is None:
-            st.info("点击按钮后会生成 UniProt 初始候选、规则评分表和 FASTA；如果 USPNet 已安装，还会给出多方法一致通过结果。")
+            result = service.load_persisted_screening_result()
+            if result is not None:
+                st.session_state["method_screening_result"] = result
+                loaded_from_disk = True
+        if result is None:
+            st.info(
+                "点击按钮后会生成 UniProt 初始候选、规则评分表和 FASTA；如果 USPNet 已安装，还会给出多方法一致通过结果。"
+                "生成后的 CSV/FASTA/JSON 会保存在本地，下次打开页面会自动加载。"
+            )
             return
 
+        if loaded_from_disk:
+            st.info("已自动加载上次保存的方法比较结果；如果需要更新 UniProt 或 USPNet 结果，再点击按钮重新运行。")
         if result.success:
             st.success(result.message)
         elif result.available:
@@ -300,12 +357,29 @@ def render_uniprot_method_screening() -> None:
             st.warning(result.message)
 
         summary = result.summary
-        metric1, metric2, metric3, metric4, metric5 = st.columns(5)
+        metric1, metric2, metric3, metric4, metric5, metric6 = st.columns(6)
         metric1.metric("UniProt 初始命中", int(summary.get("uniprot_initial_hits", 0)))
         metric2.metric("去重后候选", int(summary.get("deduplicated_candidates", 0)))
-        metric3.metric("规则高优先", int(summary.get("rules_high_priority", 0)))
-        metric4.metric("USPNet 通过", int(summary.get("uspnet_passed", 0)))
-        metric5.metric("一致通过", int(summary.get("consensus_passed", 0)))
+        metric3.metric("重复检测", int(summary.get("uniprot_duplicate_count", 0)))
+        metric4.metric("规则高优先", int(summary.get("rules_high_priority", 0)))
+        metric5.metric("USPNet 通过", int(summary.get("uspnet_passed", 0)))
+        metric6.metric("一致通过", int(summary.get("consensus_passed", 0)))
+        st.caption(f"候选来源：{summary.get('uniprot_candidate_source', '本地或本次运行结果')}")
+
+        with st.expander("规则分数和 USPNet 预测怎么读", expanded=True):
+            st.markdown(
+                """
+                - **规则分数**是一个可解释的质控分数，检查长度、N 端电荷、疏水核心、切割位点附近小残基等典型 signal peptide 特征。
+                - 很多 UniProt 已注释 signal peptide 会接近满分，这只说明“像标准信号肽”，**不代表分泌产量更高**。
+                - **USPNet=SP** 表示机器学习模型也判断它是信号肽；**NO_SP** 表示 USPNet 不支持，需要降级或人工复核。
+                - 真正用于 OPN 生产的优先级，还要结合 pcSecPichia 模型、小试表达和加工风险。
+                """
+            )
+            dist1, dist2, dist3, dist4 = st.columns(4)
+            dist1.metric("规则分数 ≥95", int(summary.get("rules_score_95_plus", 0)))
+            dist2.metric("80-94", int(summary.get("rules_score_80_to_94", 0)))
+            dist3.metric("65-79", int(summary.get("rules_score_65_to_79", 0)))
+            dist4.metric("<65", int(summary.get("rules_score_below_65", 0)))
 
         rows = pd.DataFrame(result.rows)
         if not rows.empty:
@@ -322,7 +396,8 @@ def render_uniprot_method_screening() -> None:
                             "signal_peptide_sequence",
                             "rules_score",
                             "rules_priority",
-                            "uspnet_prediction",
+                            "rules_score_note",
+                            "uspnet_prediction_label",
                             "screening_status",
                             "recommended_for_draft_library",
                         ]
@@ -334,7 +409,8 @@ def render_uniprot_method_screening() -> None:
                             "signal_peptide_sequence": "UniProt 注释信号肽",
                             "rules_score": "规则分数",
                             "rules_priority": "规则优先级",
-                            "uspnet_prediction": "USPNet 预测",
+                            "rules_score_note": "规则分数说明",
+                            "uspnet_prediction_label": "USPNet 预测说明",
                             "screening_status": "综合状态",
                             "recommended_for_draft_library": "建议进入草案库",
                         }
@@ -349,6 +425,8 @@ def render_uniprot_method_screening() -> None:
                                 "candidate_id",
                                 "rules_reasons",
                                 "rules_risks",
+                                "rules_score_note",
+                                "uspnet_interpretation",
                                 "rules_h_region_max_hydrophobicity",
                                 "rules_n_region_positive_count",
                                 "rules_c_region_small_neutral",
@@ -358,6 +436,8 @@ def render_uniprot_method_screening() -> None:
                                 "candidate_id": "候选 ID",
                                 "rules_reasons": "规则支持理由",
                                 "rules_risks": "规则风险提示",
+                                "rules_score_note": "规则分数说明",
+                                "uspnet_interpretation": "USPNet 解释",
                                 "rules_h_region_max_hydrophobicity": "最大疏水窗口",
                                 "rules_n_region_positive_count": "N 端正电残基数",
                                 "rules_c_region_small_neutral": "C 端小残基规则",
@@ -371,10 +451,11 @@ def render_uniprot_method_screening() -> None:
                 st.write(result.errors)
 
         st.markdown("**下载候选库和方法对比结果**")
-        download_cols = st.columns(3)
+        download_cols = st.columns(4)
         _download_file_button(download_cols[0], result.uniprot_csv, "下载 UniProt 初始候选 CSV", "text/csv")
-        _download_file_button(download_cols[1], result.comparison_csv, "下载方法对比 CSV", "text/csv")
-        _download_file_button(download_cols[2], result.recommended_fasta, "下载推荐候选 FASTA", "text/plain")
+        _download_file_button(download_cols[1], result.duplicate_csv, "下载重复记录 CSV", "text/csv")
+        _download_file_button(download_cols[2], result.comparison_csv, "下载方法对比 CSV", "text/csv")
+        _download_file_button(download_cols[3], result.recommended_fasta, "下载推荐候选 FASTA", "text/plain")
         st.caption(f"输出目录：{result.output_dir}")
 
 

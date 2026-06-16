@@ -59,10 +59,12 @@ class UniProtSignalPeptideSource:
                 fetched_record_count=len(items),
                 extracted_signal_count=0,
                 deduplicated_count=0,
+                duplicate_count=0,
+                duplicate_rows=[],
             )
 
         limited_items = items[:max_records]
-        rows, row_errors, extracted_signal_count = self.rows_from_items(
+        rows, row_errors, extracted_signal_count, duplicate_rows = self.rows_from_items(
             limited_items,
             exclude_existing=exclude_existing,
         )
@@ -77,6 +79,8 @@ class UniProtSignalPeptideSource:
             fetched_record_count=len(limited_items),
             extracted_signal_count=extracted_signal_count,
             deduplicated_count=len(rows),
+            duplicate_count=len(duplicate_rows),
+            duplicate_rows=duplicate_rows,
         )
 
     def rows_from_payload(
@@ -85,7 +89,7 @@ class UniProtSignalPeptideSource:
         *,
         exclude_existing: bool = True,
     ) -> tuple[list[dict[str, object]], list[str]]:
-        rows, errors, _extracted_count = self.rows_from_items(
+        rows, errors, _extracted_count, _duplicate_rows = self.rows_from_items(
             payload.get("results", []),
             exclude_existing=exclude_existing,
         )
@@ -96,11 +100,12 @@ class UniProtSignalPeptideSource:
         items: Iterable[dict],
         *,
         exclude_existing: bool,
-    ) -> tuple[list[dict[str, object]], list[str], int]:
+    ) -> tuple[list[dict[str, object]], list[str], int, list[dict[str, object]]]:
         existing_ids, existing_leaders = self._existing_sets()
         rows: list[dict[str, object]] = []
+        duplicate_rows: list[dict[str, object]] = []
         errors: list[str] = []
-        seen_sequences: set[str] = set()
+        seen_sequences: dict[str, str] = {}
         extracted_signal_count = 0
         for item in items:
             accession = item.get("primaryAccession", "")
@@ -111,11 +116,6 @@ class UniProtSignalPeptideSource:
             extracted_signal_count += 1
             candidate_id = f"OPN_UNIPROT_{_safe_id(accession)}"
             already_in_formal_library = candidate_id in existing_ids or signal in existing_leaders
-            if exclude_existing and already_in_formal_library:
-                continue
-            if signal in seen_sequences:
-                continue
-            seen_sequences.add(signal)
             candidate = SignalPeptideCandidate(
                 candidate_id=candidate_id,
                 accession=accession,
@@ -143,10 +143,30 @@ class UniProtSignalPeptideSource:
                 f"UniProt {row['accession']} {row['uniprot_id']}; "
                 f"{row['organism_name']}; {row['protein_name']}"
             )
+            if already_in_formal_library:
+                duplicate_rows.append(
+                    {
+                        **row,
+                        "duplicate_reason": "与正式候选库已有序列重复",
+                        "duplicate_of": "formal_library",
+                    }
+                )
+                if exclude_existing:
+                    continue
+            if signal in seen_sequences:
+                duplicate_rows.append(
+                    {
+                        **row,
+                        "duplicate_reason": "UniProt 结果中信号肽序列重复",
+                        "duplicate_of": seen_sequences[signal],
+                    }
+                )
+                continue
+            seen_sequences[signal] = candidate_id
             rows.append(row)
         if not rows:
             errors.append("没有发现可加入草案的新 signal peptide；可能都已存在或查询结果没有明确序列。")
-        return rows, errors, extracted_signal_count
+        return rows, errors, extracted_signal_count, duplicate_rows
 
     def _existing_sets(self) -> tuple[set[str], set[str]]:
         ids = set()

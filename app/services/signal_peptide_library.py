@@ -79,7 +79,13 @@ class SignalPeptideLibraryService:
             reviewed_only=reviewed_only,
             exclude_existing=True,
         )
-        return CandidateDiscoveryResult(library.rows, library.source_url, library.errors)
+        return CandidateDiscoveryResult(
+            library.rows,
+            library.source_url,
+            library.errors,
+            duplicate_count=library.duplicate_count,
+            duplicate_rows=library.duplicate_rows,
+        )
 
     def discover_uniprot_candidate_library(
         self,

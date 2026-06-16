@@ -10,11 +10,11 @@ st.set_page_config(
 )
 
 from app.ui.common import app_css, page_header, sidebar_navigation  # noqa: E402
-from app.ui.pages.logs import render_logs  # noqa: E402
-from app.ui.pages.opn import render_opn_signal_peptides  # noqa: E402
-from app.ui.pages.overview import render_overview  # noqa: E402
-from app.ui.pages.results import render_results_browser  # noqa: E402
-from app.ui.pages.simulation import render_simulation  # noqa: E402
+from app.ui.views.logs import render_logs  # noqa: E402
+from app.ui.views.opn import render_opn_signal_peptides  # noqa: E402
+from app.ui.views.overview import render_overview  # noqa: E402
+from app.ui.views.results import render_results_browser  # noqa: E402
+from app.ui.views.simulation import render_simulation  # noqa: E402
 
 
 def main() -> None:

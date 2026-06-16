@@ -23,6 +23,7 @@ from app.services.opn import OpnCandidateCatalog
 from app.services.opn_signal_peptides import OpnSignalPeptideCandidateSource
 from app.services.results import ResultCatalog, ResultLoader
 from app.services.signal_peptide_library import SignalPeptideLibraryService
+from app.services.signal_peptide_screening import SignalPeptideScreeningService
 
 def _paths() -> ProjectPaths:
     return ProjectPaths.discover(Path(__file__))
@@ -71,15 +72,18 @@ def cached_signal_peptide_library() -> list[dict]:
 
 @st.cache_data(show_spinner=False, ttl=3600)
 def cached_uniprot_signal_peptides(taxon_id: int, size: int, reviewed_only: bool) -> dict:
-    result = signal_peptide_library_service().discover_uniprot_candidates(
+    result = SignalPeptideScreeningService(PATHS).discover_and_persist_uniprot_candidates(
         taxon_id=taxon_id,
-        size=size,
+        max_records=size,
         reviewed_only=reviewed_only,
+        exclude_existing=True,
     )
     return {
         "rows": result.rows,
         "source_url": result.source_url,
         "errors": result.errors,
+        "duplicate_count": result.duplicate_count,
+        "duplicate_rows": result.duplicate_rows,
     }
 
 

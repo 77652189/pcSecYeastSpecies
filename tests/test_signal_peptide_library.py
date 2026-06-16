@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.adapters.uniprot import _next_link
+from app.adapters.uniprot import UniProtSignalPeptideSource, _next_link
 from app.core.paths import ProjectPaths
 from app.core.signal_peptides import SignalPeptideCandidate
 from app.services.opn import OpnCandidateCatalog
@@ -89,6 +89,26 @@ def test_signal_peptide_library_extracts_uniprot_signal_features() -> None:
     assert rows[0]["library_stage"] == "外部发现草案"
 
 
+def test_uniprot_source_reports_duplicate_signal_sequences() -> None:
+    items = [
+        _uniprot_item("X12345", "TEST1_PICPA", "Secreted test protein 1"),
+        _uniprot_item("Y12345", "TEST2_PICPA", "Secreted test protein 2"),
+    ]
+
+    rows, errors, extracted_count, duplicate_rows = UniProtSignalPeptideSource().rows_from_items(
+        items,
+        exclude_existing=False,
+    )
+
+    assert errors == []
+    assert extracted_count == 2
+    assert len(rows) == 1
+    assert len(duplicate_rows) == 1
+    assert duplicate_rows[0]["candidate_id"] == "OPN_UNIPROT_Y12345"
+    assert duplicate_rows[0]["duplicate_reason"] == "UniProt 结果中信号肽序列重复"
+    assert duplicate_rows[0]["duplicate_of"] == "OPN_UNIPROT_X12345"
+
+
 def test_uniprot_next_link_parser_handles_commas_inside_url() -> None:
     header = (
         '<https://rest.uniprot.org/uniprotkb/search?format=json&'
@@ -107,3 +127,21 @@ def _opn_library_service() -> SignalPeptideLibraryService:
     paths = ProjectPaths.discover()
     source = OpnSignalPeptideCandidateSource(OpnCandidateCatalog(paths))
     return SignalPeptideLibraryService(source.list_candidates())
+
+
+def _uniprot_item(accession: str, uniprot_id: str, protein_name: str) -> dict:
+    return {
+        "primaryAccession": accession,
+        "uniProtkbId": uniprot_id,
+        "organism": {"scientificName": "Komagataella pastoris"},
+        "proteinDescription": {
+            "recommendedName": {"fullName": {"value": protein_name}}
+        },
+        "sequence": {"value": "MKTLLALALALAAPAAQREST"},
+        "features": [
+            {
+                "type": "Signal",
+                "location": {"start": {"value": 1}, "end": {"value": 16}},
+            }
+        ],
+    }

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from pydantic import BaseModel
 
@@ -52,6 +52,8 @@ class CandidateDiscoveryResult:
     rows: list[dict[str, object]]
     source_url: str
     errors: list[str]
+    duplicate_count: int = 0
+    duplicate_rows: list[dict[str, object]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -63,3 +65,5 @@ class UniProtCandidateLibraryResult:
     fetched_record_count: int
     extracted_signal_count: int
     deduplicated_count: int
+    duplicate_count: int = 0
+    duplicate_rows: list[dict[str, object]] = field(default_factory=list)

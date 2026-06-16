@@ -20,16 +20,51 @@ def test_signal_peptide_screening_compares_rules_and_uspnet(tmp_path: Path) -> N
     assert result.success is True
     assert result.summary["uniprot_initial_hits"] == 2
     assert result.summary["deduplicated_candidates"] == 2
+    assert result.summary["uniprot_duplicate_count"] == 0
     assert result.summary["rules_passed"] == 1
     assert result.summary["rules_high_priority"] == 1
     assert result.summary["uspnet_completed"] == 2
     assert result.summary["uspnet_passed"] == 1
     assert result.summary["consensus_passed"] == 1
     assert result.uniprot_csv and result.uniprot_csv.exists()
+    assert result.duplicate_csv and result.duplicate_csv.exists()
     assert result.input_fasta and result.input_fasta.exists()
     assert result.comparison_csv and result.comparison_csv.exists()
     assert result.recommended_fasta and result.recommended_fasta.exists()
     assert "OPN_UNIPROT_X12345" in result.recommended_fasta.read_text(encoding="utf-8")
+
+
+def test_signal_peptide_screening_reuses_persisted_uniprot_candidates(tmp_path: Path) -> None:
+    library_service = CountingFakeLibraryService()
+    service = SignalPeptideScreeningService(
+        ProjectPaths(tmp_path),
+        library_service=library_service,
+        uspnet_adapter=FakeMissingUSPNetAdapter(),
+    )
+
+    service.discover_and_persist_uniprot_candidates(max_records=2)
+    result = service.screen_uniprot_candidates(max_records=2)
+
+    assert library_service.calls == 1
+    assert result.summary["uniprot_reused_from_disk"] is True
+    assert result.summary["uniprot_candidate_source"] == "已复用本地保存的 UniProt 候选"
+    assert result.uniprot_csv and result.uniprot_csv.exists()
+
+
+def test_signal_peptide_screening_loads_saved_result(tmp_path: Path) -> None:
+    service = SignalPeptideScreeningService(
+        ProjectPaths(tmp_path),
+        library_service=FakeLibraryService(),
+        uspnet_adapter=FakeUSPNetAdapter(),
+    )
+
+    result = service.screen_uniprot_candidates(max_records=2)
+    loaded = service.load_persisted_screening_result()
+
+    assert loaded is not None
+    assert loaded.summary["consensus_passed"] == result.summary["consensus_passed"]
+    assert loaded.rows[0]["rules_score_note"]
+    assert loaded.rows[0]["uspnet_prediction_label"] == "SP：USPNet 判断为信号肽"
 
 
 def test_signal_peptide_screening_keeps_rule_prefilter_when_uspnet_missing(tmp_path: Path) -> None:
@@ -137,6 +172,15 @@ class FakeLibraryService:
             extracted_signal_count=2,
             deduplicated_count=2,
         )
+
+
+class CountingFakeLibraryService(FakeLibraryService):
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def discover_uniprot_candidate_library(self, **kwargs):
+        self.calls += 1
+        return super().discover_uniprot_candidate_library(**kwargs)
 
 
 class FakeUSPNetAdapter:
