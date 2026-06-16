@@ -24,3 +24,19 @@ def test_user_facing_python_files_have_no_mojibake() -> None:
                 offenders.append(str(path))
 
     assert offenders == []
+
+
+def test_opn_page_separates_secretion_model_from_cds_design() -> None:
+    text = Path("app/ui/streamlit_app.py").read_text(encoding="utf-8")
+
+    assert "pcSecPichia 分泌模型筛选" in text
+    assert "PichiaCLM 下游 CDS 设计" in text
+    assert "PichiaCLM 不参与分泌模型评分" in text
+
+
+def test_opn_page_explains_method_comparison_without_default_signalp() -> None:
+    text = Path("app/ui/streamlit_app.py").read_text(encoding="utf-8")
+
+    assert "从 UniProt 建库并比较筛选方法" in text
+    assert "USPNet-fast" in text
+    assert "自研规则" in text

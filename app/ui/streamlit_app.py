@@ -31,6 +31,8 @@ from app.services.opn import (
     opn_category_label,
 )
 from app.services.results import PlotBuilder, ResultCatalog, ResultLoader
+from app.services.signal_peptide_library import SignalPeptideLibraryService
+from app.services.signal_peptide_screening import SignalPeptideScreeningService
 from app.services.simulation import SimulationService
 
 
@@ -80,6 +82,25 @@ def cached_opn_rankings() -> list[dict]:
 @st.cache_data(show_spinner=False, ttl=30)
 def cached_opn_construct_designs() -> list[dict]:
     return [design.model_dump() for design in OpnCandidateCatalog(PATHS).construct_designs()]
+
+
+@st.cache_data(show_spinner=False)
+def cached_signal_peptide_library() -> list[dict]:
+    return SignalPeptideLibraryService(OpnCandidateCatalog(PATHS)).library_rows()
+
+
+@st.cache_data(show_spinner=False, ttl=3600)
+def cached_uniprot_signal_peptides(taxon_id: int, size: int, reviewed_only: bool) -> dict:
+    result = SignalPeptideLibraryService(OpnCandidateCatalog(PATHS)).discover_uniprot_candidates(
+        taxon_id=taxon_id,
+        size=size,
+        reviewed_only=reviewed_only,
+    )
+    return {
+        "rows": result.rows,
+        "source_url": result.source_url,
+        "errors": result.errors,
+    }
 
 
 @st.cache_data(show_spinner=False, ttl=3600)
@@ -400,8 +421,8 @@ def render_opn_signal_peptides() -> None:
     st.markdown(
         """
         <div class="concept-box">
-        这里展示“用于毕赤酵母生产人骨桥蛋白 OPN”的候选信号肽。候选表把每个 leader 接到你提供的成熟 OPN 序列前端，
-        然后用 pcSecPichia 生成小规模 LP 验证。当前页面用于演示和筛选优先级，不等同于真实发酵产量证明。
+        这里分成两个清楚的步骤：先用 pcSecPichia 在蛋白分泌层面比较候选信号肽，再把已经选中的蛋白构建交给
+        PichiaCLM 做下游 DNA/CDS 设计。PichiaCLM 不参与分泌模型评分，它只是筛选之后的密码子优化工具。
         </div>
         """,
         unsafe_allow_html=True,
@@ -421,14 +442,15 @@ def render_opn_signal_peptides() -> None:
     metric3.metric("默认候选", DEFAULT_OPN_CANDIDATE)
     metric4.metric("默认产量约束", f"{DEFAULT_OPN_PRODUCTION_RATIO:.0e}")
 
+    render_opn_workflow_overview()
     render_opn_recommendation_board(pd.DataFrame(cached_opn_rankings()))
 
     with st.expander("这个页面怎么看", expanded=True):
         st.markdown(
             """
-            - **候选信号肽表**：直接展示每个候选的 leader 序列、长度和加工路线，便于横向比较。
-            - **候选详情**：解释为什么选它，以及真实实验中要注意什么。
-            - **运行小规模验证**：调用 MATLAB 生成 OPN/Pichia LP，再调用 Docker SoPlex 求解；结果只表示模型链路是否可行。
+            - **第一步：分泌模型筛选。** 比较候选 leader 接到成熟 OPN 后，在 pcSecPichia 中的模型可行性和资源成本。
+            - **第二步：候选解释与验证。** 查看每个 leader 的来源、风险，并可运行一个小规模 LP/SoPlex 验证。
+            - **第三步：下游 CDS 设计。** 只对已经决定进入首轮实验的候选调用 PichiaCLM，生成毕赤酵母 DNA/CDS 序列。
             """
         )
 
@@ -450,9 +472,7 @@ def render_opn_signal_peptides() -> None:
     )
     st.subheader("候选信号肽表")
     st.dataframe(display, use_container_width=True, hide_index=True)
-
-    render_opn_construct_design_table(pd.DataFrame(cached_opn_construct_designs()))
-    render_opn_cds_design_panel()
+    render_signal_peptide_library_manager()
 
     default_index = candidates.index[candidates["candidate_id"] == DEFAULT_OPN_CANDIDATE]
     selected_index = int(default_index[0]) if len(default_index) else 0
@@ -539,17 +559,392 @@ def render_opn_signal_peptides() -> None:
             mime="text/csv",
         )
 
+    render_opn_construct_design_table(pd.DataFrame(cached_opn_construct_designs()))
+    render_opn_cds_design_panel()
+
+
+def render_opn_workflow_overview() -> None:
+    st.subheader("推荐工作流")
+    step1, step2, step3 = st.columns(3)
+    step1.markdown(
+        """
+        **1. pcSecPichia 分泌模型筛选**
+
+        输入是 `leader + 成熟 OPN` 的氨基酸序列。这里比较的是蛋白分泌负担、ER 路径和 LP 求解可行性。
+        """
+    )
+    step2.markdown(
+        """
+        **2. 确定首轮实验候选**
+
+        保留 PAS_chr3_0030、DDDK18 和 alpha-factor 对照。这个决策来自模型参考、文献证据和加工风险。
+        """
+    )
+    step3.markdown(
+        """
+        **3. PichiaCLM 下游 CDS 设计**
+
+        输入仍是已选蛋白构建的氨基酸序列，输出 DNA/CDS。它不改变 pcSec 的分泌模型结果。
+        """
+    )
+
+
+def render_signal_peptide_library_manager() -> None:
+    st.subheader("信号肽候选库管理")
+    st.markdown(
+        """
+        这里管理的是“候选库”，不是最终实验清单。新增候选会先作为草案通过序列和字段检查，
+        再由项目维护者审核后写入模型输入表；这样可以避免网页误改 Git 中的正式数据。
+        """
+    )
+    service = SignalPeptideLibraryService(OpnCandidateCatalog(PATHS))
+    library = pd.DataFrame(cached_signal_peptide_library())
+    if library.empty:
+        st.info("候选库为空。")
+        return
+
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("正式候选数", len(library))
+    col2.metric("首轮推荐", int((library["library_stage"] == "首轮推荐").sum()))
+    col3.metric("Pichia 来源", int((library["category"] == "pichia_native_signal").sum()))
+    col4.metric("未入首轮候选", int((library["library_stage"] == "候选库").sum()))
+
+    with st.expander("筛选和查看候选库", expanded=True):
+        filter_left, filter_right = st.columns([1, 1])
+        with filter_left:
+            stage_options = sorted(library["library_stage"].unique())
+            selected_stages = st.multiselect("候选阶段", stage_options, default=stage_options)
+        with filter_right:
+            category_options = sorted(library["category_label"].unique())
+            selected_categories = st.multiselect("候选来源/类别", category_options, default=category_options)
+        keyword = st.text_input("按 ID、来源说明或理由搜索", placeholder="例如 PASCHR3、DDDK、UniProt")
+
+        filtered = library[
+            library["library_stage"].isin(selected_stages)
+            & library["category_label"].isin(selected_categories)
+        ].copy()
+        if keyword:
+            keyword_mask = (
+                filtered["candidate_id"].str.contains(keyword, case=False, na=False)
+                | filtered["source_note"].str.contains(keyword, case=False, na=False)
+                | filtered["rationale"].str.contains(keyword, case=False, na=False)
+            )
+            filtered = filtered[keyword_mask]
+        st.dataframe(
+            filtered[
+                [
+                    "candidate_id",
+                    "library_stage",
+                    "category_label",
+                    "source_type",
+                    "leader_length",
+                    "signal_peptide_length",
+                    "processing_route",
+                    "source_note",
+                    "rationale",
+                ]
+            ].rename(
+                columns={
+                    "candidate_id": "候选 ID",
+                    "library_stage": "候选阶段",
+                    "category_label": "类别",
+                    "source_type": "来源类型",
+                    "leader_length": "leader 长度",
+                    "signal_peptide_length": "信号肽长度",
+                    "processing_route": "加工路线",
+                    "source_note": "来源说明",
+                    "rationale": "入库理由",
+                }
+            ),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    with st.expander("新增候选草案", expanded=False):
+        st.markdown(
+            """
+            下载模板后填入新候选，再上传 CSV 做预检。预检通过后，页面会生成一个“合并草案 CSV”下载；
+            这个草案还不会自动进入正式模型，需要人工审核来源、切割位点和文献证据。
+            """
+        )
+        st.download_button(
+            "下载新增候选模板 CSV",
+            service.template_csv(),
+            file_name="signal_peptide_candidate_import_template.csv",
+            mime="text/csv",
+        )
+        upload = st.file_uploader("上传新增候选 CSV 草案", type=["csv"], key="signal_peptide_candidate_upload")
+        if upload is not None:
+            validation = service.validate_import_csv(upload.getvalue())
+            if validation.valid:
+                st.success(f"预检通过：{len(validation.rows)} 条新候选可以进入人工审核。")
+                preview = pd.DataFrame(validation.rows)
+                st.dataframe(
+                    preview[
+                        [
+                            "candidate_id",
+                            "category_label",
+                            "leader_length",
+                            "signal_peptide_length",
+                            "processing_route",
+                            "source_note",
+                        ]
+                    ].rename(
+                        columns={
+                            "candidate_id": "候选 ID",
+                            "category_label": "类别",
+                            "leader_length": "leader 长度",
+                            "signal_peptide_length": "信号肽长度",
+                            "processing_route": "加工路线",
+                            "source_note": "来源说明",
+                        }
+                    ),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+                st.download_button(
+                    "下载合并后的候选库草案 CSV",
+                    service.merged_draft_csv(validation.rows),
+                    file_name="signal_peptide_candidate_library_draft.csv",
+                    mime="text/csv",
+                )
+            else:
+                st.error("预检未通过，请修正后重新上传。")
+                st.write(validation.errors)
+
+    with st.expander("从 UniProt API 发现更多候选", expanded=True):
+        st.markdown(
+            """
+            这一步会联网查询 UniProt 中带 `signal peptide` 注释的 Komagataella/Pichia 蛋白，
+            自动提取 N 端 signal peptide 作为候选草案。它只负责“发现候选”，不会自动加入正式模型。
+            """
+        )
+        api_left, api_mid, api_right = st.columns([1, 1, 1])
+        with api_left:
+            taxon_id = st.number_input("UniProt organism/taxon ID", min_value=1, value=4922, step=1)
+        with api_mid:
+            size = st.number_input("最多拉取条目数", min_value=5, max_value=100, value=25, step=5)
+        with api_right:
+            reviewed_only = st.checkbox("只查 reviewed", value=False)
+        if st.button("从 UniProt 获取候选", type="secondary"):
+            with st.spinner("正在查询 UniProt 并提取 signal peptide..."):
+                discovery = cached_uniprot_signal_peptides(int(taxon_id), int(size), bool(reviewed_only))
+            if discovery["errors"] and not discovery["rows"]:
+                st.error("没有获取到可用候选。")
+                st.write(discovery["errors"])
+                st.caption(discovery["source_url"])
+            else:
+                if discovery["errors"]:
+                    st.warning("部分结果被跳过。")
+                    st.write(discovery["errors"])
+                discovered = pd.DataFrame(discovery["rows"])
+                st.success(f"发现 {len(discovered)} 条外部候选草案。")
+                st.caption(f"来源：{discovery['source_url']}")
+                st.dataframe(
+                    discovered[
+                        [
+                            "candidate_id",
+                            "leader_length",
+                            "signal_peptide_sequence",
+                            "source_note",
+                            "caution",
+                        ]
+                    ].rename(
+                        columns={
+                            "candidate_id": "候选 ID",
+                            "leader_length": "信号肽长度",
+                            "signal_peptide_sequence": "信号肽序列",
+                            "source_note": "UniProt 来源",
+                            "caution": "注意事项",
+                        }
+                    ),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+                import_columns = [
+                    "candidate_id",
+                    "leader_sequence",
+                    "signal_peptide_sequence",
+                    "category",
+                    "processing_route",
+                    "source_note",
+                    "rationale",
+                    "caution",
+                ]
+                st.download_button(
+                    "下载 UniProt 发现候选 CSV",
+                    discovered[import_columns].to_csv(index=False).encode("utf-8-sig"),
+                    file_name="uniprot_signal_peptide_candidates.csv",
+                    mime="text/csv",
+                )
+
+    render_uniprot_method_screening()
+
+
+def render_uniprot_method_screening() -> None:
+    with st.expander("从 UniProt 建库并比较筛选方法", expanded=True):
+        st.markdown(
+            """
+            这一步用于扩大候选库并比较证据：先从 UniProt 拉取毕赤酵母相关、带信号肽注释的蛋白，
+            再用自研透明规则做预筛；如果本机部署了 USPNet-fast，还会做机器学习复核。
+            规则分数只用于解释和排序，不等同于真实表达量；通过候选仍需要进入 pcSecPichia 模型和小试验证。
+            """
+        )
+        service = SignalPeptideScreeningService(PATHS)
+        status = service.uspnet_adapter.status()
+        if status.available:
+            st.success(status.message)
+        else:
+            st.warning(status.message)
+            st.markdown("[打开 USPNet 官方仓库](https://github.com/ml4bio/USPNet)")
+        with st.expander("这些方法分别能说明什么", expanded=False):
+            st.markdown(
+                """
+                - **UniProt 注释**：说明该来源蛋白在数据库中带有 signal peptide 注释，是候选发现证据。
+                - **自研规则**：只检查长度、N 端电荷、疏水核心和切割位点附近特征，用于可解释预筛，不是训练模型。
+                - **USPNet-fast**：MIT License 的外部机器学习模型；部署后可作为商业友好的复核方法。
+                - **Razor**：可作为后续第三方参考，但许可不如 MIT 直接，因此不作为默认依赖。
+                """
+            )
+
+        col_taxon, col_limit, col_reviewed = st.columns([1, 1, 1])
+        with col_taxon:
+            taxon_id = st.number_input(
+                "UniProt taxon ID",
+                min_value=1,
+                value=4922,
+                step=1,
+                key="method_screen_taxon_id",
+            )
+        with col_limit:
+            max_records = st.number_input(
+                "最多拉取记录数",
+                min_value=25,
+                max_value=500,
+                value=300,
+                step=25,
+                key="method_screen_max_records",
+            )
+        with col_reviewed:
+            reviewed_only = st.checkbox("只查 reviewed", value=False, key="method_screen_reviewed")
+
+        st.caption("默认范围是 Pichia/毕赤相关 taxon 4922；当前 UniProt 预检约 265 条带 signal peptide 注释的条目。")
+        if st.button("建立候选库并比较方法", type="primary"):
+            with st.spinner("正在从 UniProt 建库，并运行规则/USPNet 对比..."):
+                st.session_state["method_screening_result"] = service.screen_uniprot_candidates(
+                    taxon_id=int(taxon_id),
+                    max_records=int(max_records),
+                    reviewed_only=bool(reviewed_only),
+                )
+
+        result = st.session_state.get("method_screening_result")
+        if result is None:
+            st.info("点击按钮后会生成 UniProt 初始候选、规则评分表和 FASTA；如果 USPNet 已安装，还会给出多方法一致通过结果。")
+            return
+
+        if result.success:
+            st.success(result.message)
+        elif result.available:
+            st.warning(result.message)
+        else:
+            st.warning(result.message)
+
+        summary = result.summary
+        metric1, metric2, metric3, metric4, metric5 = st.columns(5)
+        metric1.metric("UniProt 初始命中", int(summary.get("uniprot_initial_hits", 0)))
+        metric2.metric("去重后候选", int(summary.get("deduplicated_candidates", 0)))
+        metric3.metric("规则高优先", int(summary.get("rules_high_priority", 0)))
+        metric4.metric("USPNet 通过", int(summary.get("uspnet_passed", 0)))
+        metric5.metric("一致通过", int(summary.get("consensus_passed", 0)))
+
+        rows = pd.DataFrame(result.rows)
+        if not rows.empty:
+            passed = rows[rows["recommended_for_draft_library"] == True].copy()
+            if passed.empty:
+                st.info("当前没有候选通过规则预筛；可以检查 UniProt 来源、长度和疏水核心等规则列。")
+            else:
+                st.dataframe(
+                    passed[
+                        [
+                            "candidate_id",
+                            "accession",
+                            "protein_name",
+                            "signal_peptide_sequence",
+                            "rules_score",
+                            "rules_priority",
+                            "uspnet_prediction",
+                            "screening_status",
+                            "recommended_for_draft_library",
+                        ]
+                    ].rename(
+                        columns={
+                            "candidate_id": "候选 ID",
+                            "accession": "UniProt accession",
+                            "protein_name": "来源蛋白",
+                            "signal_peptide_sequence": "UniProt 注释信号肽",
+                            "rules_score": "规则分数",
+                            "rules_priority": "规则优先级",
+                            "uspnet_prediction": "USPNet 预测",
+                            "screening_status": "综合状态",
+                            "recommended_for_draft_library": "建议进入草案库",
+                        }
+                    ),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+                with st.expander("查看规则解释列", expanded=False):
+                    st.dataframe(
+                        passed[
+                            [
+                                "candidate_id",
+                                "rules_reasons",
+                                "rules_risks",
+                                "rules_h_region_max_hydrophobicity",
+                                "rules_n_region_positive_count",
+                                "rules_c_region_small_neutral",
+                            ]
+                        ].rename(
+                            columns={
+                                "candidate_id": "候选 ID",
+                                "rules_reasons": "规则支持理由",
+                                "rules_risks": "规则风险提示",
+                                "rules_h_region_max_hydrophobicity": "最大疏水窗口",
+                                "rules_n_region_positive_count": "N 端正电残基数",
+                                "rules_c_region_small_neutral": "C 端小残基规则",
+                            }
+                        ),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+        if result.errors:
+            with st.expander("运行提示和错误详情", expanded=False):
+                st.write(result.errors)
+
+        st.markdown("**下载候选库和方法对比结果**")
+        download_cols = st.columns(3)
+        _download_file_button(download_cols[0], result.uniprot_csv, "下载 UniProt 初始候选 CSV", "text/csv")
+        _download_file_button(download_cols[1], result.comparison_csv, "下载方法对比 CSV", "text/csv")
+        _download_file_button(download_cols[2], result.recommended_fasta, "下载推荐候选 FASTA", "text/plain")
+        st.caption(f"输出目录：{result.output_dir}")
+
+
+def _download_file_button(column, path: Path | None, label: str, mime: str) -> None:
+    if path is not None and path.exists():
+        column.download_button(label, path.read_bytes(), file_name=path.name, mime=mime)
+    else:
+        column.button(label, disabled=True)
+
 
 def render_opn_construct_design_table(designs: pd.DataFrame) -> None:
-    st.subheader("实验构建设计输出")
+    st.subheader("模型筛选后的蛋白构建清单")
     if designs.empty:
         st.info("暂时没有可导出的 OPN 构建设计。")
         return
 
     st.markdown(
         """
-        这张表是给实验侧看的：把“推荐角色、信号肽序列、成熟 OPN、完整蛋白序列、Kex2 风险、下一步密码子优化”放在一起。
-        网页里只展示关键列，下载 CSV 会包含完整序列。
+        这张表仍然是蛋白层面的构建清单：它把“推荐角色、信号肽序列、成熟 OPN、完整蛋白序列、Kex2 风险”放在一起。
+        到这一步还没有做 DNA 密码子优化；PichiaCLM 是下面的下游步骤。
         """
     )
     preview = designs[
@@ -606,21 +1001,20 @@ def render_opn_construct_design_table(designs: pd.DataFrame) -> None:
 
 
 def render_opn_cds_design_panel() -> None:
-    st.subheader("首轮实验构建方案")
+    st.subheader("下游步骤：PichiaCLM 生成毕赤酵母 CDS")
     st.markdown(
         """
-        建议首轮做 `OPN_PPA_PASCHR3_0030`、`OPN_PPA_DDDK18`，并保留
-        `OPN_ALPHA_FULL_PROJECT` 作为 alpha-factor 对照。这里会调用 PichiaCLM 为每个构建生成
-        毕赤酵母 CDS 候选，并导出 CSV、XLSX 和 FASTA，供实验同事讨论。
+        只有在上面的 pcSecPichia 分泌模型筛选完成后，才进入这一步。这里调用 PichiaCLM 为首轮候选生成
+        毕赤酵母 DNA/CDS 序列，并导出 CSV、XLSX 和 FASTA，供后续载体设计和实验讨论。
         """
     )
-    st.info("注意：这些 CDS 和模型分数是表达设计参考，不代表真实发酵产量；最终仍需要毕赤酵母小试验证。")
+    st.info("注意：PichiaCLM 做的是 DNA/CDS 层面的密码子优化，不参与前面的 pcSec 分泌模型评分，也不代表真实发酵产量。")
     with st.expander("这两个项目现在怎么通信？", expanded=True):
         st.markdown(
             """
-            - **当前做法：函数级调用。** pcSecYeastSpecies 的 Streamlit 页面调用 `CdsDesignService`，服务层再调用 `PichiaClmAdapter`，适配器直接 import 本机的 PichiaCLM 核心模型。
+            - **当前做法：下游函数级调用。** pcSecYeastSpecies 的 Streamlit 页面调用 `CdsDesignService`，服务层再调用 `PichiaClmAdapter`，适配器直接 import 本机的 PichiaCLM 核心模型。
             - **不推荐：Streamlit 调 Streamlit。** 两个网页都偏展示层，互相 HTTP 调用会让错误处理、状态管理和未来上线都变复杂。
-            - **后期上线：服务级调用。** PichiaCLM 可以单独提供 FastAPI；pcSecYeastSpecies 只把适配器从“本地 import”换成“HTTP 请求”，前端和业务服务不需要重写。
+            - **后期上线：服务级调用。** PichiaCLM 可以单独提供 FastAPI；pcSecYeastSpecies 只把这个下游适配器从“本地 import”换成“HTTP 请求”，前端和分泌模型逻辑不需要重写。
             """
         )
 
@@ -640,7 +1034,7 @@ def render_opn_cds_design_panel() -> None:
     if not selected_ids:
         st.info("请至少选择一个 OPN 构建。")
         return
-    if not st.button("生成首轮构建方案", type="primary"):
+    if not st.button("生成下游 CDS 候选", type="primary"):
         st.caption("为了避免页面打开时自动加载深度学习模型，点击按钮后才会调用 PichiaCLM。")
         return
 
@@ -713,7 +1107,7 @@ def render_opn_cds_design_panel() -> None:
     )
     st.code(records.loc[selected_record, "cds"], language="text")
 
-    st.markdown("**下载给实验同事讨论的文件**")
+    st.markdown("**下载下游 CDS 设计文件**")
     col_csv, col_xlsx, col_fasta = st.columns(3)
     download_specs = [
         (col_csv, result.get("csv_file"), "下载 CSV 构建表", "text/csv"),
