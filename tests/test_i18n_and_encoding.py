@@ -27,16 +27,38 @@ def test_user_facing_python_files_have_no_mojibake() -> None:
 
 
 def test_opn_page_separates_secretion_model_from_cds_design() -> None:
-    text = Path("app/ui/streamlit_app.py").read_text(encoding="utf-8")
+    text = _read_ui_text(
+        "app/ui/pages/opn.py",
+        "app/ui/pages/opn_cds.py",
+    )
 
     assert "pcSecPichia 分泌模型筛选" in text
-    assert "PichiaCLM 下游 CDS 设计" in text
+    assert "PichiaCLM 生成毕赤酵母 CDS" in text
     assert "PichiaCLM 不参与分泌模型评分" in text
 
 
 def test_opn_page_explains_method_comparison_without_default_signalp() -> None:
-    text = Path("app/ui/streamlit_app.py").read_text(encoding="utf-8")
+    text = _read_ui_text("app/ui/pages/opn_library.py")
 
     assert "从 UniProt 建库并比较筛选方法" in text
     assert "USPNet-fast" in text
     assert "自研规则" in text
+
+
+def test_streamlit_entrypoint_keeps_all_demo_pages() -> None:
+    text = Path("app/ui/streamlit_app.py").read_text(encoding="utf-8")
+
+    assert "项目总览" in text
+    assert "结果浏览" in text
+    assert "OPN 信号肽" in text
+    assert "仿真验证" in text
+    assert "运行日志" in text
+    assert "render_overview" in text
+    assert "render_results_browser" in text
+    assert "render_opn_signal_peptides" in text
+    assert "render_simulation" in text
+    assert "render_logs" in text
+
+
+def _read_ui_text(*paths: str) -> str:
+    return "\n".join(Path(path).read_text(encoding="utf-8") for path in paths)

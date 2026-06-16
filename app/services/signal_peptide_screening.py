@@ -1,16 +1,19 @@
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable
-
-import pandas as pd
 
 from app.adapters.uspnet import USPNetAdapter
 from app.core.paths import ProjectPaths
 from app.services.opn import OpnCandidateCatalog
+from app.services.opn_signal_peptides import OpnSignalPeptideCandidateSource
+from app.services.signal_peptide_exports import (
+    write_candidate_fasta,
+    write_csv,
+    write_json,
+    write_signal_peptide_fasta,
+)
 from app.services.signal_peptide_library import SignalPeptideLibraryService
 from app.services.signal_peptide_rules import score_signal_peptide
 
@@ -48,7 +51,9 @@ class SignalPeptideScreeningService:
         uspnet_adapter: USPNetAdapter | None = None,
     ) -> None:
         self.paths = paths
-        self.library_service = library_service or SignalPeptideLibraryService(OpnCandidateCatalog(paths))
+        self.library_service = library_service or SignalPeptideLibraryService(
+            OpnSignalPeptideCandidateSource(OpnCandidateCatalog(paths)).list_candidates()
+        )
         self.uspnet_adapter = uspnet_adapter or USPNetAdapter(repo_dir=paths.uspnet_repo)
 
     def screen_uniprot_candidates(
@@ -74,8 +79,8 @@ class SignalPeptideScreeningService:
             exclude_existing=False,
         )
         candidate_rows = discovery.rows
-        _write_csv(uniprot_csv, candidate_rows)
-        _write_candidate_fasta(input_fasta, candidate_rows)
+        write_csv(uniprot_csv, candidate_rows)
+        write_candidate_fasta(input_fasta, candidate_rows)
 
         errors = list(discovery.errors)
         summary: dict[str, object] = {
@@ -98,7 +103,7 @@ class SignalPeptideScreeningService:
 
         if not candidate_rows:
             message = "UniProt 没有返回可用于比较的候选信号肽。"
-            _write_json(summary_json, {**summary, "message": message, "errors": errors})
+            write_json(summary_json, {**summary, "message": message, "errors": errors})
             return SignalPeptideScreeningResult(
                 available=False,
                 success=False,
@@ -141,8 +146,8 @@ class SignalPeptideScreeningService:
             for row in screened_rows
             if row["consensus_pass"] or row["screening_status"] == "规则高优先级，待 USPNet 复核"
         ]
-        _write_csv(comparison_csv, screened_rows)
-        _write_signal_peptide_fasta(recommended_fasta, recommended_rows)
+        write_csv(comparison_csv, screened_rows)
+        write_signal_peptide_fasta(recommended_fasta, recommended_rows)
 
         if summary["uspnet_success"]:
             message = (
@@ -163,7 +168,7 @@ class SignalPeptideScreeningService:
                 "USPNet 尚未安装，因此没有多方法一致通过结论。"
             )
 
-        _write_json(summary_json, {**summary, "message": message, "errors": errors})
+        write_json(summary_json, {**summary, "message": message, "errors": errors})
         return SignalPeptideScreeningResult(
             available=bool(summary["uspnet_available"]),
             success=True,
@@ -242,45 +247,3 @@ def _finalize_recommendation(row: dict[str, object], uspnet_results_usable: bool
         "screening_status": status,
         "recommended_for_draft_library": consensus_pass or status == "规则高优先级，待 USPNet 复核",
     }
-
-
-def _write_csv(path: Path, rows: list[dict[str, object]]) -> None:
-    frame = pd.DataFrame(rows)
-    frame.to_csv(path, index=False, encoding="utf-8-sig")
-
-
-def _write_candidate_fasta(path: Path, rows: Iterable[dict[str, object]]) -> None:
-    records = []
-    for row in rows:
-        sequence = str(row.get("protein_sequence", ""))
-        if not sequence:
-            continue
-        header = f"{row.get('candidate_id')}|accession={row.get('accession')}|source=UniProt"
-        records.append((header, sequence))
-    _write_fasta(path, records)
-
-
-def _write_signal_peptide_fasta(path: Path, rows: Iterable[dict[str, object]]) -> None:
-    records = []
-    for row in rows:
-        sequence = str(row.get("signal_peptide_sequence", ""))
-        if not sequence:
-            continue
-        header = (
-            f"{row.get('candidate_id')}|accession={row.get('accession')}|"
-            f"status={row.get('screening_status')}|rules={row.get('rules_score')}"
-        )
-        records.append((header, sequence))
-    _write_fasta(path, records)
-
-
-def _write_fasta(path: Path, records: Iterable[tuple[str, str]]) -> None:
-    with path.open("w", encoding="utf-8", newline="\n") as handle:
-        for header, sequence in records:
-            handle.write(f">{header}\n")
-            for index in range(0, len(sequence), 60):
-                handle.write(sequence[index : index + 60] + "\n")
-
-
-def _write_json(path: Path, payload: dict[str, object]) -> None:
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding="utf-8")

@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+from app.adapters.uniprot import _next_link
 from app.core.paths import ProjectPaths
+from app.core.signal_peptides import SignalPeptideCandidate
 from app.services.opn import OpnCandidateCatalog
-from app.services.signal_peptide_library import SignalPeptideLibraryService, _next_link
+from app.services.opn_signal_peptides import OpnSignalPeptideCandidateSource
+from app.services.signal_peptide_library import SignalPeptideLibraryService
 
 
 def test_signal_peptide_library_labels_current_candidates() -> None:
-    service = SignalPeptideLibraryService(OpnCandidateCatalog(ProjectPaths.discover()))
+    service = _opn_library_service()
+    assert isinstance(service.list_candidates()[0], SignalPeptideCandidate)
+
     rows = service.library_rows()
     by_id = {row["candidate_id"]: row for row in rows}
 
@@ -17,7 +22,7 @@ def test_signal_peptide_library_labels_current_candidates() -> None:
 
 
 def test_signal_peptide_library_validates_import_csv() -> None:
-    service = SignalPeptideLibraryService(OpnCandidateCatalog(ProjectPaths.discover()))
+    service = _opn_library_service()
     content = (
         "candidate_id,leader_sequence,signal_peptide_sequence,category,processing_route,"
         "source_note,rationale,caution\n"
@@ -35,7 +40,7 @@ def test_signal_peptide_library_validates_import_csv() -> None:
 
 
 def test_signal_peptide_library_rejects_duplicate_and_bad_sequence() -> None:
-    service = SignalPeptideLibraryService(OpnCandidateCatalog(ProjectPaths.discover()))
+    service = _opn_library_service()
     content = (
         "candidate_id,leader_sequence,signal_peptide_sequence,category,processing_route,"
         "source_note,rationale,caution\n"
@@ -51,7 +56,7 @@ def test_signal_peptide_library_rejects_duplicate_and_bad_sequence() -> None:
 
 
 def test_signal_peptide_library_extracts_uniprot_signal_features() -> None:
-    service = SignalPeptideLibraryService(OpnCandidateCatalog(ProjectPaths.discover()))
+    service = _opn_library_service()
     payload = {
         "results": [
             {
@@ -96,3 +101,9 @@ def test_uniprot_next_link_parser_handles_commas_inside_url() -> None:
         "fields=accession,id,protein_name,organism_name,ft_signal,sequence&"
         "cursor=abc&size=100"
     )
+
+
+def _opn_library_service() -> SignalPeptideLibraryService:
+    paths = ProjectPaths.discover()
+    source = OpnSignalPeptideCandidateSource(OpnCandidateCatalog(paths))
+    return SignalPeptideLibraryService(source.list_candidates())
