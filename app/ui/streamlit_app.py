@@ -11,7 +11,6 @@ st.set_page_config(
 
 from app.ui.common import app_css, page_header, sidebar_navigation  # noqa: E402
 from app.ui.views.logs import render_logs  # noqa: E402
-from app.ui.views.opn import render_opn_signal_peptides  # noqa: E402
 from app.ui.views.overview import render_overview  # noqa: E402
 from app.ui.views.results import render_results_browser  # noqa: E402
 from app.ui.views.simulation import render_simulation  # noqa: E402
@@ -27,8 +26,6 @@ def main() -> None:
         render_results_browser()
     elif page == "仿真验证":
         render_simulation()
-    elif page == "OPN 信号肽":
-        render_opn_signal_peptides()
     elif page == "运行日志":
         render_logs()
     else:

@@ -1,4 +1,10 @@
 from scripts import opn_pichia_target as opn
+from app.core.opn_inputs import (
+    OpnInputSet,
+    OpnLeaderCandidateInput,
+    OpnTargetProteinInput,
+    StaticOpnInputProvider,
+)
 
 
 def test_opn_target_row_matches_project_construct():
@@ -62,3 +68,50 @@ def test_candidate_csv_on_disk_matches_generator():
     assert [row["Protein name"] for row in disk_rows] == [row["Protein name"] for row in generated_rows]
     assert [row["sequence"] for row in disk_rows] == [row["sequence"] for row in generated_rows]
     assert [int(row["Length"]) for row in disk_rows] == [row["Length"] for row in generated_rows]
+
+
+def test_opn_target_generator_accepts_input_provider():
+    target = OpnTargetProteinInput(mature_sequence="IPVKQADSGSSEEK")
+    provider = StaticOpnInputProvider(
+        OpnInputSet(
+            target=target,
+            candidates=[
+                OpnLeaderCandidateInput(
+                    candidate_id="CUSTOM_SIGNAL",
+                    leader_sequence="MKFAISTLLIILQAAAVFAA",
+                    signal_peptide_sequence="MKFAISTLLIILQAAAVFAA",
+                    category="pichia_native_signal",
+                    processing_route="signal peptidase only",
+                    source_note="fixture",
+                    rationale="fixture",
+                    caution="fixture",
+                )
+            ],
+            source_name="test input",
+        )
+    )
+
+    rows = opn.build_candidate_rows(provider)
+    metadata = opn.build_candidate_metadata(provider)
+
+    assert rows == [
+        {
+            "Protein name": "CUSTOM_SIGNAL",
+            "abbreviation": "CUSTOM_SIGNAL",
+            "ThroughER": 1,
+            "Signal peptide ": 1,
+            "Disulfide site": 0,
+            "N-glycosylation site": 0,
+            "O-linked glycisylation ": 7,
+            "Transmembrane": 0,
+            "GPI site": 0,
+            "Localization": "e",
+            "sequence": "MKFAISTLLIILQAAAVFAAIPVKQADSGSSEEK",
+            "Length": 34,
+            "sp sequence": "MKFAISTLLIILQAAAVFAA",
+            "Signal peptide length": 20,
+            "Cotranslation": 0,
+        }
+    ]
+    assert metadata[0]["candidate_id"] == "CUSTOM_SIGNAL"
+    assert metadata[0]["construct_length"] == 34

@@ -67,17 +67,9 @@ class ProjectPaths:
         return self.local_runs_dir / "OPN_design"
 
     @property
-    def opn_signal_peptides_dir(self) -> Path:
-        return self.local_runs_dir / "OPN_signal_peptides"
-
-    @property
     def opn_matlab_script(self) -> Path:
         return self.repo_root / "local_opn_pichia_glc.m"
 
     @property
     def pichia_clm_repo(self) -> Path:
         return self.repo_root.parent / "PichiaCLM"
-
-    @property
-    def uspnet_repo(self) -> Path:
-        return self.repo_root.parent / "USPNet"

@@ -26,46 +26,15 @@ def test_user_facing_python_files_have_no_mojibake() -> None:
     assert offenders == []
 
 
-def test_opn_page_separates_secretion_model_from_cds_design() -> None:
-    text = _read_ui_text(
-        "app/ui/views/opn.py",
-        "app/ui/views/opn_cds.py",
-    )
-
-    assert "pcSecPichia 分泌模型筛选" in text
-    assert "PichiaCLM 生成毕赤酵母 CDS" in text
-    assert "PichiaCLM 不参与分泌模型评分" in text
-    assert "st.tabs" in text
-    assert "推荐结论" in text
-    assert "候选库" in text
-    assert "外部发现与筛选" in text
-    assert "下游设计与验证" in text
-
-
-def test_opn_page_explains_method_comparison_without_default_signalp() -> None:
-    text = _read_ui_text("app/ui/views/opn_library.py")
-
-    assert "从 UniProt 建库并比较筛选方法" in text
-    assert "USPNet-fast" in text
-    assert "自研规则" in text
-    assert "重复检测" in text
-    assert "自动加载上次保存的方法比较结果" in text
-    assert "SP** 表示机器学习模型也判断它是信号肽" in text
-    assert "max_value=500" in text
-    assert "value=300" in text
-
-
 def test_streamlit_entrypoint_keeps_all_demo_pages() -> None:
     text = Path("app/ui/streamlit_app.py").read_text(encoding="utf-8")
 
     assert "项目总览" in text
     assert "结果浏览" in text
-    assert "OPN 信号肽" in text
     assert "仿真验证" in text
     assert "运行日志" in text
     assert "render_overview" in text
     assert "render_results_browser" in text
-    assert "render_opn_signal_peptides" in text
     assert "render_simulation" in text
     assert "render_logs" in text
 

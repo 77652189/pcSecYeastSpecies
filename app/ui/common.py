@@ -17,13 +17,8 @@ from app.core.i18n import (
     status_label,
 )
 from app.core.paths import ProjectPaths
-from app.services.cds_design import CdsDesignService
 from app.services.health import HealthService
-from app.services.opn import OpnCandidateCatalog
-from app.services.opn_signal_peptides import OpnSignalPeptideCandidateSource
 from app.services.results import ResultCatalog, ResultLoader
-from app.services.signal_peptide_library import SignalPeptideLibraryService
-from app.services.signal_peptide_screening import SignalPeptideScreeningService
 
 def _paths() -> ProjectPaths:
     return ProjectPaths.discover(Path(__file__))
@@ -48,58 +43,6 @@ def cached_loaded_dataset(dataset_id: str) -> dict:
 def cached_health() -> dict:
     report = HealthService(PATHS, PowerShellAdapter()).check()
     return report.model_dump()
-
-
-@st.cache_data(show_spinner=False)
-def cached_opn_candidates() -> list[dict]:
-    return [candidate.model_dump() for candidate in OpnCandidateCatalog(PATHS).list_candidates()]
-
-
-@st.cache_data(show_spinner=False, ttl=30)
-def cached_opn_rankings() -> list[dict]:
-    return [ranking.model_dump() for ranking in OpnCandidateCatalog(PATHS).rank_candidates()]
-
-
-@st.cache_data(show_spinner=False, ttl=30)
-def cached_opn_construct_designs() -> list[dict]:
-    return [design.model_dump() for design in OpnCandidateCatalog(PATHS).construct_designs()]
-
-
-@st.cache_data(show_spinner=False)
-def cached_signal_peptide_library() -> list[dict]:
-    return signal_peptide_library_service().library_rows()
-
-
-@st.cache_data(show_spinner=False, ttl=3600)
-def cached_uniprot_signal_peptides(taxon_id: int, size: int, reviewed_only: bool) -> dict:
-    result = SignalPeptideScreeningService(PATHS).discover_and_persist_uniprot_candidates(
-        taxon_id=taxon_id,
-        max_records=size,
-        reviewed_only=reviewed_only,
-        exclude_existing=True,
-    )
-    return {
-        "rows": result.rows,
-        "source_url": result.source_url,
-        "errors": result.errors,
-        "duplicate_count": result.duplicate_count,
-        "duplicate_rows": result.duplicate_rows,
-    }
-
-
-@st.cache_data(show_spinner=False, ttl=3600)
-def cached_opn_cds_designs(candidate_ids: tuple[str, ...], per_construct: int, seed: int) -> dict:
-    result = CdsDesignService(PATHS).design_opn_shortlist(
-        list(candidate_ids),
-        cds_candidates_per_construct=per_construct,
-        seed=seed,
-    )
-    return result.model_dump()
-
-
-def signal_peptide_library_service() -> SignalPeptideLibraryService:
-    source = OpnSignalPeptideCandidateSource(OpnCandidateCatalog(PATHS))
-    return SignalPeptideLibraryService(source.list_candidates())
 
 
 def dataset_frame() -> pd.DataFrame:
@@ -143,22 +86,21 @@ def sidebar_navigation() -> str:
     st.sidebar.title("演示导航")
     page = st.sidebar.radio(
         "选择功能",
-        ["项目总览", "结果浏览", "OPN 信号肽", "仿真验证", "运行日志"],
-        index=2,
+        ["项目总览", "结果浏览", "仿真验证", "运行日志"],
+        index=0,
     )
     st.sidebar.divider()
     st.sidebar.markdown(
         """
         **推荐演示顺序**
 
-        1. OPN 信号肽
+        1. 项目总览
         2. 结果浏览
-        3. 运行日志
+        3. 仿真验证
+        4. 运行日志
         """
     )
-    if page == "OPN 信号肽":
-        st.sidebar.info("当前建议：首轮小试做 PAS_chr3_0030、DDDK18，并保留 alpha-factor 作为对照。")
-    elif page == "结果浏览":
+    if page == "结果浏览":
         st.sidebar.caption("当前页的筛选器在下方，可以按物种、结果主题和关键词过滤。")
     return page
 
