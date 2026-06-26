@@ -46,6 +46,7 @@
 - hLF 710aa 对齐展示统一：`hLF` 与 `hLF_PROJECT_710` 的语义已在 service/report warning 中区分。
 - 慢测与 release 验证分层：日常、focused、slow、release 命令已固化。
 - Streamlit 结果展示 helper：候选表中文列名、状态归一化、路径图空值显示已收敛到 `simulation_display.py`。
+- Streamlit 基因扰动 UI：基因库展示、候选文本解析、KO/OE 表单已拆成独立视图 helper。
 
 ## 一轮对话可完成的小目标
 

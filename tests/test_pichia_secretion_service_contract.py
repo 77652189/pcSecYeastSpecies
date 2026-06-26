@@ -25,6 +25,7 @@ from app.ui.views.simulation_display import (
     normalise_candidate_frame_for_display,
     target_semantics_label,
 )
+from app.ui.views.simulation_gene_text import merge_candidate_text, parse_candidate_text
 from app.services.pichia_secretion_service import (
     discover_project_paths,
     run_pichia_secretion_draft,
@@ -185,7 +186,9 @@ def test_python_draft_streamlit_views_do_not_import_legacy_opn_service() -> None
         REPO_ROOT / "app" / "ui" / "views" / "simulation.py",
         REPO_ROOT / "app" / "ui" / "views" / "simulation_builder.py",
         REPO_ROOT / "app" / "ui" / "views" / "simulation_display.py",
+        REPO_ROOT / "app" / "ui" / "views" / "simulation_gene_catalog.py",
         REPO_ROOT / "app" / "ui" / "views" / "simulation_gene_inputs.py",
+        REPO_ROOT / "app" / "ui" / "views" / "simulation_gene_text.py",
         REPO_ROOT / "app" / "ui" / "views" / "simulation_results.py",
         REPO_ROOT / "app" / "ui" / "views" / "candidate_path_graph.py",
     ]
@@ -210,7 +213,9 @@ def test_python_draft_streamlit_views_use_owner_services_not_fat_facade() -> Non
         REPO_ROOT / "app" / "ui" / "views" / "simulation.py",
         REPO_ROOT / "app" / "ui" / "views" / "simulation_builder.py",
         REPO_ROOT / "app" / "ui" / "views" / "simulation_display.py",
+        REPO_ROOT / "app" / "ui" / "views" / "simulation_gene_catalog.py",
         REPO_ROOT / "app" / "ui" / "views" / "simulation_gene_inputs.py",
+        REPO_ROOT / "app" / "ui" / "views" / "simulation_gene_text.py",
         REPO_ROOT / "app" / "ui" / "views" / "simulation_results.py",
         REPO_ROOT / "app" / "ui" / "views" / "candidate_path_graph.py",
     ]
@@ -265,6 +270,13 @@ def test_streamlit_display_helpers_localize_candidate_status_without_engine_logi
     assert display_frame.loc[0, "effect_label"] == "约束不可行"
     assert counts == {"提升分泌": 1, "约束不可行": 1}
     assert target_semantics_label("project_defined_hLF") == "项目定义 hLF（用户提供序列）"
+
+
+def test_streamlit_gene_input_text_helpers_dedupe_multiline_candidates() -> None:
+    parsed = parse_candidate_text("G1, G2\nG1\uFF1BG3\uFF0CG2")
+
+    assert parsed == ("G1", "G2", "G3")
+    assert merge_candidate_text("G1\nG2", ["G2", "G4"]) == "G1\nG2\nG4"
 
 
 def test_python_draft_service_does_not_depend_on_legacy_app_engines() -> None:
