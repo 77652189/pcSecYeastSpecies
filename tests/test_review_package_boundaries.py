@@ -27,7 +27,6 @@ REVIEW_PACKAGES = {
         "app/services/pichia_gene_catalog_service.py",
         "app/services/pichia_screen_preview_service.py",
         "app/services/pichia_target_catalog_service.py",
-        "app/services/pichia_target_template_service.py",
     ],
     "streamlit_draft_ui": [
         "app/ui/streamlit_app.py",

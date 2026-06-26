@@ -11,7 +11,7 @@ from app.services.pichia_request_mapping_service import (
 from app.services.pichia_background_tasks import response_to_summary
 from app.services.pichia_screen_preview_service import _preview_screen_inputs_for_model
 from app.services.pichia_secretion_schema import SecretionRunRequest, SecretionRunResponse
-from app.services.pichia_target_template_service import (
+from app.services.pichia_target_catalog_service import (
     _builtin_target_semantics,
 )
 from app.services.pichia_target_catalog_service import (

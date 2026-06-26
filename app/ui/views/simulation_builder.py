@@ -5,7 +5,7 @@ from pathlib import Path
 
 import streamlit as st
 
-from app.services.pichia_target_template_service import list_builtin_target_templates
+from app.services.pichia_target_catalog_service import list_builtin_target_templates
 from app.ui.common import PATHS
 from app.ui.views.simulation_results import target_semantics_label
 
