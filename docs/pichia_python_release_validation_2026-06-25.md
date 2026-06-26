@@ -78,6 +78,29 @@ git diff --name-only -- Code Model Enzymedata Results
 
 如果要包含真实 pipeline 或 screen 求解，在 release 验证中额外运行 slow pipeline / slow screen 命令。
 
+## 最近一次非 slow rehearsal
+
+日期：2026-06-26
+分支：`codex/pichia-python-draft-engine`
+状态：通过 review-ready focused gate。
+
+已运行：
+
+```powershell
+python -m compileall app python_pichia tests
+python -m pytest -q tests\test_pichia_secretion_service_contract.py tests\test_review_package_boundaries.py tests\test_docs_active_boundary.py tests\test_streamlit_startup_scripts.py
+python -m pytest -q python_pichia\tests\test_target_entrypoints.py python_pichia\tests\test_secretion_plan_entrypoints.py python_pichia\tests\test_alignment_entrypoints.py python_pichia\tests\test_pipeline_entrypoints.py
+git diff --name-only -- Code Model Enzymedata Results
+```
+
+结果：
+
+- `compileall` 通过。
+- app/service/docs/startup 聚焦测试：35 passed。
+- engine target/secretion/alignment/pipeline 聚焦测试：32 passed, 5 skipped。
+- `Code/`、`Model/`、`Enzymedata/`、`Results/` diff 为空。
+- 未启动 MATLAB，未打开 slow pipeline/screen/probe 环境变量。
+
 旧 probe 迁移回归也属于慢任务，默认跳过；需要显式打开：
 
 ```powershell
