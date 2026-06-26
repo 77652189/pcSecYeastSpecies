@@ -9,7 +9,7 @@ from typing import Any
 
 from pcsec_pichia.core.paths import ProjectPaths
 
-from app.services.pichia_secretion_schema import SecretionRunRequest
+from app.services.pichia_secretion_schema import SecretionRunRequest, SecretionRunResponse
 
 
 def save_last_result(result_dict: dict[str, object], paths: ProjectPaths) -> None:
@@ -88,6 +88,28 @@ def status_path_for_background_task(task_id: str, paths: ProjectPaths | None = N
     return _background_dir(resolved_paths) / task_id / "status.json"
 
 
+def response_to_summary(response: SecretionRunResponse) -> dict[str, Any]:
+    return {
+        "success": response.success,
+        "target_id": response.target_id,
+        "result_status": response.result_status,
+        "matlab_alignment_status": response.matlab_alignment_status,
+        "objective_value": response.objective_value,
+        "secretion_flux": response.secretion_flux,
+        "constraint_counts": response.constraint_counts,
+        "warnings": response.warnings,
+        "errors": response.errors,
+        "output_dir": str(response.output_dir) if response.output_dir else None,
+        "summary_path": str(response.summary_path) if response.summary_path else None,
+        "report_path": str(response.report_path) if response.report_path else None,
+        "candidate_table_path": str(response.candidate_table_path) if response.candidate_table_path else None,
+        "tradeoff_path": str(response.tradeoff_path) if response.tradeoff_path else None,
+        "alignment_summary": response.alignment_summary,
+        "target_metadata": response.target_metadata,
+        "target_warnings": response.target_warnings,
+    }
+
+
 def _last_result_dir(paths: ProjectPaths) -> Path:
     directory = paths.local_runs_dir / "streamlit_pichia_runs" / ".last_result"
     directory.mkdir(parents=True, exist_ok=True)
@@ -118,7 +140,6 @@ def _write_status(path: Path, status: str, *, message: str = "", result: dict[st
 
 
 def _run_background_task(request: SecretionRunRequest, paths: ProjectPaths, status_path: Path) -> None:
-    from app.services.pichia_response_summary_service import response_to_summary
     from app.services.pichia_secretion_service import run_pichia_secretion_draft
 
     try:
@@ -134,6 +155,7 @@ __all__ = [
     "clear_last_result",
     "load_last_result",
     "poll_background_simulation",
+    "response_to_summary",
     "save_last_result",
     "status_path_for_background_task",
     "submit_background_simulation",

@@ -8,7 +8,7 @@ from app.services.pichia_request_mapping_service import (
     sequence_contract_for_engine,
     target_input_payload,
 )
-from app.services.pichia_response_summary_service import response_to_summary
+from app.services.pichia_background_tasks import response_to_summary
 from app.services.pichia_screen_preview_service import _preview_screen_inputs_for_model
 from app.services.pichia_secretion_schema import SecretionRunRequest, SecretionRunResponse
 from app.services.pichia_target_template_service import (

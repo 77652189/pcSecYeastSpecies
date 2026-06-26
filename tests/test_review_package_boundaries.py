@@ -23,7 +23,6 @@ REVIEW_PACKAGES = {
         "app/services/pichia_secretion_schema.py",
         "app/services/pichia_secretion_runner.py",
         "app/services/pichia_request_mapping_service.py",
-        "app/services/pichia_response_summary_service.py",
         "app/services/pichia_background_tasks.py",
         "app/services/pichia_gene_catalog_service.py",
         "app/services/pichia_screen_preview_service.py",
