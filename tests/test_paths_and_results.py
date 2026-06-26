@@ -1,9 +1,32 @@
 from __future__ import annotations
 
+import ast
+from pathlib import Path
+
 import pandas as pd
 
-from app.core.paths import ProjectPaths
+from pcsec_pichia.core.paths import ProjectPaths
 from app.services.results import PlotBuilder, ResultCatalog, ResultLoader
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_app_no_longer_imports_deleted_app_core_paths_module() -> None:
+    deleted_path_imports: list[str] = []
+    for path in (REPO_ROOT / "app").rglob("*.py"):
+        module_ast = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(module_ast):
+            imported: list[str] = []
+            if isinstance(node, ast.ImportFrom) and node.module:
+                imported.append(node.module)
+            elif isinstance(node, ast.Import):
+                imported.extend(alias.name for alias in node.names)
+            for module_name in imported:
+                if module_name == "app.core.paths":
+                    deleted_path_imports.append(str(path.relative_to(REPO_ROOT)))
+
+    assert deleted_path_imports == []
 
 
 def test_project_paths_locate_required_directories() -> None:

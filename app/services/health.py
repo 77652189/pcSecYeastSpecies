@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 from app.adapters.powershell import PowerShellAdapter
 from app.core.models import HealthItem, HealthReport
-from app.core.paths import ProjectPaths
+from pcsec_pichia.core.paths import ProjectPaths
 
 
 @dataclass

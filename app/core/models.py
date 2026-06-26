@@ -42,6 +42,12 @@ class SoplexSummary(BaseModel):
     optimal: bool
     objective_value: str | None = None
     status_line: str | None = None
+    solution_type: str | None = None
+    diagnostic: str = ""
+    condition_number: float | None = None
+    max_bound_violation: float | None = None
+    max_row_violation: float | None = None
+    termination_despite_violations: bool = False
 
 
 class SimulationResult(BaseModel):

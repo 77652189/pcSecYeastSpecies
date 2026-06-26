@@ -5,8 +5,8 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
-from app.adapters.process_runner import CommandResult
-from app.core.paths import ProjectPaths
+from pcsec_pichia.adapters.process_runner import CommandResult
+from pcsec_pichia.core.paths import ProjectPaths
 from app.services.opn import DEFAULT_OPN_CANDIDATE, OpnCandidateCatalog, OpnSimulationService
 
 
@@ -73,6 +73,11 @@ class FakeRunner:
         return CommandResult(args=args, returncode=0, stdout="", stderr="")
 
 
+class ExplodingMatlab:
+    def run_batch(self, repo_root: Path, matlab_command: str, timeout_seconds=None) -> CommandResult:
+        raise AssertionError("MATLAB should not be called in Python engine mode")
+
+
 def test_opn_simulation_service_returns_soplex_summary(tmp_path: Path) -> None:
     repo_paths = ProjectPaths.discover()
     paths = ProjectPaths(tmp_path)
@@ -87,3 +92,25 @@ def test_opn_simulation_service_returns_soplex_summary(tmp_path: Path) -> None:
     assert result.objective_value == "-1.07457773e+00"
     assert result.lp_file is not None
     assert result.output_file is not None
+
+
+def test_opn_simulation_service_can_use_python_engine_mode(tmp_path: Path) -> None:
+    paths = ProjectPaths.discover()
+    service = OpnSimulationService(paths, ExplodingMatlab(), FakeRunner())
+
+    result = service.run_candidate_smoke(
+        DEFAULT_OPN_CANDIDATE,
+        mu=0.10,
+        production_ratio=1e-8,
+        timeout_seconds=120,
+        engine_mode="python",
+        output_dir=tmp_path,
+    )
+
+    assert result.success is True
+    assert result.candidate_id == DEFAULT_OPN_CANDIDATE
+    assert result.objective_value == "0.00739706966"
+    assert result.lp_file is None  # new Python engine solves directly, no LP export
+    assert result.output_file is None  # no SoPlex run in python engine mode
+    assert result.message is not None
+    assert "Python pcSecPichia engine" in result.message

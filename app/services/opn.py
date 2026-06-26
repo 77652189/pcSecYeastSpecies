@@ -1,18 +1,24 @@
 from __future__ import annotations
 
 import csv
-import re
-import shlex
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 
 from app.adapters.matlab import MatlabAdapter
-from app.adapters.process_runner import ProcessRunner
+from pcsec_pichia.adapters.process_runner import ProcessRunner
 from app.adapters.soplex_parser import parse_soplex_file
 from app.core.models import OpnCandidate, OpnCandidateRank, OpnConstructDesign, OpnSimulationResult
-from app.core.paths import ProjectPaths
+from app.core.opn_inputs import BuiltinOpnInputProvider
+from pcsec_pichia.core.paths import ProjectPaths
+from pcsec_pichia.core.target_inputs import target_input_set_from_opn_input_set
+from pcsec_pichia.core.target_protein_plan import build_target_protein_plan
+from app.engines.matlab_pichia_engine import MatlabPichiaEngine
+from pcsec_pichia.engines.base import PichiaSimulationRequest
 from app.services.simulation import MU_MAX, MU_MIN
+from pcsec_pichia.services.target_simulation import PichiaTargetSimulationService as PythonPichiaSimulationService
+from pcsec_pichia.services.target_simulation import PichiaTargetSimulationService
 
 
 DEFAULT_OPN_CANDIDATE = "OPN_PPA_DDDK18"
@@ -20,6 +26,7 @@ DEFAULT_OPN_MEDIA_TYPE = 4
 DEFAULT_OPN_PRODUCTION_RATIO = 1e-8
 OPN_SHORTLIST = ("OPN_PPA_PASCHR3_0030", "OPN_PPA_DDDK18", "OPN_ALPHA_FULL_PROJECT")
 ALPHA_PRO_MARKER = "APVNTTTEDETAQIPAEAVIGY"
+OpnEngineMode = Literal["matlab", "python"]
 
 
 OPN_CATEGORY_LABELS = {
@@ -92,10 +99,6 @@ OPN_RECOMMENDATION_PROFILES = {
 
 def opn_category_label(category: str) -> str:
     return OPN_CATEGORY_LABELS.get(category, category)
-
-
-def _matlab_string(value: str) -> str:
-    return value.replace("'", "''")
 
 
 @dataclass
@@ -225,9 +228,13 @@ class OpnSimulationService:
         mu: float = 0.10,
         production_ratio: float = DEFAULT_OPN_PRODUCTION_RATIO,
         timeout_seconds: int = 300,
+        engine_mode: OpnEngineMode = "matlab",
+        output_dir: Path | None = None,
     ) -> OpnSimulationResult:
         if not MU_MIN <= mu <= MU_MAX:
             raise ValueError("生长速率 mu 必须在 0.01 到 0.44 h^-1 之间。")
+        if engine_mode not in ("matlab", "python"):
+            raise ValueError(f"不支持的 OPN 仿真引擎：{engine_mode}")
         catalog = OpnCandidateCatalog(self.paths)
         catalog.get_candidate(candidate_id)
         if not self._lock.acquire(blocking=False):
@@ -240,48 +247,38 @@ class OpnSimulationService:
                 message="已有 OPN 仿真任务正在运行，请稍后再试。",
             )
         try:
-            self.paths.opn_run_dir.mkdir(parents=True, exist_ok=True)
-            matlab_command = self._build_matlab_command(candidate_id, mu, production_ratio)
-            matlab_result = self.matlab.run_batch(self.paths.repo_root, matlab_command, timeout_seconds=220)
-            if matlab_result.returncode != 0:
-                return OpnSimulationResult(
-                    success=False,
+            if engine_mode == "python":
+                plan = _builtin_opn_plan(candidate_id)
+                engine_result = PythonPichiaSimulationService(self.paths).run_glucose_smoke(
+                    plan,
+                    output_dir=output_dir or self.paths.local_runs_dir / "pichia_python" / "opn_service",
                     mu=mu,
-                    candidate_id=candidate_id,
                     production_ratio=production_ratio,
                     media_type=DEFAULT_OPN_MEDIA_TYPE,
-                    message="MATLAB 生成 OPN 候选 LP 文件失败。",
-                    command_output=matlab_result.combined_output,
                 )
-
-            lp_file = self._latest_candidate_lp(candidate_id)
-            if lp_file is None:
-                return OpnSimulationResult(
-                    success=False,
-                    mu=mu,
-                    candidate_id=candidate_id,
-                    production_ratio=production_ratio,
-                    media_type=DEFAULT_OPN_MEDIA_TYPE,
-                    message="MATLAB 已结束，但没有找到新生成的 OPN LP 文件。",
-                    command_output=matlab_result.combined_output,
+            else:
+                engine = MatlabPichiaEngine(self.paths, self.matlab, self.runner)
+                engine_result = engine.run_target_smoke(
+                    PichiaSimulationRequest(
+                        target_id="OPN",
+                        candidate_id=candidate_id,
+                        mu=mu,
+                        production_ratio=production_ratio,
+                        media_type=DEFAULT_OPN_MEDIA_TYPE,
+                        timeout_seconds=timeout_seconds,
+                    )
                 )
-
-            output_file = lp_file.with_suffix(lp_file.suffix + ".float.out")
-            soplex_result = self._run_soplex_float(lp_file, output_file, timeout_seconds)
-            summary = parse_soplex_file(output_file) if output_file.exists() else None
-            success = soplex_result.returncode == 0 and bool(summary and summary.optimal)
-            output = "\n".join([matlab_result.combined_output, soplex_result.combined_output])
             return OpnSimulationResult(
-                success=success,
-                mu=mu,
+                success=engine_result.success,
+                mu=engine_result.mu,
                 candidate_id=candidate_id,
-                production_ratio=production_ratio,
-                media_type=DEFAULT_OPN_MEDIA_TYPE,
-                message="OPN 候选验证完成，SoPlex 返回 optimal。" if success else "OPN 候选求解未通过，请查看命令输出。",
-                lp_file=lp_file,
-                output_file=output_file,
-                objective_value=summary.objective_value if summary else None,
-                command_output=output,
+                production_ratio=engine_result.production_ratio,
+                media_type=engine_result.media_type,
+                message=engine_result.message,
+                lp_file=engine_result.lp_file,
+                output_file=engine_result.output_file,
+                objective_value=engine_result.objective_value,
+                command_output=engine_result.command_output,
             )
         finally:
             self._lock.release()
@@ -294,45 +291,13 @@ class OpnSimulationService:
         latest = max(outputs, key=lambda path: path.stat().st_mtime)
         return latest, parse_soplex_file(latest)
 
-    def _build_matlab_command(self, candidate_id: str, mu: float, production_ratio: float) -> str:
-        repo = self.paths.repo_root.as_posix()
-        candidate = _matlab_string(candidate_id)
-        return (
-            f"cd('{repo}'); "
-            "opts=struct('mediaType',4,'writeMisfoldingConstraints',false,'writeRibosomeConstraint',false); "
-            f"local_opn_pichia_glc({mu:.4g},{production_ratio:.4g},[],opts,'{candidate}');"
-        )
 
-    def _latest_candidate_lp(self, candidate_id: str) -> Path | None:
-        safe_candidate = re.sub(r"[^A-Za-z0-9]+", "_", candidate_id).strip("_")
-        files = list(self.paths.opn_run_dir.glob(f"*{safe_candidate}*.lp"))
-        return max(files, key=lambda path: path.stat().st_mtime) if files else None
-
-    def _run_soplex_float(self, lp_file: Path, output_file: Path, timeout_seconds: int):
-        lp_name = lp_file.name
-        out_name = output_file.name
-        shell_command = (
-            f"timeout {int(timeout_seconds)} soplex -s0 -g5 -t{int(timeout_seconds)} -q "
-            "--readmode=0 --solvemode=0 --real:fpfeastol=1e-3 --real:fpopttol=1e-3 "
-            f"{shlex.quote(lp_name)} > {shlex.quote(out_name)}"
-        )
-        return self.runner.run(
-            [
-                "docker",
-                "run",
-                "--rm",
-                "-v",
-                f"{self.paths.opn_run_dir}:/work",
-                "-w",
-                "/work",
-                "pcsec-soplex:24.04",
-                "sh",
-                "-lc",
-                shell_command,
-            ],
-            cwd=self.paths.repo_root,
-            timeout_seconds=timeout_seconds + 60,
-        )
+def _builtin_opn_plan(candidate_id: str):
+    generic = target_input_set_from_opn_input_set(BuiltinOpnInputProvider().load_input_set())
+    leader = next((item for item in generic.leaders if item.candidate_id == candidate_id), None)
+    if leader is None:
+        raise KeyError(f"当前 Python engine 只支持内置 OPN 候选，未找到：{candidate_id}")
+    return build_target_protein_plan(generic.target, leader)
 
 
 def latest_opn_objectives(paths: ProjectPaths) -> dict[str, tuple[float | None, str | None, bool, Path | None]]:
