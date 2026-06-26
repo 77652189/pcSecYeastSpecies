@@ -32,6 +32,7 @@ REVIEW_PACKAGES = {
         "app/ui/streamlit_app.py",
         "app/ui/views/simulation.py",
         "app/ui/views/simulation_builder.py",
+        "app/ui/views/simulation_display.py",
         "app/ui/views/simulation_gene_inputs.py",
         "app/ui/views/simulation_results.py",
         "app/ui/views/candidate_path_graph.py",

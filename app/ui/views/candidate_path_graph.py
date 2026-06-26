@@ -1,21 +1,8 @@
 from __future__ import annotations
 
-import pandas as pd
 import streamlit as st
 
-
-def _display_value(value: object, fallback: str = "") -> str:
-    if value is None:
-        return fallback
-    try:
-        if pd.isna(value):
-            return fallback
-    except TypeError:
-        pass
-    text = str(value)
-    if text.lower() in {"nan", "none", "nat"}:
-        return fallback
-    return text
+from app.ui.views.simulation_display import display_value
 
 
 def _target_ptm_counts(summary: dict[str, object]) -> dict[str, object]:
@@ -39,12 +26,12 @@ def _target_ptm_counts(summary: dict[str, object]) -> dict[str, object]:
 
 def render_secretion_path_graph(row: dict[str, object], summary: dict[str, object]) -> None:
     """用 graphviz 展示选定候选的分泌路径影响图。"""
-    gene = _display_value(row.get("input_gene_id") or row.get("gene_id") or row.get("candidate_id"))
-    intervention = _display_value(row.get("intervention_type"))
-    effect = _display_value(row.get("effect_label"), "未解析")
-    delta = _display_value(row.get("delta_objective"), "无可行目标值")
-    process = _display_value(row.get("secretory_process"))
-    reaction = _display_value(row.get("resolved_reaction_id") or row.get("reaction_id"))
+    gene = display_value(row.get("input_gene_id") or row.get("gene_id") or row.get("candidate_id"))
+    intervention = display_value(row.get("intervention_type"))
+    effect = display_value(row.get("effect_label"), "未解析")
+    delta = display_value(row.get("delta_objective"), "无可行目标值")
+    process = display_value(row.get("secretory_process"))
+    reaction = display_value(row.get("resolved_reaction_id") or row.get("reaction_id"))
     ptm = _target_ptm_counts(summary)
     ptm_label = f"目标 PTM\nDSB={ptm.get('DSB')} / NG={ptm.get('NG')} / OG={ptm.get('OG')}"
 

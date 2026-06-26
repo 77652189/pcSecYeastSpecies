@@ -45,6 +45,7 @@
 - gene/reaction 解析统一：pipeline 与 preview 复用 engine-side 解析 helper。
 - hLF 710aa 对齐展示统一：`hLF` 与 `hLF_PROJECT_710` 的语义已在 service/report warning 中区分。
 - 慢测与 release 验证分层：日常、focused、slow、release 命令已固化。
+- Streamlit 结果展示 helper：候选表中文列名、状态归一化、路径图空值显示已收敛到 `simulation_display.py`。
 
 ## 一轮对话可完成的小目标
 

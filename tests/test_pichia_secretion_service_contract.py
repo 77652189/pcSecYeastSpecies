@@ -3,6 +3,8 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+import pandas as pd
+
 from app.services.pichia_request_mapping_service import (
     request_warnings,
     sequence_contract_for_engine,
@@ -17,6 +19,11 @@ from app.services.pichia_target_catalog_service import (
 from app.services.pichia_target_catalog_service import (
     known_mature_proteins,
     known_signal_peptides,
+)
+from app.ui.views.simulation_display import (
+    candidate_effect_counts,
+    normalise_candidate_frame_for_display,
+    target_semantics_label,
 )
 from app.services.pichia_secretion_service import (
     discover_project_paths,
@@ -177,6 +184,7 @@ def test_python_draft_streamlit_views_do_not_import_legacy_opn_service() -> None
     draft_view_paths = [
         REPO_ROOT / "app" / "ui" / "views" / "simulation.py",
         REPO_ROOT / "app" / "ui" / "views" / "simulation_builder.py",
+        REPO_ROOT / "app" / "ui" / "views" / "simulation_display.py",
         REPO_ROOT / "app" / "ui" / "views" / "simulation_gene_inputs.py",
         REPO_ROOT / "app" / "ui" / "views" / "simulation_results.py",
         REPO_ROOT / "app" / "ui" / "views" / "candidate_path_graph.py",
@@ -201,6 +209,7 @@ def test_python_draft_streamlit_views_use_owner_services_not_fat_facade() -> Non
     draft_view_paths = [
         REPO_ROOT / "app" / "ui" / "views" / "simulation.py",
         REPO_ROOT / "app" / "ui" / "views" / "simulation_builder.py",
+        REPO_ROOT / "app" / "ui" / "views" / "simulation_display.py",
         REPO_ROOT / "app" / "ui" / "views" / "simulation_gene_inputs.py",
         REPO_ROOT / "app" / "ui" / "views" / "simulation_results.py",
         REPO_ROOT / "app" / "ui" / "views" / "candidate_path_graph.py",
@@ -239,6 +248,23 @@ def test_simulation_view_reaches_legacy_matlab_only_through_reference_tab() -> N
     assert "app.adapters.matlab" not in imported_modules
     assert "app.services.opn" not in imported_modules
     assert not any(module_name.startswith("app.engines") for module_name in imported_modules)
+
+
+def test_streamlit_display_helpers_localize_candidate_status_without_engine_logic() -> None:
+    frame = pd.DataFrame(
+        [
+            {"status": "2", "success": False, "effect_label": "求解失败"},
+            {"status": "optimal", "success": True, "effect_label": "提升分泌"},
+        ]
+    )
+
+    display_frame = normalise_candidate_frame_for_display(frame)
+    counts = candidate_effect_counts(display_frame)
+
+    assert display_frame.loc[0, "solver_status_label"] == "约束不可行"
+    assert display_frame.loc[0, "effect_label"] == "约束不可行"
+    assert counts == {"提升分泌": 1, "约束不可行": 1}
+    assert target_semantics_label("project_defined_hLF") == "项目定义 hLF（用户提供序列）"
 
 
 def test_python_draft_service_does_not_depend_on_legacy_app_engines() -> None:

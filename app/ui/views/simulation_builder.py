@@ -7,7 +7,7 @@ import streamlit as st
 
 from app.services.pichia_target_catalog_service import list_builtin_target_templates
 from app.ui.common import PATHS
-from app.ui.views.simulation_results import target_semantics_label
+from app.ui.views.simulation_display import target_semantics_label
 
 
 @dataclass(frozen=True)
