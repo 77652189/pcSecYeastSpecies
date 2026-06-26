@@ -42,11 +42,15 @@ Future FastAPI
 
 | 债务 | 处理方向 |
 |---|---|
-| `app/services/pichia_secretion_service.py` 过胖 | 拆成 schema / runner / catalog / background |
 | `app/ui/views/simulation.py` 过胖 | 拆 builder / results / candidate graph / MATLAB reference |
-| gene/reaction 解析重复 | 收敛到一个 engine/helper，service/UI 复用 |
 | `sys.path` bootstrap 分散 | 保留 `app/__init__.py` 为短期方案；长期用 editable install |
 | FastAPI 定位不清 | 明确 experimental 或删除 |
+
+已完成的架构收口：
+
+- `app/services/pichia_secretion_service.py` 已拆成 schema / runner / catalog / background 等 owner modules。
+- gene/reaction 解析已收敛到 engine helpers，preview 与 pipeline 复用同一解析边界。
+- 旧迁移大文档和旧 route-by-route OPN/hLF draft 测试不再作为 active 维护对象。
 
 ## Alignment 语义
 

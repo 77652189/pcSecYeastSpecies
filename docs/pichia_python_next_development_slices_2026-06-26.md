@@ -37,60 +37,18 @@
 - Python corrected 默认行为不回退到旧 MATLAB bug/legacy 行为。
 - `hLF` 当前指用户提供的 710 aa 项目序列；对应 MATLAB artifact target 是 `hLF_PROJECT_710`。
 
+## 已完成的收口切片
+
+- 提交边界清理：feature branch / Draft PR 已建立，保护目录和 local artifacts 不进入源码提交。
+- 历史文档冻结：active docs 只保留 architecture / next slices / release validation。
+- service facade 拆分：schema、runner、target catalog、gene catalog、background tasks 已拆出 owner modules。
+- gene/reaction 解析统一：pipeline 与 preview 复用 engine-side 解析 helper。
+- hLF 710aa 对齐展示统一：`hLF` 与 `hLF_PROJECT_710` 的语义已在 service/report warning 中区分。
+- 慢测与 release 验证分层：日常、focused、slow、release 命令已固化。
+
 ## 一轮对话可完成的小目标
 
-### 1. 提交边界清理
-
-目标：让工作区能被 review，而不是一团 untracked 文件。
-
-可完成内容：
-- 列出应进入正式源码的新增文件。
-- 列出应保留为 local artifact 的目录。
-- 确认 `python_pichia/`、`app/services/pichia_secretion_service.py`、关键 tests/docs 的状态。
-- 不提交，只产出清单或最小 `.gitignore` 修正。
-
-验证：
-
-```powershell
-git status --short
-git diff --name-only -- Code Model Enzymedata Results
-```
-
-### 2. 历史文档冻结
-
-目标：保留历史决策证据，但不再把旧迁移路线作为 active plan。
-
-可完成内容：
-- 对已删除/过时迁移文档做最终决定：删除、恢复为 frozen，或移入 archive。
-- 新增一个短索引说明哪些文档是 active，哪些是 frozen。
-- 不再扩写 stage/route-by-route 旧路线。
-
-验证：
-
-```powershell
-git status --short docs
-```
-
-### 3. Service facade 拆分
-
-目标：降低 `app/services/pichia_secretion_service.py` 的耦合。
-
-建议拆分：
-- `pichia_secretion_schema.py`：request/response dataclass。
-- `pichia_secretion_runner.py`：调用 `python_pichia.pipeline`。
-- `pichia_gene_catalog_service.py`：KO/OE catalog facade。
-- `pichia_background_tasks.py`：后台任务与 last-result cache。
-
-每轮只拆一块，保持 import 兼容。
-
-验证：
-
-```powershell
-python -m py_compile app\services\pichia_secretion_service.py app\ui\views\simulation.py
-python -m pytest -q tests\test_pichia_secretion_service_contract.py
-```
-
-### 4. UI 页面拆分
+### 1. UI 页面拆分
 
 目标：把 `app/ui/views/simulation.py` 从单一大文件拆成可维护的视图模块。
 
@@ -109,38 +67,40 @@ python -m py_compile app\ui\views\simulation.py
 python -m pytest -q tests\test_pichia_secretion_service_contract.py
 ```
 
-### 5. Gene/reaction 解析统一
+### 2. 文档和测试继续瘦身
 
-目标：避免“预检能解析，正式运行不能解析”的分叉。
+目标：删除对下一阶段开发没有帮助的历史材料，保留 release/review 需要的最小边界测试。
 
 可完成内容：
-- 在 `python_pichia` 中建立唯一解析 helper。
-- pipeline 与 service preview 都调用同一 helper。
-- 保留 OE gene proxy 的明确警告。
+- 删除旧 route-by-route OPN/hLF draft 输入测试。
+- 删除只描述已废弃迁移路线的大文档。
+- 保留 active docs 边界测试和 release slow gate 测试。
+- 不删除当前 service/UI/pipeline/alignment 的聚焦门禁。
 
 验证：
 
 ```powershell
-python -m pytest -q python_pichia\tests\test_pipeline_entrypoints.py tests\test_pichia_secretion_service_contract.py
+python -m pytest -q tests\test_docs_active_boundary.py tests\test_review_package_boundaries.py tests\test_pichia_secretion_service_contract.py
+git diff --name-only -- Code Model Enzymedata Results
 ```
 
-### 6. hLF 710aa 对齐展示统一
+### 3. Streamlit 结果展示瘦身
 
-目标：用户看到的状态不再混淆旧 hLF MATLAB failure 与当前项目 hLF 710 artifact。
+目标：减少 UI 展示层中重复的中文列名、warning 组装和 markdown 拼接。
 
 可完成内容：
-- UI/service warning 改成双层表述：
-  - 旧 MATLAB `hLF` baseline：historical `matlab_failed`。
-  - 当前项目 `hLF` 710aa：使用 `hLF_PROJECT_710` artifact，状态为 `aligned_except_known_matlab_compatibility_differences`，但不是 fully aligned。
-- report/summary 中保留 `python_target_id=hLF` 与 `alignment_artifact_target_id=hLF_PROJECT_710`。
+- 把候选表列名映射收敛到一个小 helper。
+- 把 alignment/status badge 文案收敛到一个小 helper。
+- 不改 result payload，不改 pipeline。
 
 验证：
 
 ```powershell
-python -m pytest -q python_pichia\tests\test_alignment_entrypoints.py python_pichia\tests\test_pipeline_entrypoints.py tests\test_pichia_secretion_service_contract.py
+python -m py_compile app\ui\views\simulation_results.py app\ui\views\simulation.py
+python -m pytest -q tests\test_pichia_secretion_service_contract.py
 ```
 
-### 7. FastAPI 取舍
+### 4. FastAPI 取舍（暂缓）
 
 目标：决定 `app/api/` 是 active experimental，还是暂时移除。
 
@@ -155,31 +115,30 @@ python -m pytest -q python_pichia\tests\test_alignment_entrypoints.py python_pic
 python -m pytest -q tests\test_pichia_fastapi_entrypoints.py
 ```
 
-### 8. 慢测与 release 验证分层
+### 5. Release 前验证 rehearsal
 
-目标：日常测试保持快，release 前仍可跑真实求解。
+目标：在不启动 MATLAB 的前提下，跑一次 release 文档里的非 slow 验证命令，确认 Draft PR 可 review。
 
 可完成内容：
-- 把慢求解测试统一标记为环境变量开关。
-- 文档中给出 daily / focused / slow / release 四级命令。
+- 跑 compileall / focused pytest。
+- 记录任何跳过项或环境阻塞。
+- 确认保护目录 diff 为空。
 
 验证：
 
 ```powershell
-python -m pytest -q python_pichia\tests\test_pipeline_entrypoints.py
-$env:PCSEC_RUN_SLOW_PIPELINE_TESTS="1"; python -m pytest -q python_pichia\tests\test_pipeline_entrypoints.py
+python -m compileall app python_pichia tests
+python -m pytest -q tests\test_pichia_secretion_service_contract.py tests\test_review_package_boundaries.py tests\test_docs_active_boundary.py
+git diff --name-only -- Code Model Enzymedata Results
 ```
 
 ## 推荐顺序
 
-1. 提交边界清理。
-2. 历史文档冻结。
-3. hLF 710aa 对齐展示统一。
-4. service facade 拆分。
-5. UI 页面拆分。
-6. gene/reaction 解析统一。
-7. FastAPI 取舍。
-8. 慢测/release 验证分层完善。
+1. UI 页面拆分。
+2. 文档和测试继续瘦身。
+3. Streamlit 结果展示瘦身。
+4. Release 前验证 rehearsal。
+5. FastAPI 取舍（暂缓）。
 
 ## 暂不进入下一阶段的内容
 
