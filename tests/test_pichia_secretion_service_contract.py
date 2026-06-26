@@ -411,6 +411,27 @@ def test_screen_preview_and_pipeline_share_engine_candidate_resolution_helpers()
     assert "过表达基因当前按 reaction-level OE proxy" in pipeline_source
 
 
+def test_app_gene_catalog_facade_reuses_formal_engine_catalog() -> None:
+    catalog_path = REPO_ROOT / "app" / "services" / "pichia_gene_catalog_service.py"
+    module_ast = ast.parse(catalog_path.read_text(encoding="utf-8"))
+    imported_names: dict[str, set[str]] = {}
+    for node in ast.walk(module_ast):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            imported_names.setdefault(node.module, set()).update(alias.name for alias in node.names)
+
+    source = catalog_path.read_text(encoding="utf-8")
+    identifiers = {node.id for node in ast.walk(module_ast) if isinstance(node, ast.Name)}
+    attributes = {node.attr for node in ast.walk(module_ast) if isinstance(node, ast.Attribute)}
+
+    assert "search_full_catalog" in imported_names["pcsec_pichia.services.gene_catalog"]
+    assert "load_full_model_genes" in imported_names["pcsec_pichia.services.gene_catalog"]
+    assert "get_catalog_by_category" in imported_names["pcsec_pichia.services.gene_catalog"]
+    assert "import re" not in source
+    assert "rules" not in identifiers | attributes
+    assert "gr_rules" not in identifiers | attributes
+    assert "x\\(" not in source
+
+
 def test_hlf_builtin_target_semantics_use_project_defined_sequence() -> None:
     hlf = _builtin_target_semantics("hLF")
 

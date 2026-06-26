@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from pathlib import Path
 from typing import Any
 
@@ -20,44 +19,20 @@ def list_pichia_gene_options(
     ensure_python_pichia_on_path()
 
     from pcsec_pichia.loading import load_pcsec_pichia_inputs
-    from pcsec_pichia.screens import classify_secretory_process, default_ko_genes
+    from pcsec_pichia.screens import default_ko_genes
+    from pcsec_pichia.services.gene_catalog import search_full_catalog
 
     inputs = load_pcsec_pichia_inputs(resolved_paths.repo_root)
     model = inputs.prepared_model
     max_rows = max(1, min(int(limit), 200))
     query_text = str(query or "").strip().lower()
     preferred = set(default_ko_genes(model, 20)) if not query_text else set()
-    gene_rows: dict[str, dict[str, Any]] = {}
 
-    for reaction_index, reaction_id in enumerate(model.rxns):
-        rule = model.rules[reaction_index] if reaction_index < len(model.rules) else ""
-        gr_rule = model.gr_rules[reaction_index] if reaction_index < len(model.gr_rules) else ""
-        process = _secretory_process_label(classify_secretory_process(reaction_id))
-        for gene_id in _genes_for_reaction(model, str(rule or ""), str(gr_rule or "")):
-            if query_text and not _gene_lookup_matches(query_text, gene_id, reaction_id, gr_rule, process):
-                continue
-            if not query_text and gene_id not in preferred and not _is_secretory_lookup_process(process):
-                continue
-            row = gene_rows.setdefault(
-                gene_id,
-                {
-                    "gene_id": gene_id,
-                    "reaction_count": 0,
-                    "reactions_preview": [],
-                    "secretory_processes": [],
-                    "gr_rule_preview": "",
-                    "suggested_use": "KO / OE gene proxy",
-                },
-            )
-            row["reaction_count"] = int(row["reaction_count"]) + 1
-            if len(row["reactions_preview"]) < 5:
-                row["reactions_preview"].append(reaction_id)
-            if process not in row["secretory_processes"]:
-                row["secretory_processes"].append(process)
-            if not row["gr_rule_preview"] and gr_rule:
-                row["gr_rule_preview"] = str(gr_rule)[:160]
-
-    rows = list(gene_rows.values())
+    rows = [
+        _gene_option_row(row)
+        for row in search_full_catalog(query_text, model=model)
+        if query_text or row.get("gene_id") in preferred or row.get("primary_category") == "分泌相关"
+    ]
     rows.sort(key=lambda row: _gene_lookup_sort_key(row, query_text, preferred))
     return rows[:max_rows]
 
@@ -113,42 +88,18 @@ def get_pichia_oe_reactions_for_selection(selected_names: list[str]) -> list[str
     return get_oe_reactions_for_selection(selected_names)
 
 
-def _secretory_process_label(process_code: str) -> str:
-    labels = {
-        "ribosome": "翻译",
-        "proteasome_degradation": "蛋白降解",
-        "disulfide_folding": "ER 折叠 / DSB",
-        "n_glycan_processing": "N-糖基化 NG",
-        "o_glycan_processing": "O-糖基化 OG",
-        "chaperone_folding": "ER 折叠 / 分子伴侣",
-        "erad_misfolding": "错误折叠 / ERAD",
-        "er_translocation": "ER 转运",
-        "er_to_golgi_transport": "ER 到 Golgi 转运",
-        "golgi_surface_transport": "Golgi 到胞外运输",
-        "secretory_capacity": "分泌容量",
-        "metabolic_or_other": "代谢或其它反应",
-        "unknown": "未解析",
+def _gene_option_row(row: dict[str, object]) -> dict[str, Any]:
+    sample_reactions = [str(item) for item in row.get("sample_reactions") or []]
+    processes = [item.strip() for item in str(row.get("processes") or "").split(",") if item.strip()]
+    return {
+        "gene_id": str(row.get("gene_id") or ""),
+        "reaction_count": int(row.get("n_reactions") or 0),
+        "reactions_preview": sample_reactions[:5],
+        "secretory_processes": processes,
+        "gr_rule_preview": "",
+        "suggested_use": "KO / OE gene proxy",
+        "primary_category": row.get("primary_category"),
     }
-    return labels.get(process_code, process_code)
-
-
-def _genes_for_reaction(model: Any, rule: str, gr_rule: str) -> list[str]:
-    genes: list[str] = []
-    for match in re.finditer(r"x\((\d+)\)", rule):
-        gene_index = int(match.group(1)) - 1
-        if 0 <= gene_index < len(model.genes):
-            gene_id = str(model.genes[gene_index])
-            if gene_id not in genes:
-                genes.append(gene_id)
-    for gene_id in re.findall(r"PAS_[A-Za-z0-9_\-]+", gr_rule):
-        if gene_id in model.gene_index and gene_id not in genes:
-            genes.append(gene_id)
-    return genes
-
-
-def _gene_lookup_matches(query: str, gene_id: str, reaction_id: str, gr_rule: str, process: str) -> bool:
-    haystack = " ".join([gene_id, reaction_id, gr_rule, process]).lower()
-    return all(token in haystack for token in re.split(r"[\s,;，]+", query) if token)
 
 
 def _gene_lookup_sort_key(row: dict[str, Any], query: str, preferred: set[str]) -> tuple[int, int, str]:
