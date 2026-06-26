@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pcsec-pichia"
+version = "0.1.0"
+description = "Python migration of the pcSecPichia target secretion workflow with MATLAB baseline alignment."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "h5py",
+    "numpy",
+    "pandas",
+    "scipy",
+    "openpyxl",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
