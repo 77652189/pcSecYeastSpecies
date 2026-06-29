@@ -16,8 +16,11 @@ from app.ui.views.simulation_gene_text import merge_candidate_text
 
 def render_gene_lookup_panel() -> None:
     st.markdown("**毕赤酵母分泌基因库**")
-    st.caption("默认显示 37 条策展靶点；也可以勾选查看全部模型基因。KO 直接按基因运行，过表达基因会按反应级代理模型运行。")
-    show_full = st.checkbox("显示全部模型基因（~1025 个）", value=False, key="pichia_gene_show_full")
+    st.caption(
+        "默认显示策略热点；也可以勾选查看全部模型基因。"
+        "KO 直接按基因运行，过表达基因会按反应级代理模型运行。"
+    )
+    show_full = st.checkbox("显示全部模型基因（约 1025 个）", value=False, key="pichia_gene_show_full")
     query = st.text_input(
         "搜索",
         value=st.session_state.get("pichia_gene_lookup_query", ""),
@@ -84,7 +87,7 @@ def _render_curated_gene_lookup(query: str) -> None:
     for entry in curated:
         if entry.category != current_category:
             current_category = entry.category
-            rows.append({"基因": f"⬇ {current_category}", "描述": "", "ID": "", "方式": ""})
+            rows.append({"基因": f"▸ {current_category}", "描述": "", "ID": "", "方式": ""})
         rows.append(
             {
                 "基因": entry.common_name,
@@ -106,7 +109,7 @@ def _render_curated_gene_lookup(query: str) -> None:
                 current = str(st.session_state.get("pichia_draft_ko_reactions", ""))
                 st.session_state["pichia_draft_ko_reactions"] = merge_candidate_text(current, reactions)
             else:
-                st.toast("所选条目无对应的敲除模型基因或反应 ID", icon="⚠️")
+                st.toast("所选条目无对应的敲除模型基因或反应 ID")
         st.rerun()
     if st.button("添加到过表达反应代理") and selected:
         reactions = get_pichia_oe_reactions_for_selection(selected)
@@ -114,7 +117,7 @@ def _render_curated_gene_lookup(query: str) -> None:
             current = str(st.session_state.get("pichia_draft_oe_reactions", ""))
             st.session_state["pichia_draft_oe_reactions"] = merge_candidate_text(current, reactions)
         else:
-            st.toast("所选条目无对应的过表达反应 ID（可能只支持敲除）", icon="⚠️")
+            st.toast("所选条目无对应的过表达反应 ID（可能只支持敲除）")
         st.rerun()
 
 

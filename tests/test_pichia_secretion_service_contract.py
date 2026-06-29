@@ -25,6 +25,7 @@ from app.ui.views.simulation_display import (
     normalise_candidate_frame_for_display,
     target_semantics_label,
 )
+from app.ui.views.simulation_gene_inputs import gene_mapping_rows_for_display
 from app.ui.views.simulation_gene_text import merge_candidate_text, parse_candidate_text
 from app.services.pichia_secretion_service import (
     discover_project_paths,
@@ -409,19 +410,32 @@ def test_screen_input_preview_resolves_manual_ko_oe_candidates() -> None:
     assert preview["oe_genes"][1]["status"] == "unresolved_gene"
     assert preview["oe_reactions"][0]["status"] == "resolved"
     assert preview["oe_reactions"][1]["status"] == "unresolved_reaction"
+    assert preview["gene_mapping"]["genes"][0]["gene_id"] == "G1"
+    assert preview["gene_mapping"]["genes"][0]["reaction_count"] == 2
+    assert any(
+        row["gene_id"] == "NO_SUCH_GENE"
+        and row["mapping_level"] == "unresolved"
+        and row["mapping_confidence"] == "unresolved"
+        for row in preview["gene_mapping_rows"]
+    )
     assert "reaction-level OE proxy" in preview["semantics"]["OE_gene_proxy"]
     assert any("敲除基因未在模型中找到" in item for item in preview["warnings"])
     assert any("过表达基因当前按 reaction-level OE proxy" in item for item in preview["warnings"])
+
+    display_frame = gene_mapping_rows_for_display(preview["gene_mapping_rows"])
+    assert {"基因", "反应", "分泌环节", "映射层级", "置信度", "解释"}.issubset(display_frame.columns)
+    assert "未解析" in set(display_frame["置信度"])
 
 
 def test_screen_preview_and_pipeline_share_engine_candidate_resolution_helpers() -> None:
     preview_path = REPO_ROOT / "app" / "services" / "pichia_screen_preview_service.py"
     pipeline_path = REPO_ROOT / "python_pichia" / "src" / "pcsec_pichia" / "pipeline.py"
-    expected_helpers = {
+    shared_helpers = {
         "resolve_oe_gene_reactions",
         "split_existing_genes",
         "split_existing_reactions",
     }
+    preview_only_helpers = {"build_gene_perturbation_map"}
 
     def module_ast_for(path: Path) -> ast.Module:
         return ast.parse(path.read_text(encoding="utf-8"))
@@ -440,8 +454,8 @@ def test_screen_preview_and_pipeline_share_engine_candidate_resolution_helpers()
     preview_names = {node.id for node in ast.walk(preview_ast) if isinstance(node, ast.Name)}
     preview_attributes = {node.attr for node in ast.walk(preview_ast) if isinstance(node, ast.Attribute)}
 
-    assert expected_helpers.issubset(imported_names(preview_path, "pcsec_pichia.screens"))
-    assert expected_helpers.issubset(imported_names(pipeline_path, "pcsec_pichia.screens"))
+    assert (shared_helpers | preview_only_helpers).issubset(imported_names(preview_path, "pcsec_pichia.screens"))
+    assert shared_helpers.issubset(imported_names(pipeline_path, "pcsec_pichia.screens"))
     assert "import re" not in preview_source
     assert "gene_index" not in preview_names | preview_attributes
     assert "gr_rules" not in preview_names | preview_attributes

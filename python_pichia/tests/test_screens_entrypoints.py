@@ -10,6 +10,7 @@ import pytest
 from pcsec_pichia.loading import PcSecPichiaInputs, load_pcsec_pichia_inputs
 from pcsec_pichia.screens import (
     ScreenResult,
+    build_gene_perturbation_map,
     run_knockout_screen,
     run_overexpression_screen,
     run_reaction_knockout_screen,
@@ -41,6 +42,60 @@ REQUIRED_ROW_FIELDS = {
     "complex_subunit_ids",
     "complex_subunit_stoichiometry",
 }
+
+
+def test_gene_perturbation_map_explains_gene_reaction_process_and_confidence() -> None:
+    class TinyModel:
+        rxns = [
+            "sec_Kar2p_complex_formation",
+            "sec_PDI1_ERV2_Ero1p_complex_formation",
+            "sec_Kar2p_activity",
+            "BIOMASS",
+        ]
+        rules = ["x(1)", "x(1)", "x(2)", "x(3)"]
+        gr_rules = ["G1", "G1", "G2", "G3"]
+        gene_index = {"G1": 0, "G2": 1, "G3": 2}
+        reaction_index = {
+            "sec_Kar2p_complex_formation": 0,
+            "sec_PDI1_ERV2_Ero1p_complex_formation": 1,
+            "sec_Kar2p_activity": 2,
+            "BIOMASS": 3,
+        }
+
+    result = build_gene_perturbation_map(
+        TinyModel(),
+        ("G1", "G2", "G3", "NO_SUCH_GENE"),
+        complex_subunits={
+            "sec_Kar2p_complex": [
+                {"subunit_id": "Kar2p", "stoichiometry": 1.0},
+            ],
+        },
+    )
+    rows = result.rows
+
+    g1_rows = [row for row in rows if row["gene_id"] == "G1"]
+    assert len(g1_rows) == 2
+    assert all(row["reaction_count"] == 2 for row in g1_rows)
+    assert any(row["secretory_process"] == "ER 折叠 / 分子伴侣" for row in g1_rows)
+
+    complex_row = next(row for row in rows if row["reaction_id"] == "sec_Kar2p_complex_formation")
+    assert complex_row["mapping_level"] == "complex_subunit"
+    assert complex_row["mapping_confidence"] == "medium"
+    assert complex_row["complex_subunit_ids"] == ["Kar2p"]
+    assert complex_row["complex_subunit_stoichiometry"] == [1.0]
+
+    direct_row = next(row for row in rows if row["reaction_id"] == "sec_Kar2p_activity")
+    assert direct_row["mapping_level"] == "direct_gpr"
+    assert direct_row["mapping_confidence"] == "high"
+
+    metabolic_row = next(row for row in rows if row["reaction_id"] == "BIOMASS")
+    assert metabolic_row["mapping_level"] == "metabolic_or_other"
+    assert metabolic_row["mapping_confidence"] == "low"
+
+    unresolved_row = next(row for row in rows if row["gene_id"] == "NO_SUCH_GENE")
+    assert unresolved_row["mapping_level"] == "unresolved"
+    assert unresolved_row["mapping_confidence"] == "unresolved"
+    assert unresolved_row["resolved"] is False
 
 
 def test_screen_solve_tests_are_slow_gated() -> None:

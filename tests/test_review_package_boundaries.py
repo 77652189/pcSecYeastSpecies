@@ -14,6 +14,7 @@ REVIEW_PACKAGES = {
         "python_pichia/src/pcsec_pichia/constraints/_prototype_adapter.py",
         "python_pichia/src/pcsec_pichia/simulation/__init__.py",
         "python_pichia/src/pcsec_pichia/screens/__init__.py",
+        "python_pichia/src/pcsec_pichia/screens/gene_perturbation_map.py",
         "python_pichia/src/pcsec_pichia/reports/__init__.py",
         "python_pichia/src/pcsec_pichia/alignment/__init__.py",
         "python_pichia/src/pcsec_pichia/pipeline.py",

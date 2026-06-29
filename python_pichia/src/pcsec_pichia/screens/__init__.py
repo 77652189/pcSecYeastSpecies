@@ -30,6 +30,12 @@ from pcsec_pichia.screens.candidate_resolution import (
     split_existing_genes,
     split_existing_reactions,
 )
+from pcsec_pichia.screens.gene_perturbation_map import (
+    GenePerturbationMapping,
+    GenePerturbationMapResult,
+    GeneReactionMapping,
+    build_gene_perturbation_map,
+)
 
 
 @dataclass(frozen=True)
@@ -410,6 +416,10 @@ def _empty_screen_result(target_id: str, screen_type: str, prepared: dict[str, A
 
 __all__ = [
     "ScreenResult",
+    "GenePerturbationMapping",
+    "GenePerturbationMapResult",
+    "GeneReactionMapping",
+    "build_gene_perturbation_map",
     "default_ko_genes",
     "default_oe_reactions",
     "reactions_for_gene",

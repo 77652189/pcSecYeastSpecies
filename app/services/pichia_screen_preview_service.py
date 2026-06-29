@@ -28,10 +28,18 @@ def preview_screen_inputs(
     from pcsec_pichia.loading import load_pcsec_pichia_inputs
 
     inputs = load_pcsec_pichia_inputs(resolved_paths.repo_root)
-    return _preview_screen_inputs_for_model(inputs.prepared_model, request)
+    return _preview_screen_inputs_for_model(
+        inputs.prepared_model,
+        request,
+        complex_subunits=inputs.secretory.complex_subunits,
+    )
 
 
-def _preview_screen_inputs_for_model(model: Any, request: SecretionRunRequest) -> dict[str, Any]:
+def _preview_screen_inputs_for_model(
+    model: Any,
+    request: SecretionRunRequest,
+    complex_subunits: dict[str, list[dict[str, object]]] | None = None,
+) -> dict[str, Any]:
     limit = max(0, min(int(request.screen_candidate_limit), 20))
     ko_gene_ids = _dedupe_text_tuple(request.ko_gene_ids or request.ko_candidates)[:limit]
     ko_reaction_ids = _dedupe_text_tuple(request.ko_reaction_ids)[:limit]
@@ -39,6 +47,7 @@ def _preview_screen_inputs_for_model(model: Any, request: SecretionRunRequest) -
     oe_reaction_ids = _dedupe_text_tuple(request.oe_reaction_ids or request.oe_candidates)[:limit]
 
     from pcsec_pichia.screens import (
+        build_gene_perturbation_map,
         reactions_for_gene,
         resolve_oe_gene_reactions,
         split_existing_genes,
@@ -47,7 +56,11 @@ def _preview_screen_inputs_for_model(model: Any, request: SecretionRunRequest) -
 
     existing_ko_genes, _ = split_existing_genes(model, ko_gene_ids)
     existing_ko_reactions, _ = split_existing_reactions(model, ko_reaction_ids)
-    _, _, unresolved_oe_genes, oe_gene_warnings = resolve_oe_gene_reactions(model, oe_gene_ids, limit)
+    _, _, unresolved_oe_genes, oe_gene_warnings = resolve_oe_gene_reactions(
+        model,
+        oe_gene_ids,
+        limit,
+    )
     existing_oe_reactions, _ = split_existing_reactions(model, oe_reaction_ids)
 
     ko_genes = [
@@ -72,6 +85,11 @@ def _preview_screen_inputs_for_model(model: Any, request: SecretionRunRequest) -
         _reaction_row(reaction_id, "OE_reaction", resolved=reaction_id in existing_oe_reactions)
         for reaction_id in oe_reaction_ids
     ]
+    gene_mapping = build_gene_perturbation_map(
+        model,
+        _dedupe_text_tuple((*ko_gene_ids, *oe_gene_ids)),
+        complex_subunits=complex_subunits,
+    ).to_dict()
     warnings = _screen_preview_warnings(ko_genes, ko_reactions, oe_genes, oe_reactions, request)
 
     return {
@@ -86,6 +104,8 @@ def _preview_screen_inputs_for_model(model: Any, request: SecretionRunRequest) -
         "ko_reactions": ko_reactions,
         "oe_genes": oe_genes,
         "oe_reactions": oe_reactions,
+        "gene_mapping": gene_mapping,
+        "gene_mapping_rows": gene_mapping["rows"],
         "warnings": warnings,
     }
 
@@ -112,7 +132,13 @@ def _reaction_row(reaction_id: str, intervention_type: str, resolved: bool) -> d
     }
 
 
-def _oe_gene_row(gene_id: str, reactions: list[str], resolved: bool, limit: int, truncated: bool) -> dict[str, Any]:
+def _oe_gene_row(
+    gene_id: str,
+    reactions: list[str],
+    resolved: bool,
+    limit: int,
+    truncated: bool,
+) -> dict[str, Any]:
     return {
         "input_id": gene_id,
         "intervention_type": "OE_gene_proxy",
@@ -144,7 +170,10 @@ def _screen_preview_warnings(
         if not row["resolved"]:
             warnings.append(f"过表达基因无法解析到模型反应：{row['input_id']}")
         elif row.get("truncated"):
-            warnings.append(f"过表达基因 {row['input_id']} 解析到的反应超过候选上限 {request.screen_candidate_limit}，正式运行会截断。")
+            warnings.append(
+                f"过表达基因 {row['input_id']} 解析到的反应超过候选上限 "
+                f"{request.screen_candidate_limit}，正式运行会截断。"
+            )
     for row in oe_reactions:
         if not row["resolved"]:
             warnings.append(f"过表达反应未在模型中找到：{row['input_id']}")
