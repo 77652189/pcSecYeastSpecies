@@ -335,6 +335,10 @@ def _unresolved_row(
         "delta_objective": None,
         "effect_label": "未解析",
         "secretory_process": "未解析",
+        "mapping_level": "unresolved",
+        "mapping_confidence": "unresolved",
+        "mapping_interpretation": "未解析到可解释的模型反应。",
+        "complex_id": None,
         "complex_subunit_ids": [],
         "complex_subunit_stoichiometry": [],
     }

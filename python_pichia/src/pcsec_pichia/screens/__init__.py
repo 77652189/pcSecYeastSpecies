@@ -35,6 +35,7 @@ from pcsec_pichia.screens.gene_perturbation_map import (
     GenePerturbationMapResult,
     GeneReactionMapping,
     build_gene_perturbation_map,
+    build_reaction_perturbation_mapping,
 )
 
 
@@ -301,6 +302,7 @@ def _normalize_screen_row(
     process_code = classify_secretory_process(resolved_reaction)
     effect_code = classify_candidate_effect(bool(row.get("success")), relative_delta)
     solver_status_label = _solver_status_label(row.get("status"), bool(row.get("success")))
+    mapping = build_reaction_perturbation_mapping(resolved_reaction, complex_subunits)
     return {
         **row,
         "target_id": target_id,
@@ -317,9 +319,13 @@ def _normalize_screen_row(
         "effect_label": _effect_label(effect_code, row.get("status")),
         "solver_status_label": solver_status_label,
         "failure_reason": None if row.get("success") else solver_status_label,
-        "secretory_process": _secretory_process_label(process_code),
-        "complex_subunit_ids": [str(item["subunit_id"]) for item in subunits],
-        "complex_subunit_stoichiometry": [float(item["stoichiometry"]) for item in subunits],
+        "secretory_process": mapping.secretory_process or _secretory_process_label(process_code),
+        "mapping_level": mapping.mapping_level,
+        "mapping_confidence": mapping.mapping_confidence,
+        "mapping_interpretation": mapping.interpretation,
+        "complex_id": mapping.complex_id or (complex_id or None),
+        "complex_subunit_ids": list(mapping.complex_subunit_ids) or [str(item["subunit_id"]) for item in subunits],
+        "complex_subunit_stoichiometry": list(mapping.complex_subunit_stoichiometry) or [float(item["stoichiometry"]) for item in subunits],
     }
 
 
@@ -420,6 +426,7 @@ __all__ = [
     "GenePerturbationMapResult",
     "GeneReactionMapping",
     "build_gene_perturbation_map",
+    "build_reaction_perturbation_mapping",
     "default_ko_genes",
     "default_oe_reactions",
     "reactions_for_gene",

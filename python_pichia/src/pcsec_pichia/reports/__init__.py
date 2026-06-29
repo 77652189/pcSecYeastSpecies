@@ -32,6 +32,10 @@ CANDIDATE_COLUMNS: tuple[str, ...] = (
     "solver_status_label",
     "failure_reason",
     "secretory_process",
+    "mapping_level",
+    "mapping_confidence",
+    "mapping_interpretation",
+    "complex_id",
     "success",
     "status",
     "objective_value",
@@ -52,6 +56,10 @@ CORE_CANDIDATE_EXPLANATION_COLUMNS: tuple[str, ...] = (
     "intervention_type",
     "effect_label",
     "secretory_process",
+    "mapping_level",
+    "mapping_confidence",
+    "mapping_interpretation",
+    "complex_id",
     "success",
     "status",
     "objective_value",
@@ -333,6 +341,9 @@ def normalize_candidate_explanation_row(row: dict[str, Any]) -> dict[str, Any]:
         "未解析候选",
     )
     process = _text(row.get("secretory_process"), "未解析")
+    mapping_level = _text(row.get("mapping_level"), "unresolved")
+    mapping_confidence = _text(row.get("mapping_confidence"), "unresolved")
+    mapping_interpretation = _text(row.get("mapping_interpretation"))
     effect_label = _effect_bucket(row)
     delta = row.get("delta_objective")
     status = _text(row.get("status"))
@@ -341,13 +352,19 @@ def normalize_candidate_explanation_row(row: dict[str, Any]) -> dict[str, Any]:
     status_note = _status_note(status, solver_status, effect_label)
     summary = (
         f"{intervention_type} `{candidate_id}`：{effect_label}；"
-        f"关联环节：{process}；Δobjective={delta_text}。{status_note}"
+        f"关联环节：{process}；映射置信度：{_confidence_label(mapping_confidence)}；"
+        f"Δobjective={delta_text}。{status_note}"
     )
+    if mapping_interpretation:
+        summary = f"{summary} {mapping_interpretation}"
     return {
         "candidate_id": candidate_id,
         "intervention_type": intervention_type,
         "effect_bucket": effect_label,
         "secretory_process": process,
+        "mapping_level": mapping_level,
+        "mapping_confidence": mapping_confidence,
+        "mapping_interpretation": mapping_interpretation,
         "delta_objective": delta,
         "status": status,
         "solver_status_label": solver_status,
@@ -408,6 +425,15 @@ def _delta_text(value: Any) -> str:
         return f"{float(value):.6g}"
     except (TypeError, ValueError):
         return str(value)
+
+
+def _confidence_label(value: str) -> str:
+    return {
+        "high": "高",
+        "medium": "中",
+        "low": "低",
+        "unresolved": "未解析",
+    }.get(value, value or "未解析")
 
 
 def _text(value: Any, fallback: str = "") -> str:

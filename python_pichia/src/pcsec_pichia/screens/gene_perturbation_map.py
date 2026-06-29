@@ -120,6 +120,25 @@ def build_gene_perturbation_map(
     return GenePerturbationMapResult(genes=genes)
 
 
+def build_reaction_perturbation_mapping(
+    reaction_id: str | None,
+    complex_subunits: dict[str, list[dict[str, object]]] | None = None,
+) -> GeneReactionMapping:
+    """Build the reaction-level explanation used by formal KO/OE result rows."""
+    if not reaction_id:
+        return GeneReactionMapping(
+            reaction_id=None,
+            secretory_process="未解析",
+            mapping_level="unresolved",
+            mapping_confidence="unresolved",
+            complex_id=None,
+            complex_subunit_ids=(),
+            complex_subunit_stoichiometry=(),
+            interpretation="未解析到可解释的模型反应。",
+        )
+    return _build_reaction_mapping(str(reaction_id), complex_subunits or {})
+
+
 def _build_gene_mapping(
     model: Any,
     gene_id: str,
@@ -261,4 +280,5 @@ __all__ = [
     "GenePerturbationMapResult",
     "GeneReactionMapping",
     "build_gene_perturbation_map",
+    "build_reaction_perturbation_mapping",
 ]

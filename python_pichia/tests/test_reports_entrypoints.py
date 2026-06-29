@@ -89,6 +89,10 @@ def _screen_results(target_id: str) -> tuple[ScreenResult, ScreenResult]:
                 "resolved_reaction_id": "RPE_no_1_fwd",
                 "effect_label": "降低分泌",
                 "secretory_process": "代谢或其它反应",
+                "mapping_level": "metabolic_or_other",
+                "mapping_confidence": "low",
+                "mapping_interpretation": "该基因关联代谢或其它反应；可能间接影响分泌，解释置信度较低。",
+                "complex_id": None,
                 "intervention_type": "KO",
                 "success": True,
                 "status": "0",
@@ -120,6 +124,10 @@ def _screen_results(target_id: str) -> tuple[ScreenResult, ScreenResult]:
                 "resolved_reaction_id": "sec_BIP_NEFS_complex_formation",
                 "effect_label": "提升分泌",
                 "secretory_process": "ER 折叠 / 分子伴侣",
+                "mapping_level": "complex_subunit",
+                "mapping_confidence": "medium",
+                "mapping_interpretation": "该基因关联分泌复合体反应（ER 折叠 / 分子伴侣）；OE gene 应解释为 reaction-level OE proxy。",
+                "complex_id": "sec_BIP_NEFS_complex",
                 "intervention_type": "OE_reaction",
                 "success": True,
                 "status": "0",
@@ -198,6 +206,10 @@ def test_write_simulation_outputs_creates_stable_report_bundle(tmp_path: Path, t
         "secretory_process",
         "complex_subunit_ids",
         "complex_subunit_stoichiometry",
+        "mapping_level",
+        "mapping_confidence",
+        "mapping_interpretation",
+        "complex_id",
     ):
         assert field in (reader.fieldnames or [])
 
@@ -234,6 +246,9 @@ def test_candidate_interpretation_summarizes_effects_and_infeasible_rows() -> No
             "intervention_type": "OE_reaction",
             "effect_label": "提升分泌",
             "secretory_process": "ER 折叠 / 分子伴侣",
+            "mapping_level": "complex_subunit",
+            "mapping_confidence": "medium",
+            "mapping_interpretation": "该反应映射到分子伴侣复合体。",
             "success": True,
             "status": "0",
             "delta_objective": 0.0001,
@@ -245,6 +260,9 @@ def test_candidate_interpretation_summarizes_effects_and_infeasible_rows() -> No
             "effect_label": "求解失败",
             "solver_status_label": "约束不可行",
             "secretory_process": "N-糖基化 NG",
+            "mapping_level": "complex_subunit",
+            "mapping_confidence": "medium",
+            "mapping_interpretation": "该反应映射到 N-糖基化复合体。",
             "success": False,
             "status": "2",
             "delta_objective": None,
@@ -255,6 +273,9 @@ def test_candidate_interpretation_summarizes_effects_and_infeasible_rows() -> No
             "intervention_type": "KO",
             "effect_label": "未解析",
             "secretory_process": "未解析",
+            "mapping_level": "unresolved",
+            "mapping_confidence": "unresolved",
+            "mapping_interpretation": "未解析到可解释的模型反应。",
             "success": False,
             "status": "unresolved_gene",
             "delta_objective": None,
@@ -269,6 +290,7 @@ def test_candidate_interpretation_summarizes_effects_and_infeasible_rows() -> No
     assert interpretation["effect_counts"]["未解析"] == 1
     assert "固定生长下约束不可行" in infeasible["summary"]
     assert "N-糖基化 NG" in infeasible["summary"]
+    assert "映射置信度：中" in infeasible["summary"]
 
 
 def test_candidate_report_consistency_audit_matches_summary_and_markdown() -> None:
@@ -304,6 +326,9 @@ def test_candidate_report_consistency_audit_flags_mismatched_counts() -> None:
             "intervention_type": "KO",
             "effect_label": "未解析",
             "secretory_process": "未解析",
+            "mapping_level": "unresolved",
+            "mapping_confidence": "unresolved",
+            "mapping_interpretation": "未解析到可解释的模型反应。",
             "success": False,
             "status": "unresolved_gene",
         }

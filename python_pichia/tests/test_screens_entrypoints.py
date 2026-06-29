@@ -39,6 +39,10 @@ REQUIRED_ROW_FIELDS = {
     "solver_status_label",
     "failure_reason",
     "secretory_process",
+    "mapping_level",
+    "mapping_confidence",
+    "mapping_interpretation",
+    "complex_id",
     "complex_subunit_ids",
     "complex_subunit_stoichiometry",
 }
@@ -96,6 +100,37 @@ def test_gene_perturbation_map_explains_gene_reaction_process_and_confidence() -
     assert unresolved_row["mapping_level"] == "unresolved"
     assert unresolved_row["mapping_confidence"] == "unresolved"
     assert unresolved_row["resolved"] is False
+
+
+def test_formal_screen_row_normalization_adds_mapping_explanation_fields() -> None:
+    import pcsec_pichia.screens as screens_module
+
+    row = screens_module._normalize_screen_row(
+        {
+            "reaction": "sec_Kar2p_complex_formation",
+            "success": True,
+            "status": "0",
+            "objective_value": 0.002,
+            "delta_vs_baseline": 0.0001,
+        },
+        target_id="OPN_ALPHA_FULL_PROJECT",
+        screen_type="overexpression",
+        intervention_type="OE_reaction",
+        baseline_objective_value=0.0019,
+        complex_subunits={
+            "sec_Kar2p_complex": [
+                {"subunit_id": "Kar2p", "stoichiometry": 1.0},
+                {"subunit_id": "Sil1p", "stoichiometry": 1.0},
+            ],
+        },
+    )
+
+    assert row["mapping_level"] == "complex_subunit"
+    assert row["mapping_confidence"] == "medium"
+    assert row["mapping_interpretation"]
+    assert row["complex_id"] == "sec_Kar2p_complex"
+    assert row["complex_subunit_ids"] == ["Kar2p", "Sil1p"]
+    assert row["secretory_process"] == "ER 折叠 / 分子伴侣"
 
 
 def test_screen_solve_tests_are_slow_gated() -> None:

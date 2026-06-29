@@ -260,7 +260,13 @@ def test_streamlit_display_helpers_localize_candidate_status_without_engine_logi
     frame = pd.DataFrame(
         [
             {"status": "2", "success": False, "effect_label": "求解失败"},
-            {"status": "optimal", "success": True, "effect_label": "提升分泌"},
+            {
+                "status": "optimal",
+                "success": True,
+                "effect_label": "提升分泌",
+                "mapping_level": "complex_subunit",
+                "mapping_confidence": "medium",
+            },
         ]
     )
 
@@ -269,6 +275,8 @@ def test_streamlit_display_helpers_localize_candidate_status_without_engine_logi
 
     assert display_frame.loc[0, "solver_status_label"] == "约束不可行"
     assert display_frame.loc[0, "effect_label"] == "约束不可行"
+    assert display_frame.loc[1, "mapping_level"] == "复合体亚基"
+    assert display_frame.loc[1, "mapping_confidence"] == "中"
     assert counts == {"提升分泌": 1, "约束不可行": 1}
     assert target_semantics_label("project_defined_hLF") == "项目定义 hLF（用户提供序列）"
 

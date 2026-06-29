@@ -16,6 +16,10 @@ CANDIDATE_DISPLAY_COLUMNS = {
     "secretory_process": "分泌环节",
     "solver_status_label": "求解状态",
     "failure_reason": "失败原因",
+    "mapping_level": "映射层级",
+    "mapping_confidence": "解释置信度",
+    "mapping_interpretation": "解释",
+    "complex_id": "复合体",
 }
 
 
@@ -30,6 +34,23 @@ TARGET_SEMANTICS_LABELS = {
     "custom_user_sequence": "用户自定义序列",
     "user_provided_as_provided": "用户提供序列，按原样使用",
     "as_provided": "按提供序列记录",
+}
+
+
+MAPPING_LEVEL_LABELS = {
+    "direct_gpr": "GPR 直接关联",
+    "complex_subunit": "复合体亚基",
+    "reaction_proxy": "反应代理",
+    "metabolic_or_other": "代谢/其它",
+    "unresolved": "未解析",
+}
+
+
+MAPPING_CONFIDENCE_LABELS = {
+    "high": "高",
+    "medium": "中",
+    "low": "低",
+    "unresolved": "未解析",
 }
 
 
@@ -74,6 +95,14 @@ def normalise_candidate_frame_for_display(frame: pd.DataFrame) -> pd.DataFrame:
         frame["solver_status_label"] = ""
     if "failure_reason" not in frame.columns:
         frame["failure_reason"] = ""
+    if "mapping_level" in frame.columns:
+        frame["mapping_level"] = frame["mapping_level"].map(
+            lambda value: MAPPING_LEVEL_LABELS.get(display_value(value), display_value(value))
+        )
+    if "mapping_confidence" in frame.columns:
+        frame["mapping_confidence"] = frame["mapping_confidence"].map(
+            lambda value: MAPPING_CONFIDENCE_LABELS.get(display_value(value), display_value(value))
+        )
     for idx, row in frame.iterrows():
         label = screen_status_label(row.get("status"), row.get("success"))
         if not display_value(row.get("solver_status_label")):
@@ -125,6 +154,8 @@ def candidate_row_label(index: int, row: pd.Series) -> str:
 
 __all__ = [
     "CANDIDATE_DISPLAY_COLUMNS",
+    "MAPPING_CONFIDENCE_LABELS",
+    "MAPPING_LEVEL_LABELS",
     "candidate_effect_counts",
     "candidate_row_label",
     "display_value",

@@ -32,6 +32,8 @@ def render_secretion_path_graph(row: dict[str, object], summary: dict[str, objec
     delta = display_value(row.get("delta_objective"), "无可行目标值")
     process = display_value(row.get("secretory_process"))
     reaction = display_value(row.get("resolved_reaction_id") or row.get("reaction_id"))
+    confidence = display_value(row.get("mapping_confidence"), "未解析")
+    interpretation = display_value(row.get("mapping_interpretation"))
     ptm = _target_ptm_counts(summary)
     ptm_label = f"目标 PTM\nDSB={ptm.get('DSB')} / NG={ptm.get('NG')} / OG={ptm.get('OG')}"
 
@@ -40,6 +42,7 @@ def render_secretion_path_graph(row: dict[str, object], summary: dict[str, objec
         "Intervention": {"label": f"扰动\n{intervention}", "fill": "#e5e7eb"},
         "Reaction": {"label": f"反应/复合体\n{reaction[:30]}", "fill": "#e5e7eb"},
         "Process": {"label": f"分泌环节\n{process[:30]}", "fill": "#dbeafe"},
+        "Evidence": {"label": f"解释置信度\n{confidence}", "fill": "#fef9c3"},
         "PTM": {"label": ptm_label, "fill": "#fef3c7"},
         "Secretion": {
             "label": f"分泌通量变化\n{effect}",
@@ -53,7 +56,8 @@ def render_secretion_path_graph(row: dict[str, object], summary: dict[str, objec
         ("Gene", "Intervention"),
         ("Intervention", "Reaction"),
         ("Reaction", "Process"),
-        ("Process", "PTM"),
+        ("Process", "Evidence"),
+        ("Evidence", "PTM"),
         ("PTM", "Secretion"),
         ("Secretion", "Result"),
     ]
@@ -73,6 +77,8 @@ def render_secretion_path_graph(row: dict[str, object], summary: dict[str, objec
     except ImportError:
         st.graphviz_chart(dot, use_container_width=True)
 
+    if interpretation:
+        st.caption(interpretation)
     st.caption("路径图展示扰动从基因/反应到分泌通量的影响链路，非实际发酵网络。")
 
 
