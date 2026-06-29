@@ -62,6 +62,7 @@ class SecretionRunResponse:
     alignment_summary: dict[str, Any] = field(default_factory=dict)
     target_metadata: dict[str, Any] = field(default_factory=dict)
     target_warnings: list[str] = field(default_factory=list)
+    protein_cost_analysis: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

@@ -319,3 +319,30 @@ def test_candidate_report_consistency_audit_flags_mismatched_counts() -> None:
     assert any("candidate_count mismatch" in issue for issue in audit["issues"])
     assert any("effect_counts mismatch" in issue for issue in audit["issues"])
     assert any("Python draft" in issue or "Python 草稿" in issue for issue in audit["issues"])
+
+
+def test_markdown_report_renders_protein_cost_analysis_section() -> None:
+    summary = build_summary_payload(_simulation_result("OPN_ALPHA_FULL_PROJECT"), None, ())
+    summary["protein_cost_analysis"] = {
+        "result_status": "draft_explanatory",
+        "total_relative_score": 100.0,
+        "dominant_cost_categories": ["translation", "o_glycosylation"],
+        "cost_items": [
+            {
+                "category": "translation",
+                "label": "翻译负担",
+                "basis": "full sequence length",
+                "raw_value": 383.0,
+                "relative_score": 55.0,
+                "interpretation": "sequence length burden",
+            }
+        ],
+        "warnings": ["explanatory score only"],
+    }
+
+    markdown = build_markdown_report(summary)
+
+    assert "## 目标蛋白成本分析" in markdown
+    assert "draft_explanatory" in markdown
+    assert "translation" in markdown
+    assert "不代表真实发酵产量" in markdown

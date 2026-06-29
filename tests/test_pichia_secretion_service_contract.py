@@ -531,6 +531,11 @@ def test_response_summary_exposes_target_metadata_and_warnings() -> None:
             "normalization_mode": "user_provided_as_provided",
         },
         target_warnings=["hLF 使用用户提供的 710aa 目标序列。"],
+        protein_cost_analysis={
+            "result_status": "draft_explanatory",
+            "total_relative_score": 100.0,
+            "dominant_cost_categories": ["translation"],
+        },
     )
 
     summary = response_to_summary(response)
@@ -543,3 +548,5 @@ def test_response_summary_exposes_target_metadata_and_warnings() -> None:
     assert summary["alignment_summary"]["matlab_alignment_status"] == "aligned_except_known_matlab_compatibility_differences"
     assert summary["alignment_summary"]["is_fully_aligned"] is False
     assert summary["target_warnings"] == ["hLF 使用用户提供的 710aa 目标序列。"]
+    assert summary["protein_cost_analysis"]["result_status"] == "draft_explanatory"
+    assert summary["protein_cost_analysis"]["total_relative_score"] == 100.0

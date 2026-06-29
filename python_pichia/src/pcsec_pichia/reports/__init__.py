@@ -174,6 +174,7 @@ def build_markdown_report(summary: dict[str, Any]) -> str:
     status = summary.get("target_parameter_status")
     constraint_counts = summary.get("constraint_counts") or {}
     candidate_interpretation = summary.get("candidate_interpretation") or {}
+    protein_cost = summary.get("protein_cost_analysis") or {}
     lines = [
             f"# pcSecPichia Python 分泌仿真报告: {target_id}",
             "",
@@ -212,7 +213,36 @@ def build_markdown_report(summary: dict[str, Any]) -> str:
         for row in candidate_interpretation.get("top_explanations") or []:
             lines.append(f"- {row.get('summary')}")
         lines.append("")
+    if protein_cost:
+        lines.extend(_protein_cost_markdown_lines(protein_cost))
     return "\n".join(lines)
+
+
+def _protein_cost_markdown_lines(protein_cost: dict[str, Any]) -> list[str]:
+    items = protein_cost.get("cost_items") or []
+    dominant = protein_cost.get("dominant_cost_categories") or []
+    lines = [
+        "## 目标蛋白成本分析",
+        "",
+        "- 当前结果是 Python draft explanatory score，不代表真实发酵产量或湿实验成本。",
+        f"- 成本分析状态: `{protein_cost.get('result_status')}`.",
+        f"- 总相对成本分: `{protein_cost.get('total_relative_score')}`.",
+        f"- 主要成本类别: `{', '.join(str(item) for item in dominant)}`.",
+        "",
+        "| 类别 | 成本项 | 相对分 | 依据 |",
+        "| --- | --- | ---: | --- |",
+    ]
+    for item in items:
+        lines.append(
+            f"| `{item.get('category')}` | {item.get('label')} | "
+            f"{item.get('relative_score')} | {item.get('basis')} |"
+        )
+    warnings = protein_cost.get("warnings") or []
+    if warnings:
+        lines.extend(["", "提示:"])
+        lines.extend(f"- {warning}" for warning in warnings)
+    lines.append("")
+    return lines
 
 
 def build_candidate_interpretation(candidate_rows: Iterable[dict[str, Any]], limit: int = 5) -> dict[str, Any]:

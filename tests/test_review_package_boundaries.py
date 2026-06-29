@@ -17,6 +17,7 @@ REVIEW_PACKAGES = {
         "python_pichia/src/pcsec_pichia/screens/gene_perturbation_map.py",
         "python_pichia/src/pcsec_pichia/reports/__init__.py",
         "python_pichia/src/pcsec_pichia/alignment/__init__.py",
+        "python_pichia/src/pcsec_pichia/analysis/__init__.py",
         "python_pichia/src/pcsec_pichia/pipeline.py",
     ],
     "app_service_facade": [

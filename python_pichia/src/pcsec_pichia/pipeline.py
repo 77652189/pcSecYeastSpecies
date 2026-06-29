@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from pcsec_pichia.analysis import analyze_target_protein_cost, summarize_protein_cost_analysis
 from pcsec_pichia.alignment import (
     build_alignment_summary,
     hlf_project_710_known_matlab_compatibility_exceptions,
@@ -54,6 +55,7 @@ def run_pichia_secretion_simulation(
     target = _resolve_target(request, root)
 
     plan = build_secretion_plan(target)
+    protein_cost = analyze_target_protein_cost(target, plan)
     constraint_result = build_pcsec_constraints(
         inputs.prepared_model,
         target,
@@ -201,6 +203,7 @@ def run_pichia_secretion_simulation(
                 "reaction_count": plan.reaction_count,
                 "ptm_counts": plan.ptm_counts,
             },
+            "protein_cost_analysis": summarize_protein_cost_analysis(protein_cost),
             "alignment_summary": alignment_payload,
             "target_metadata": _target_metadata(target, request),
             "target_warnings": _target_warnings(target),
@@ -523,6 +526,7 @@ def _build_pipeline_report(summary: dict[str, Any]) -> str:
     exceptions = alignment.get("compatibility_exceptions") or []
     target_metadata = summary.get("target_metadata") or {}
     target_warnings = summary.get("target_warnings") or []
+    protein_cost = summary.get("protein_cost_analysis") or {}
     lines = [
         f"# pcSecPichia Python 分泌仿真报告: {summary.get('target_id')}",
         "",
@@ -562,6 +566,8 @@ def _build_pipeline_report(summary: dict[str, Any]) -> str:
             )
     if target_warnings:
         lines.extend(["", "## 目标输入边界", "", *[f"- {item}" for item in target_warnings]])
+    if protein_cost:
+        lines.extend(_protein_cost_report_lines(protein_cost))
     screen_warnings = summary.get("screen_warnings") or []
     if screen_warnings:
         lines.extend(["", "## 基因扰动提示", "", *[f"- {item}" for item in screen_warnings]])
@@ -605,6 +611,33 @@ def _build_pipeline_report(summary: dict[str, Any]) -> str:
             lines.append(f"- {row.get('summary')}")
         lines.append("")
     return "\n".join(lines)
+
+
+def _protein_cost_report_lines(protein_cost: dict[str, Any]) -> list[str]:
+    items = protein_cost.get("cost_items") or []
+    dominant = protein_cost.get("dominant_cost_categories") or []
+    lines = [
+        "",
+        "## 目标蛋白成本分析",
+        "",
+        "- 当前结果是 Python draft explanatory score，不代表真实发酵产量或湿实验成本。",
+        f"- 成本分析状态: `{protein_cost.get('result_status')}`.",
+        f"- 总相对成本分: `{protein_cost.get('total_relative_score')}`.",
+        f"- 主要成本类别: `{', '.join(str(item) for item in dominant)}`.",
+        "",
+        "| 类别 | 成本项 | 相对分 | 依据 |",
+        "| --- | --- | ---: | --- |",
+    ]
+    for item in items:
+        lines.append(
+            f"| `{item.get('category')}` | {item.get('label')} | "
+            f"{item.get('relative_score')} | {item.get('basis')} |"
+        )
+    warnings = protein_cost.get("warnings") or []
+    if warnings:
+        lines.extend(["", "提示:"])
+        lines.extend(f"- {warning}" for warning in warnings)
+    return lines
 
 
 __all__ = ["run_pichia_secretion_simulation"]

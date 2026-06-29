@@ -55,6 +55,11 @@ def run_pichia_pipeline_draft(
     summary_warnings = [str(item) for item in summary_payload.get("screen_warnings") or []]
     target_warnings = [str(item) for item in summary_payload.get("target_warnings") or []]
     target_metadata = summary_payload.get("target_metadata") if isinstance(summary_payload.get("target_metadata"), dict) else {}
+    protein_cost = (
+        summary_payload.get("protein_cost_analysis")
+        if isinstance(summary_payload.get("protein_cost_analysis"), dict)
+        else {}
+    )
 
     return SecretionRunResponse(
         success=result.success,
@@ -73,6 +78,7 @@ def run_pichia_pipeline_draft(
         alignment_summary=dict(result.alignment_summary),
         target_metadata=dict(target_metadata),
         target_warnings=target_warnings,
+        protein_cost_analysis=dict(protein_cost),
     )
 
 

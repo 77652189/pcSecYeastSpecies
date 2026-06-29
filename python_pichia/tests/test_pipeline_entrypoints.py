@@ -70,13 +70,30 @@ def _assert_common_pipeline_outputs(result: PichiaSimulationRunResult, output_di
     assert summary["matlab_alignment_status"] == "pending"
     assert summary["alignment_summary"] == result.alignment_summary
     assert summary["compatibility_mode"] == "corrected"
+    assert summary["protein_cost_analysis"]["result_status"] == "draft_explanatory"
+    assert summary["protein_cost_analysis"]["total_relative_score"] == pytest.approx(100.0, abs=0.01)
     assert result.result_status == "corrected_condition"
     assert result.matlab_alignment_status != "aligned"
 
     with result.candidate_table_path.open(newline="", encoding="utf-8") as handle:
         candidate_rows = list(csv.DictReader(handle))
     assert candidate_rows
-    assert {"gene_id", "reaction_id", "input_gene_id", "resolved_reaction_id", "intervention_type", "effect_label", "solver_status_label", "failure_reason", "secretory_process", "objective_value", "baseline_objective_value", "delta_objective", "complex_subunit_ids", "complex_subunit_stoichiometry"}.issubset(candidate_rows[0])
+    assert {
+        "gene_id",
+        "reaction_id",
+        "input_gene_id",
+        "resolved_reaction_id",
+        "intervention_type",
+        "effect_label",
+        "solver_status_label",
+        "failure_reason",
+        "secretory_process",
+        "objective_value",
+        "baseline_objective_value",
+        "delta_objective",
+        "complex_subunit_ids",
+        "complex_subunit_stoichiometry",
+    }.issubset(candidate_rows[0])
 
     with result.tradeoff_path.open(newline="", encoding="utf-8") as handle:
         tradeoff_rows = list(csv.DictReader(handle))
@@ -404,3 +421,41 @@ def test_pipeline_raises_clear_error_for_unknown_target(tmp_path: Path) -> None:
             PichiaSimulationRequest(target_id="NO_SUCH_TARGET", candidate_id="NO_SUCH_TARGET"),
             output_dir=tmp_path,
         )
+
+
+def test_pipeline_report_includes_protein_cost_analysis_section() -> None:
+    report = _build_pipeline_report(
+        {
+            "target_id": "OPN_ALPHA_FULL_PROJECT",
+            "result_status": "draft",
+            "matlab_alignment_status": "pending",
+            "target_parameter_status": "draft",
+            "success": True,
+            "objective_value": 0.1,
+            "growth_rate": 0.1,
+            "constraint_counts": {},
+            "candidate_count": 0,
+            "tradeoff": {"tradeoff_rows": []},
+            "protein_cost_analysis": {
+                "result_status": "draft_explanatory",
+                "total_relative_score": 100.0,
+                "dominant_cost_categories": ["translation", "o_glycosylation"],
+                "cost_items": [
+                    {
+                        "category": "o_glycosylation",
+                        "label": "O-糖基化 OG",
+                        "basis": "declared OG count",
+                        "raw_value": 91.0,
+                        "relative_score": 20.0,
+                        "interpretation": "OPN OG burden",
+                    }
+                ],
+                "warnings": ["draft explanatory score"],
+            },
+        }
+    )
+
+    assert "## 目标蛋白成本分析" in report
+    assert "draft_explanatory" in report
+    assert "o_glycosylation" in report
+    assert "不代表真实发酵产量" in report

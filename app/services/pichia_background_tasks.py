@@ -107,6 +107,7 @@ def response_to_summary(response: SecretionRunResponse) -> dict[str, Any]:
         "alignment_summary": response.alignment_summary,
         "target_metadata": response.target_metadata,
         "target_warnings": response.target_warnings,
+        "protein_cost_analysis": response.protein_cost_analysis,
     }
 
 

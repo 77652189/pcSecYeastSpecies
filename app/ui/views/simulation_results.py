@@ -107,6 +107,10 @@ def render_pichia_results() -> None:
             for error in errors:
                 st.error(error)
 
+    protein_cost = _protein_cost_payload(data)
+    if protein_cost:
+        _render_protein_cost_analysis(protein_cost)
+
     candidate_path = data.get("candidate_table_path")
     if candidate_path and Path(candidate_path).exists():
         with st.expander("候选表与分泌路径", expanded=True):
@@ -156,6 +160,55 @@ def _render_candidate_outputs(candidate_path: str, summary_path: str | None) -> 
             except Exception:
                 summary = {}
         render_secretion_path_graph(row.to_dict(), summary or {})
+
+
+def _protein_cost_payload(data: dict[str, object]) -> dict[str, object]:
+    payload = data.get("protein_cost_analysis")
+    if isinstance(payload, dict) and payload:
+        return payload
+    summary_path = data.get("summary_path")
+    if not summary_path or not Path(str(summary_path)).exists():
+        return {}
+    try:
+        summary = json.loads(Path(str(summary_path)).read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    payload = summary.get("protein_cost_analysis") if isinstance(summary, dict) else None
+    return payload if isinstance(payload, dict) else {}
+
+
+def _render_protein_cost_analysis(protein_cost: dict[str, object]) -> None:
+    with st.expander("目标蛋白成本分析", expanded=True):
+        st.caption("解释型相对评分，不代表真实发酵产量、培养成本或湿实验结果。")
+        c1, c2, c3 = st.columns([1, 2, 2])
+        with c1:
+            st.metric("总相对成本分", protein_cost.get("total_relative_score", "—"))
+        with c2:
+            st.write("**主要成本类别**")
+            st.write(", ".join(str(item) for item in protein_cost.get("dominant_cost_categories") or []) or "—")
+        with c3:
+            st.write("**状态**")
+            st.write(protein_cost.get("result_status", "draft_explanatory"))
+
+        items = protein_cost.get("cost_items") or []
+        if items:
+            frame = pd.DataFrame(items)
+            display_columns = {
+                "category": "类别",
+                "label": "成本项",
+                "relative_score": "相对分",
+                "basis": "依据",
+                "interpretation": "解释",
+                "raw_value": "原始值",
+            }
+            columns = [key for key in display_columns if key in frame.columns]
+            st.dataframe(
+                frame[columns].rename(columns=display_columns),
+                use_container_width=True,
+                hide_index=True,
+            )
+        for warning in protein_cost.get("warnings") or []:
+            st.warning(str(warning))
 
 
 __all__ = ["render_pichia_results"]

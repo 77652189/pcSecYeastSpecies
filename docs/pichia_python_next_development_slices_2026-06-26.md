@@ -48,105 +48,104 @@
 - Streamlit 结果展示 helper：候选表中文列名、状态归一化、路径图空值显示已收敛到 `simulation_display.py`。
 - Streamlit 基因扰动 UI：基因库展示、候选文本解析、KO/OE 表单已拆成独立视图 helper。
 
+## 下一阶段优先级
+
+后续不再围绕 MATLAB 项目全量迁移推进，而是按产品分析能力扩展。优先级固定为：
+
+1. 目标蛋白蛋白成本分析。
+2. 目标蛋白生长分析。
+3. 代谢工程靶点分析。
+4. 人源化糖基化蛋白成本分析。
+5. 人源化糖基化生长分析。
+
 ## 一轮对话可完成的小目标
 
-### 1. UI 页面拆分
+### 1. 目标蛋白蛋白成本分析
 
-目标：把 `app/ui/views/simulation.py` 从单一大文件拆成可维护的视图模块。
-
-建议拆分：
-- `simulation_builder.py`
-- `simulation_results.py`
-- `candidate_path_graph.py`
-- `matlab_reference.py`
-
-每轮只拆一个模块，不改 UI 行为。
-
-验证：
-
-```powershell
-python -m py_compile app\ui\views\simulation.py
-python -m pytest -q tests\test_pichia_secretion_service_contract.py
-```
-
-### 2. 文档和测试继续瘦身
-
-目标：删除对下一阶段开发没有帮助的历史材料，保留 release/review 需要的最小边界测试。
+目标：基于当前 target/secretion plan/constraint summary，给出目标蛋白造成的主要蛋白成本来源，不先改变求解数值行为。
 
 可完成内容：
-- 删除旧 route-by-route OPN/hLF draft 输入测试。
-- 删除只描述已废弃迁移路线的大文档。
-- 保留 active docs 边界测试和 release slow gate 测试。
-- 不删除当前 service/UI/pipeline/alignment 的聚焦门禁。
+- 在 `python_pichia/` 下建立正式 cost analysis 入口，例如 `pcsec_pichia.analysis` 或 `pcsec_pichia.costs`。
+- 汇总 target sequence length、MW、DSB/NG/OG/GPI、translation、ER folding、glycosylation、misfolding 等成本项。
+- 输出结构化 payload，供 report/UI 消费。
+- 第一轮只做 OPN/hLF/custom target 的 deterministic summary，不做新 LP 求解和参数拟合。
 
 验证：
 
 ```powershell
-python -m pytest -q tests\test_docs_active_boundary.py tests\test_review_package_boundaries.py tests\test_pichia_secretion_service_contract.py
+python -m pytest -q python_pichia\tests\test_target_entrypoints.py python_pichia\tests\test_secretion_plan_entrypoints.py
+python -m pytest -q tests\test_pichia_secretion_service_contract.py
 git diff --name-only -- Code Model Enzymedata Results
 ```
 
-### 3. Streamlit 结果展示瘦身
+### 2. 目标蛋白生长分析
 
-目标：减少 UI 展示层中重复的中文列名、warning 组装和 markdown 拼接。
+目标：把已有 small-grid growth tradeoff 提升为面向目标蛋白解释的生长影响分析。
 
 可完成内容：
-- 把候选表列名映射收敛到一个小 helper。
-- 把 alignment/status badge 文案收敛到一个小 helper。
-- 不改 result payload，不改 pipeline。
+- 复用 `simulation.run_growth_tradeoff`，不新增慢批量任务。
+- 对 OPN/hLF/custom target 输出 growth vs secretion 的小表和解释字段。
+- 在 report/UI 中区分 draft tradeoff 与真实发酵增长预测。
 
 验证：
 
 ```powershell
-python -m py_compile app\ui\views\simulation_results.py app\ui\views\simulation.py
-python -m pytest -q tests\test_pichia_secretion_service_contract.py
-```
-
-### 4. FastAPI 取舍（暂缓）
-
-目标：决定 `app/api/` 是 active experimental，还是暂时移除。
-
-可完成内容：
-- 若保留：文档标注 experimental，并确保只调用 app service facade。
-- 若删除：删除 `app/api/` 与对应测试。
-- 不新增认证、队列、下载等新功能。
-
-验证：
-
-```powershell
-python -m pytest -q tests\test_pichia_fastapi_entrypoints.py
-```
-
-### 5. Release 前验证 rehearsal
-
-目标：在不启动 MATLAB 的前提下，跑一次 release 文档里的非 slow 验证命令，确认 Draft PR 可 review。
-
-可完成内容：
-- 跑 compileall / focused pytest。
-- 记录任何跳过项或环境阻塞。
-- 确认保护目录 diff 为空。
-
-验证：
-
-```powershell
-python -m compileall app python_pichia tests
-python -m pytest -q tests\test_pichia_secretion_service_contract.py tests\test_review_package_boundaries.py tests\test_docs_active_boundary.py
+python -m pytest -q python_pichia\tests\test_simulation_entrypoints.py python_pichia\tests\test_pipeline_entrypoints.py
 git diff --name-only -- Code Model Enzymedata Results
 ```
 
-## 推荐顺序
+### 3. 代谢工程靶点分析
 
-1. UI 页面拆分。
-2. 文档和测试继续瘦身。
-3. Streamlit 结果展示瘦身。
-4. Release 前验证 rehearsal。
-5. FastAPI 取舍（暂缓）。
+目标：在小批量 KO/OE 基础上提升解释能力，而不是立即做全模型筛选。
 
-## 暂不进入下一阶段的内容
+可完成内容：
+- 保留手动小候选集。
+- 对 KO/OE rows 增加 pathway/process grouping、effect summary 和 unresolved diagnostics。
+- 继续明确 OE gene 是 reaction-level proxy。
 
-- Humanized 糖基化。
-- 温度敏感性。
-- 三物种全量迁移。
+验证：
+
+```powershell
+python -m pytest -q python_pichia\tests\test_screens_entrypoints.py tests\test_pichia_secretion_service_contract.py
+git diff --name-only -- Code Model Enzymedata Results
+```
+
+### 4. 人源化糖基化蛋白成本分析
+
+目标：在 native OPN/hLF 稳定基础上引入 humanized glycosylation 的成本解释，不先承诺完整 pathway engineering。
+
+可完成内容：
+- 明确 humanized glycosylation mode 的输入 schema。
+- 先做 cost/report 层面的新增成本项，不改变 corrected 默认 pipeline。
+- 输出 warning：humanized 参数仍需实验/文献校准。
+
+验证：
+
+```powershell
+python -m pytest -q python_pichia\tests\test_target_entrypoints.py python_pichia\tests\test_reports_entrypoints.py
+git diff --name-only -- Code Model Enzymedata Results
+```
+
+### 5. 人源化糖基化生长分析
+
+目标：在人源化糖基化成本项稳定后，再分析其 growth tradeoff。
+
+可完成内容：
+- 复用目标蛋白生长分析入口。
+- 增加 humanized glycosylation mode 对 growth tradeoff summary 的影响解释。
+- 不做三物种迁移或新 MATLAB baseline。
+
+验证：
+
+```powershell
+python -m pytest -q python_pichia\tests\test_simulation_entrypoints.py python_pichia\tests\test_reports_entrypoints.py
+git diff --name-only -- Code Model Enzymedata Results
+```
+
+## 明确不做的内容
+
+- 三物种 MATLAB 项目全量迁移。
 - 论文 figure 复现。
-- 全模型 KO/OE 批量筛选。
-- 新 MATLAB baseline 生成。
+- 新 MATLAB baseline 自动生成。
+- 温度敏感性。
+- 全模型 KO/OE 批量筛选，除非后续单独立项。
