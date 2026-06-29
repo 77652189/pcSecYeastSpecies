@@ -16,12 +16,12 @@ from app.core.i18n import (
     species_label,
     status_label,
 )
-from app.core.paths import ProjectPaths
 from app.services.health import HealthService
+from app.services.pichia_secretion_service import discover_project_paths
 from app.services.results import ResultCatalog, ResultLoader
 
-def _paths() -> ProjectPaths:
-    return ProjectPaths.discover(Path(__file__))
+def _paths():
+    return discover_project_paths(Path(__file__))
 
 
 PATHS = _paths()

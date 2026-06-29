@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from app.adapters.process_runner import CommandResult, ProcessRunner
+from pcsec_pichia.adapters.process_runner import CommandResult, ProcessRunner
 
 
 class MatlabAdapter:

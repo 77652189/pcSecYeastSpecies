@@ -59,6 +59,20 @@ function Test-HealthOk {
         return $false
     }
 }
+function Stop-StaleProjectService {
+    param([Parameter(Mandatory = $true)]$ProcessInfo)
+
+    Write-Host ""
+    Write-Host "$projectName appears to be running on port $port, but the health check failed." -ForegroundColor Yellow
+    Write-Host "Stopping stale service process PID $($ProcessInfo.ProcessId) and restarting..." -ForegroundColor Yellow
+
+    Stop-Process -Id $ProcessInfo.ProcessId -Force -ErrorAction Stop
+    Start-Sleep -Seconds 2
+
+    if (Get-PortOwner) {
+        throw "Port $port is still in use after stopping stale $projectName process."
+    }
+}
 
 function Write-LanUrls {
     $lanAddresses = Get-NetIPAddress -AddressFamily IPv4 |
@@ -81,6 +95,15 @@ if (-not (Test-FirewallRuleReady)) {
 
 Set-Location $projectRoot
 
+$pythonPichiaSrc = Join-Path $projectRoot "python_pichia\src"
+if (Test-Path -LiteralPath $pythonPichiaSrc) {
+    if ([string]::IsNullOrWhiteSpace($env:PYTHONPATH)) {
+        $env:PYTHONPATH = $pythonPichiaSrc
+    } elseif (($env:PYTHONPATH -split [IO.Path]::PathSeparator) -notcontains $pythonPichiaSrc) {
+        $env:PYTHONPATH = "$pythonPichiaSrc$([IO.Path]::PathSeparator)$env:PYTHONPATH"
+    }
+}
+
 $owner = Get-PortOwner
 if ($owner) {
     $commandLine = [string]$owner.CommandLine
@@ -96,13 +119,17 @@ if ($owner) {
         exit 0
     }
 
-    Write-Host ""
-    Write-Host "Port $port is already in use. Cannot start $projectName." -ForegroundColor Red
-    Write-Host "Owner PID: $($owner.ProcessId)" -ForegroundColor Yellow
-    Write-Host "Owner command: $commandLine" -ForegroundColor Yellow
-    Write-Host ""
-    Write-Host "If this is an old project service, close that window or stop that process first." -ForegroundColor Yellow
-    exit 1
+    if ($isThisApp) {
+        Stop-StaleProjectService -ProcessInfo $owner
+    } else {
+        Write-Host ""
+        Write-Host "Port $port is already in use. Cannot start $projectName." -ForegroundColor Red
+        Write-Host "Owner PID: $($owner.ProcessId)" -ForegroundColor Yellow
+        Write-Host "Owner command: $commandLine" -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "If this is an old project service, close that window or stop that process first." -ForegroundColor Yellow
+        exit 1
+    }
 }
 
 $python = Join-Path $projectRoot ".venv\Scripts\python.exe"

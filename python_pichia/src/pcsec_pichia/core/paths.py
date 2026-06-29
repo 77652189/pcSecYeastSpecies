@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -25,6 +25,30 @@ class ProjectPaths:
     @property
     def models_dir(self) -> Path:
         return self.repo_root / "Model"
+
+    @property
+    def pichia_model_mat(self) -> Path:
+        return self.models_dir / "pcSecPichia.mat"
+
+    @property
+    def pichia_enzymedata_dir(self) -> Path:
+        return self.repo_root / "Enzymedata" / "pcSecPichia"
+
+    @property
+    def pichia_enzymedata_sec_mat(self) -> Path:
+        return self.pichia_enzymedata_dir / "enzymedataSEC_PP.mat"
+
+    @property
+    def pichia_enzymedata_machine_mat(self) -> Path:
+        return self.pichia_enzymedata_dir / "enzymedataMachine_PP.mat"
+
+    @property
+    def pichia_enzymedata_metabolic_mat(self) -> Path:
+        return self.pichia_enzymedata_dir / "enzymedat_PP.mat"
+
+    @property
+    def pichia_enzymedata_dummy_er_mat(self) -> Path:
+        return self.pichia_enzymedata_dir / "enzymedataDummyER_PP.mat"
 
     @property
     def local_runs_dir(self) -> Path:
@@ -57,6 +81,10 @@ class ProjectPaths:
     @property
     def opn_candidate_meta_csv(self) -> Path:
         return self.repo_root / "Data" / "pcSecPichia" / "TargetProtein_OPN_candidates_meta.csv"
+
+    @property
+    def pichia_aa_id_xlsx(self) -> Path:
+        return self.repo_root / "Data" / "pcSecPichia" / "aa_id_PP.xlsx"
 
     @property
     def opn_run_dir(self) -> Path:

@@ -1,24 +1,23 @@
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
+from pcsec_pichia.adapters.soplex_output import parse_soplex_text
 from app.core.models import SoplexSummary
 
 
-STATUS_PATTERN = re.compile(r"SoPlex status\s*:\s*(.+)")
-OBJECTIVE_PATTERN = re.compile(r"Objective value\s*:?\s*(.+)")
-
-
 def parse_soplex_output(text: str) -> SoplexSummary:
-    status_matches = STATUS_PATTERN.findall(text)
-    objective_matches = OBJECTIVE_PATTERN.findall(text)
-    status_line = status_matches[-1].strip() if status_matches else None
-    objective_value = objective_matches[-1].strip() if objective_matches else None
+    parsed = parse_soplex_text(text)
     return SoplexSummary(
-        optimal=bool(status_line and "problem is solved [optimal]" in status_line),
-        objective_value=objective_value,
-        status_line=status_line,
+        optimal=parsed.is_optimal,
+        objective_value=parsed.objective_text,
+        status_line=parsed.status,
+        solution_type=parsed.solution_type,
+        diagnostic=parsed.diagnostic,
+        condition_number=parsed.condition_number,
+        max_bound_violation=parsed.max_bound_violation,
+        max_row_violation=parsed.max_row_violation,
+        termination_despite_violations=parsed.termination_despite_violations,
     )
 
 

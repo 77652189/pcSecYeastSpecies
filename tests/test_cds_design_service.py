@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pandas as pd
 
-from app.core.paths import ProjectPaths
+from pcsec_pichia.core.paths import ProjectPaths
 from app.services.cds_design import CODON_TO_AA, CdsDesignService
 
 

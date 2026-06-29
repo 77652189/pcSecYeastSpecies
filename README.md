@@ -41,8 +41,14 @@ Please ensure that all required toolboxes and solvers are properly installed and
 This repository also includes a local Streamlit interface designed for
 non-computational biology users. The app provides a Chinese-language entry
 point for browsing processed results, checking local deployment status,
-inspecting solver outputs, and running a small verified *S. cerevisiae*
-glucose smoke simulation.
+inspecting solver outputs, and running the draft Python pcSecPichia corrected
+secretion workbench for OPN, the project hLF 710 aa target, and custom target
+inputs. The workbench supports small KO/OE candidate runs and keeps historical
+MATLAB OPN checks on a separate reference page; MATLAB is not the main runtime
+for the Python corrected workflow.
+The built-in hLF target is the user-provided 710 aa project sequence; its
+alignment artifact target is `hLF_PROJECT_710`, while the old MATLAB `hLF`
+baseline remains historical `matlab_failed` and is not fully aligned.
 
 Install the Python dependencies:
 
@@ -66,6 +72,9 @@ The launcher starts the Streamlit app on port `8502` and can configure a
 Windows Firewall rule for local-subnet access when administrator approval is
 granted.
 
+The legacy `run_streamlit.ps1` helper also defaults to port `8502` for this
+project. Port `8501` may be used by another local project on the same machine.
+
 Then open:
 
 ```text
@@ -82,6 +91,20 @@ http://192.168.2.174:8502
 The app is intentionally separated into UI, service, adapter, and core layers
 under [`app/`](app/) so that the same result loading, health checks, and
 simulation services can be reused by a future FastAPI web backend.
+
+---
+
+## Python pcSecPichia Migration Documents
+
+The active Python pcSecPichia direction is documented in:
+
+- [Python engine architecture](docs/pichia_python_architecture.md)
+- [Next development slices](docs/pichia_python_next_development_slices_2026-06-26.md)
+- [Validation commands](docs/pichia_python_release_validation_2026-06-25.md)
+
+Older route-by-route migration documents have been frozen or removed from the
+active plan. The current implementation treats `python_pichia/` as the engine
+boundary and `app/` as UI/service orchestration.
 
 ---
 

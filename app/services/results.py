@@ -10,7 +10,7 @@ from scipy.io import loadmat
 
 from app.core.i18n import category_label, species_label
 from app.core.models import DatasetInfo, LoadedDataset, SpeciesCode
-from app.core.paths import ProjectPaths
+from pcsec_pichia.core.paths import ProjectPaths
 
 
 SPECIES_HINTS: dict[str, SpeciesCode] = {

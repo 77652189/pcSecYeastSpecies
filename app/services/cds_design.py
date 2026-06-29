@@ -8,7 +8,7 @@ import pandas as pd
 
 from app.adapters.pichia_clm import PichiaClmAdapter
 from app.core.models import CdsDesignRecord, CdsDesignResult
-from app.core.paths import ProjectPaths
+from pcsec_pichia.core.paths import ProjectPaths
 from app.services.opn import OPN_SHORTLIST, OpnCandidateCatalog
 
 

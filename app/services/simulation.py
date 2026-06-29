@@ -9,7 +9,7 @@ from app.adapters.matlab import MatlabAdapter
 from app.adapters.powershell import PowerShellAdapter
 from app.adapters.soplex_parser import parse_soplex_file
 from app.core.models import SimulationResult
-from app.core.paths import ProjectPaths
+from pcsec_pichia.core.paths import ProjectPaths
 
 
 MU_MIN = 0.01

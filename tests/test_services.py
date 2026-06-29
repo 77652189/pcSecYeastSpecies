@@ -1,13 +1,34 @@
 from __future__ import annotations
 
+import ast
 from dataclasses import dataclass
 from pathlib import Path
 
-from app.adapters.process_runner import CommandResult
+from pcsec_pichia.adapters.process_runner import CommandResult
 from app.adapters.soplex_parser import parse_soplex_output
-from app.core.paths import ProjectPaths
+from pcsec_pichia.core.paths import ProjectPaths
 from app.services.health import HealthService
 from app.services.simulation import parse_objective_from_text
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_app_no_longer_imports_deleted_process_runner_adapter() -> None:
+    deleted_adapter_imports: list[str] = []
+    for path in (REPO_ROOT / "app").rglob("*.py"):
+        module_ast = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(module_ast):
+            imported: list[str] = []
+            if isinstance(node, ast.ImportFrom) and node.module:
+                imported.append(node.module)
+            elif isinstance(node, ast.Import):
+                imported.extend(alias.name for alias in node.names)
+            for module_name in imported:
+                if module_name == "app.adapters.process_runner":
+                    deleted_adapter_imports.append(str(path.relative_to(REPO_ROOT)))
+
+    assert deleted_adapter_imports == []
 
 
 def test_soplex_parser_reads_optimal_objective() -> None:
@@ -21,6 +42,7 @@ def test_soplex_parser_reads_optimal_objective() -> None:
     assert summary.optimal is True
     assert summary.objective_value == "-1.05755453e+00"
     assert summary.status_line == "problem is solved [optimal]"
+    assert summary.diagnostic == "optimal"
 
 
 def test_objective_parser_uses_last_objective() -> None:

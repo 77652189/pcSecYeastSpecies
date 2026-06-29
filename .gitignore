@@ -1,6 +1,10 @@
 # Local runtime outputs
 local_runs/
 
+# Agent/IDE workspace config
+.reasonix/
+.workbuddy/
+
 # Python caches and virtual environments
 __pycache__/
 *.py[cod]
