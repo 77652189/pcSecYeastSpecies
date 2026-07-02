@@ -23,6 +23,7 @@ class PichiaSimulationRequest:
     mu: float = 0.10
     production_ratio: float = 1e-8
     media_type: int = 4
+    carbon_source_id: str = "glucose"
     timeout_seconds: int = 300
     target_input: Any | None = None
     leader_candidate: Any | None = None

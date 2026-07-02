@@ -119,6 +119,7 @@ def test_fastapi_run_status_and_result_endpoints(monkeypatch, tmp_path: Path) ->
             "ko_gene_ids": ["PAS_chr1-4_0586"],
             "oe_reaction_ids": ["r_4041"],
             "growth_points": [0.1],
+            "carbon_source_id": "methanol",
         },
     )
     assert create_response.status_code == 200
@@ -130,6 +131,7 @@ def test_fastapi_run_status_and_result_endpoints(monkeypatch, tmp_path: Path) ->
     assert captured["request"].ko_gene_ids == ("PAS_chr1-4_0586",)
     assert captured["request"].oe_reaction_ids == ("r_4041",)
     assert captured["request"].enable_misfolding_constraint is True
+    assert captured["request"].carbon_source_id == "methanol"
 
     status_response = client.get("/pichia/secretion/runs/task-123/status")
     assert status_response.status_code == 200

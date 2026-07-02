@@ -41,6 +41,7 @@ class SecretionRunRequest:
     growth_points: tuple[float, ...] = (0.10,)
     mu: float = 0.10
     media_type: int = 4
+    carbon_source_id: str = "glucose"
     output_dir: Path | None = None
 
 

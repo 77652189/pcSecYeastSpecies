@@ -29,6 +29,7 @@ def run_pichia_pipeline_draft(
             glycosylation_mode="native",
             mu=request.mu,
             media_type=request.media_type,
+            carbon_source_id=request.carbon_source_id,
             enable_ribosome_translation_constraint=request.enable_ribosome_translation_constraint,
             enable_misfolding_constraint=request.enable_misfolding_constraint,
             growth_points=tuple(request.growth_points),

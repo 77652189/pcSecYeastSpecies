@@ -53,6 +53,7 @@ class PichiaSecretionRunRequest(BaseModel):
     growth_points: list[float] = Field(default_factory=lambda: [0.10])
     mu: float = 0.10
     media_type: int = 4
+    carbon_source_id: str = "glucose"
     output_dir: str | None = None
 
     def to_service_request(self) -> SecretionRunRequest:
@@ -82,6 +83,7 @@ class PichiaSecretionRunRequest(BaseModel):
             growth_points=tuple(self.growth_points or [0.10]),
             mu=self.mu,
             media_type=self.media_type,
+            carbon_source_id=self.carbon_source_id,
             output_dir=Path(self.output_dir) if self.output_dir else None,
         )
 
