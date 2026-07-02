@@ -46,6 +46,18 @@ def test_desktop_shortcut_repair_points_to_8502_lan_launcher() -> None:
     assert "8501" not in script
 
 
+def test_streamlit_page_icon_is_repo_asset() -> None:
+    source = _read_repo_text("app/ui/streamlit_app.py")
+    icon_path = REPO_ROOT / "app" / "ui" / "assets" / "pcsecyeast_8502.png"
+
+    assert icon_path.exists()
+    assert icon_path.stat().st_size > 0
+    assert "pcsecyeast_8502.png" in source
+    assert "assets" in source
+    assert "LauncherIcons" not in source
+    assert "C:\\Users" not in source
+
+
 def test_orphan_python_cleanup_script_is_repo_scoped_and_dry_run_by_default() -> None:
     script = _read_repo_text("scripts/stop_pcsec_orphan_python.ps1")
 

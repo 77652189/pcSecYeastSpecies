@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import importlib
+from pathlib import Path
 
 import streamlit as st
 
+APP_ICON = Path(__file__).resolve().parent / "assets" / "pcsecyeast_8502.png"
+
 st.set_page_config(
     page_title="pcSecYeastSpecies",
-    page_icon=None,
+    page_icon=str(APP_ICON),
     layout="wide",
     initial_sidebar_state="expanded",
 )
