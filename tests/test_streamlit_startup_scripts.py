@@ -44,3 +44,14 @@ def test_desktop_shortcut_repair_points_to_8502_lan_launcher() -> None:
     assert "start_pcSecYeastSpecies_lan.bat" in script
     assert "scripts\\start_pcSecYeastSpecies_lan.ps1" in launcher
     assert "8501" not in script
+
+
+def test_orphan_python_cleanup_script_is_repo_scoped_and_dry_run_by_default() -> None:
+    script = _read_repo_text("scripts/stop_pcsec_orphan_python.ps1")
+
+    assert "[switch]$Stop" in script
+    assert "Dry run only" in script
+    assert "python(?:\\.exe)?\"?\\s+-\\s*$" in script
+    assert "WorkingDirectory" in script
+    assert "Get-NetTCPConnection" in script
+    assert "Stop-Process -Id $suspect.ProcessId" in script
