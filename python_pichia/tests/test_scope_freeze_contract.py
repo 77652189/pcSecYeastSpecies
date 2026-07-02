@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 import numpy as np
+import pytest
 from scipy import sparse
 
 from pcsec_pichia.alignment import AlignmentSummary
@@ -28,6 +29,12 @@ from pcsec_pichia.targets import TargetSpec, load_targets
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PROBE_DIR = REPO_ROOT / "local_runs" / "pichia_hlf_opn_probe"
+
+
+def _require_local_probe_artifact(path: Path) -> None:
+    if not path.exists():
+        pytest.skip(f"local probe artifact is not available in this checkout: {path}")
+    assert path.stat().st_size > 0, f"empty Stage 3 artifact: {path}"
 
 
 def _tiny_exchange_model() -> CobraModel:
@@ -194,8 +201,7 @@ def test_stage3_optional_constraint_artifacts_remain_valid() -> None:
         candidates_path = PROBE_DIR / f"{prefix}_candidates.csv"
         tradeoff_path = PROBE_DIR / f"{prefix}_tradeoff.csv"
         for path in (summary_path, report_path, candidates_path, tradeoff_path):
-            assert path.exists(), f"missing Stage 3 artifact: {path}"
-            assert path.stat().st_size > 0, f"empty Stage 3 artifact: {path}"
+            _require_local_probe_artifact(path)
 
         summary = json.loads(summary_path.read_text(encoding="utf-8"))
         for target in summary["targets"]:
@@ -224,7 +230,7 @@ def test_stage3_optional_constraint_artifacts_remain_valid() -> None:
 
 def test_matlab_alignment_summary_preserves_hlf_diagnostic() -> None:
     summary_path = PROBE_DIR / "matlab_stage3_alignment" / "matlab_stage3_alignment_summary.json"
-    assert summary_path.exists(), f"missing MATLAB alignment summary: {summary_path}"
+    _require_local_probe_artifact(summary_path)
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
     by_target = {item["target_id"]: item for item in summary}
 
