@@ -415,20 +415,33 @@ def test_screen_input_preview_resolves_manual_ko_oe_candidates() -> None:
     assert preview["ko_reactions"][1]["status"] == "unresolved_reaction"
     assert preview["oe_genes"][0]["intervention_type"] == "OE_gene_proxy"
     assert preview["oe_genes"][0]["resolved_reactions_preview"] == ["R1", "R2"]
+    assert preview["oe_genes"][0]["simulation_basis"] == "reaction_level_capacity_proxy"
+    assert preview["oe_genes"][0]["capacity_effect"] == "reaction_capacity_proxy"
     assert preview["oe_genes"][1]["status"] == "unresolved_gene"
     assert preview["oe_reactions"][0]["status"] == "resolved"
     assert preview["oe_reactions"][1]["status"] == "unresolved_reaction"
     assert preview["gene_mapping"]["genes"][0]["gene_id"] == "G1"
     assert preview["gene_mapping"]["genes"][0]["reaction_count"] == 2
+    assert preview["gene_capabilities"][0]["gene_id"] == "G1"
+    assert preview["gene_capabilities"][0]["ko_support_status"] == "ko_runnable_gpr_gene_deletion"
+    assert preview["gene_capabilities"][0]["oe_support_status"] == "oe_runnable_reaction_proxy"
+    assert preview["ko_genes"][0]["ko_support_status"] == "ko_runnable_gpr_gene_deletion"
+    assert preview["oe_genes"][0]["oe_support_status"] == "oe_runnable_reaction_proxy"
+    assert preview["ko_genes"][0]["recommendation_tier"] == "model_executable"
+    assert preview["oe_genes"][0]["recommendation_tier"] == "model_executable"
+    assert preview["oe_genes"][0]["oe_reaction_proxy"] is True
+    assert "phenotype_evidence" in preview["ko_genes"][0]
+    assert "database_annotation_sources" in preview["gene_capabilities"][0]
+    assert preview["oe_genes"][0]["support_reason"]
     assert any(
         row["gene_id"] == "NO_SUCH_GENE"
         and row["mapping_level"] == "unresolved"
         and row["mapping_confidence"] == "unresolved"
         for row in preview["gene_mapping_rows"]
     )
-    assert "reaction-level OE proxy" in preview["semantics"]["OE_gene_proxy"]
+    assert "GPR-aware" in preview["semantics"]["OE_gene_proxy"]
     assert any("敲除基因未在模型中找到" in item for item in preview["warnings"])
-    assert any("过表达基因当前按 reaction-level OE proxy" in item for item in preview["warnings"])
+    assert any("GPR-aware planning + reaction-level proxy" in item for item in preview["warnings"])
 
     display_frame = gene_mapping_rows_for_display(preview["gene_mapping_rows"])
     assert {"基因", "反应", "分泌环节", "映射层级", "置信度", "解释"}.issubset(display_frame.columns)
@@ -438,12 +451,6 @@ def test_screen_input_preview_resolves_manual_ko_oe_candidates() -> None:
 def test_screen_preview_and_pipeline_share_engine_candidate_resolution_helpers() -> None:
     preview_path = REPO_ROOT / "app" / "services" / "pichia_screen_preview_service.py"
     pipeline_path = REPO_ROOT / "python_pichia" / "src" / "pcsec_pichia" / "pipeline.py"
-    shared_helpers = {
-        "resolve_oe_gene_reactions",
-        "split_existing_genes",
-        "split_existing_reactions",
-    }
-    preview_only_helpers = {"build_gene_perturbation_map"}
 
     def module_ast_for(path: Path) -> ast.Module:
         return ast.parse(path.read_text(encoding="utf-8"))
@@ -458,17 +465,24 @@ def test_screen_preview_and_pipeline_share_engine_candidate_resolution_helpers()
 
     preview_source = preview_path.read_text(encoding="utf-8")
     pipeline_source = pipeline_path.read_text(encoding="utf-8")
+    planning_source = (REPO_ROOT / "python_pichia" / "src" / "pcsec_pichia" / "screens" / "planning.py").read_text(
+        encoding="utf-8"
+    )
     preview_ast = module_ast_for(preview_path)
     preview_names = {node.id for node in ast.walk(preview_ast) if isinstance(node, ast.Name)}
     preview_attributes = {node.attr for node in ast.walk(preview_ast) if isinstance(node, ast.Attribute)}
 
-    assert (shared_helpers | preview_only_helpers).issubset(imported_names(preview_path, "pcsec_pichia.screens"))
-    assert shared_helpers.issubset(imported_names(pipeline_path, "pcsec_pichia.screens"))
+    assert "build_screen_plan" in imported_names(preview_path, "pcsec_pichia.screens.planning")
+    assert "build_screen_plan" in imported_names(pipeline_path, "pcsec_pichia.screens.planning")
+    assert {"plan_gene_overexpression", "split_existing_genes", "split_existing_reactions"}.isdisjoint(
+        imported_names(preview_path, "pcsec_pichia.screens")
+    )
     assert "import re" not in preview_source
     assert "gene_index" not in preview_names | preview_attributes
     assert "gr_rules" not in preview_names | preview_attributes
     assert "x\\(" not in preview_source
-    assert "过表达基因当前按 reaction-level OE proxy" in pipeline_source
+    assert "_build_screen_plan" not in pipeline_source
+    assert "过表达基因先进行 GPR-aware 规划" in planning_source
 
 
 def test_app_gene_catalog_facade_reuses_formal_engine_catalog() -> None:

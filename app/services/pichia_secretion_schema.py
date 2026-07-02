@@ -35,6 +35,7 @@ class SecretionRunRequest:
     oe_reaction_ids: tuple[str, ...] = ()
     ko_reaction_ids: tuple[str, ...] = ()
     screen_candidate_limit: int = 20
+    enable_gene_rule_overlay: bool = False
     ko_candidates: tuple[str, ...] = ()
     oe_candidates: tuple[str, ...] = ()
     growth_points: tuple[float, ...] = (0.10,)

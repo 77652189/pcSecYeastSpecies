@@ -4,7 +4,12 @@ import json
 from pathlib import Path
 from typing import Any
 
-from pcsec_pichia.analysis import analyze_target_protein_cost, summarize_protein_cost_analysis
+from pcsec_pichia.analysis import (
+    analyze_target_protein_cost,
+    analyze_yield_improvement_candidates,
+    summarize_protein_cost_analysis,
+    summarize_yield_improvement_recommendations,
+)
 from pcsec_pichia.alignment import (
     build_alignment_summary,
     hlf_project_710_known_matlab_compatibility_exceptions,
@@ -27,6 +32,14 @@ from pcsec_pichia.screens import (
     split_existing_reactions,
 )
 from pcsec_pichia.secretion_plan import build_secretion_plan
+from pcsec_pichia.screens.planning import build_screen_plan
+from pcsec_pichia.services.gene_evidence import (
+    DEFAULT_GENE_EVIDENCE_CACHE,
+    evidence_for_gene,
+    load_gene_evidence_cache,
+    recommendation_tier_for_candidate,
+)
+from pcsec_pichia.services.gene_catalog import build_lightweight_secretion_gene_evidence
 from pcsec_pichia.simulation import run_growth_tradeoff, solve_secretion_capacity
 from pcsec_pichia.targets import (
     TargetSpec,
@@ -89,7 +102,13 @@ def run_pichia_secretion_simulation(
         write_ribosome_translation_constraint=request.enable_ribosome_translation_constraint,
         write_misfolding_constraints=request.enable_misfolding_constraint,
     )
-    screen_plan = _build_screen_plan(inputs.prepared_model, request)
+    evidence_by_gene = load_gene_evidence_cache(root / DEFAULT_GENE_EVIDENCE_CACHE)
+    screen_plan = build_screen_plan(
+        inputs.prepared_model,
+        request,
+        inputs.secretory.complex_subunits,
+        evidence_by_gene=evidence_by_gene,
+    )
 
     # Keep smoke screens sequential so shared model/enzyme inputs stay easy to
     # reason about while the pipeline is still draft-alignment code.
@@ -168,6 +187,15 @@ def run_pichia_secretion_simulation(
                         baseline_objective_value=oe_reaction.baseline_objective_value)
         for rid in screen_plan["unresolved_oe_reaction_ids"]))
     screens_list = [ko, ko_reaction, oe_gene, oe_reaction]
+    screens_list = [_annotate_gene_evidence(result) for result in screens_list]
+    candidate_rows = tuple(row for result in screens_list for row in result.rows)
+    yield_recommendations = analyze_yield_improvement_candidates(
+        candidate_rows,
+        target_id=target.target_id,
+        baseline_objective=simulation.objective_value,
+        baseline_secretion_flux=simulation.secretion_flux,
+        curated_gene_evidence=tuple(build_lightweight_secretion_gene_evidence(model)),
+    )
     report = write_simulation_outputs(
         simulation,
         tradeoff,
@@ -242,56 +270,6 @@ def run_pichia_secretion_simulation(
     )
 
 
-def _build_screen_plan(model: CobraModel, request: PichiaSimulationRequest) -> dict[str, Any]:
-    limit = _candidate_limit(request.screen_candidate_limit)
-    requested_ko = _dedupe_nonempty(request.ko_gene_ids)[:limit]
-    requested_ko_rxns = _dedupe_nonempty(request.ko_reaction_ids)[:limit]
-    requested_oe_genes = _dedupe_nonempty(request.oe_gene_ids)[:limit]
-    requested_oe_reactions = _dedupe_nonempty(request.oe_reaction_ids)[:limit]
-    has_user_ko = bool(requested_ko or requested_ko_rxns)
-    has_user_oe = bool(requested_oe_genes or requested_oe_reactions)
-
-    ko_gene_ids, unresolved_ko = split_existing_genes(model, tuple(requested_ko))
-    if not has_user_ko and limit > 0:
-        ko_gene_ids = default_ko_genes(model, 1)
-
-    # Reaction-level KO IDs (for complex KO, no gene fallback needed)
-    existing_ko_rxns, unresolved_ko_rxns = split_existing_reactions(model, requested_ko_rxns)
-
-    resolved_oe_from_genes, oe_gene_by_reaction, unresolved_oe_genes, gene_warnings = resolve_oe_gene_reactions(
-        model, requested_oe_genes, limit
-    )
-    existing_oe_reactions, unresolved_oe_reactions = split_existing_reactions(model, requested_oe_reactions)
-    if not has_user_oe and limit > 0:
-        existing_oe_reactions = default_oe_reactions(model, 1)
-
-    warnings = list(gene_warnings)
-    warnings.extend(f"敲除基因未在模型中找到：{gene_id}" for gene_id in unresolved_ko)
-    warnings.extend(f"敲除反应未在模型中找到：{reaction_id}" for reaction_id in unresolved_ko_rxns)
-    warnings.extend(f"过表达基因无法解析到模型反应：{gene_id}" for gene_id in unresolved_oe_genes)
-    warnings.extend(f"过表达反应未在模型中找到：{reaction_id}" for reaction_id in unresolved_oe_reactions)
-    if requested_oe_genes:
-        warnings.append("过表达基因当前按 reaction-level OE proxy 运行：先解析到该基因参与的反应，再逐个模拟反应容量上调。")
-
-    return {
-        "candidate_limit": limit,
-        "requested_ko_gene_ids": tuple(requested_ko),
-        "requested_ko_rxn_ids": tuple(requested_ko_rxns),
-        "requested_oe_gene_ids": tuple(requested_oe_genes),
-        "requested_oe_reaction_ids": tuple(requested_oe_reactions),
-        "ko_gene_ids": ko_gene_ids[:limit],
-        "unresolved_ko_gene_ids": unresolved_ko,
-        "ko_reaction_ids": existing_ko_rxns[:limit],
-        "unresolved_ko_reaction_ids": unresolved_ko_rxns,
-        "oe_gene_reaction_ids": resolved_oe_from_genes[:limit],
-        "oe_gene_by_reaction": oe_gene_by_reaction,
-        "unresolved_oe_gene_ids": unresolved_oe_genes,
-        "oe_reaction_ids": existing_oe_reactions[:limit],
-        "unresolved_oe_reaction_ids": unresolved_oe_reactions,
-        "warnings": warnings,
-    }
-
-
 def _append_unresolved_rows(result: ScreenResult, rows: tuple[dict[str, Any], ...]) -> ScreenResult:
     if not rows:
         return result
@@ -308,6 +286,104 @@ def _append_unresolved_rows(result: ScreenResult, rows: tuple[dict[str, Any], ..
         matlab_alignment_status=result.matlab_alignment_status,
     )
 
+
+def _annotate_gene_evidence(
+    result: ScreenResult,
+    evidence_by_gene: dict[str, Any] | None = None,
+) -> ScreenResult:
+    evidence_by_gene = load_gene_evidence_cache() if evidence_by_gene is None else evidence_by_gene
+    rows: list[dict[str, Any]] = []
+    for row in result.rows:
+        gene_id = str(row.get("canonical_gene_id") or row.get("gene_id") or row.get("input_gene_id") or "").strip()
+        record = evidence_for_gene(gene_id, evidence_by_gene)
+        if record is None:
+            rows.append(
+                {
+                    **row,
+                    "standard_gene_symbol": "",
+                    "display_name": row.get("input_gene_id") or row.get("gene_id") or row.get("candidate_id"),
+                    "protein_name": "",
+                    "function_annotation": "",
+                    "external_ids": {},
+                    "ec_numbers": [],
+                    "go_terms": [],
+                    "ortholog_symbol": "",
+                    "evidence_sources": [],
+                    "evidence_confidence": "low_model_only",
+                    "wet_lab_readiness": "model_only_not_experiment_ready",
+                    **_candidate_evidence_tier_fields(row, None, result.target_id),
+                }
+            )
+            continue
+        rows.append(
+            {
+                **row,
+                "standard_gene_symbol": record.standard_gene_symbol,
+                "display_name": record.display_name,
+                "protein_name": record.protein_name,
+                "function_annotation": record.function_annotation,
+                "external_ids": record.external_ids or {},
+                "ec_numbers": list(record.ec_numbers),
+                "go_terms": list(record.go_terms),
+                "ortholog_symbol": record.ortholog_symbol,
+                "evidence_sources": list(record.evidence_sources),
+                "evidence_confidence": record.evidence_confidence,
+                "wet_lab_readiness": record.wet_lab_readiness,
+                **_candidate_evidence_tier_fields(row, record, result.target_id),
+            }
+        )
+    return ScreenResult(
+        target_id=result.target_id,
+        screen_type=result.screen_type,
+        success=result.success,
+        candidate_count=result.candidate_count,
+        rows=tuple(rows),
+        constraint_counts=result.constraint_counts,
+        baseline_objective_value=result.baseline_objective_value,
+        result_status=result.result_status,
+        matlab_alignment_status=result.matlab_alignment_status,
+    )
+
+
+def _candidate_evidence_tier_fields(
+    row: dict[str, Any],
+    record: Any | None,
+    target_id: str,
+) -> dict[str, Any]:
+    intervention_type = str(row.get("intervention_type") or row.get("screen_type") or "")
+    gene_id = str(row.get("canonical_gene_id") or row.get("gene_id") or row.get("input_gene_id") or "")
+    status = str(row.get("status") or "")
+    resolved = not status.startswith("unresolved")
+    model_gpr_executable = (
+        intervention_type == "KO"
+        and str(row.get("ko_support_status") or "") == "ko_runnable_gpr_gene_deletion"
+    )
+    oe_reaction_proxy = (
+        intervention_type in {"OE_gene_proxy", "OE_reaction"}
+        and resolved
+        and status
+        not in {"not_run_complex_subunit_limited", "not_run_gene_oe_proxy", "not_run_no_gpr_effect"}
+    )
+    aliases = tuple(str(row.get(key) or "") for key in ("input_gene_id", "display_name", "standard_gene_symbol"))
+    tier, reason, phenotype = recommendation_tier_for_candidate(
+        gene_id=gene_id,
+        intervention_type=intervention_type,
+        target_protein_context=target_id,
+        model_gpr_executable=model_gpr_executable,
+        oe_reaction_proxy=oe_reaction_proxy,
+        resolved=resolved,
+        database_annotation_available=record is not None,
+        aliases=aliases,
+    )
+    return {
+        "database_annotation_sources": list(record.evidence_sources) if record else [],
+        "database_annotation_confidence": record.evidence_confidence if record else "",
+        "model_gpr_executable": model_gpr_executable,
+        "oe_reaction_proxy": oe_reaction_proxy,
+        "phenotype_evidence": phenotype.to_dict() if phenotype else {},
+        "recommendation_tier": tier,
+        "recommendation_tier_reason": reason,
+    }
 
 def _unresolved_row(
     target_id: str,

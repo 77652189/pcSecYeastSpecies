@@ -11,12 +11,14 @@ import pytest
 from pcsec_pichia.engines.base import PichiaSimulationRequest, PichiaSimulationRunResult
 from pcsec_pichia.pipeline import (
     _alignment_request_for_target,
-    _build_screen_plan,
+    _annotate_gene_evidence,
     _build_pipeline_report,
     _target_metadata,
     run_pichia_secretion_simulation,
 )
-from pcsec_pichia.screens import resolve_oe_gene_reactions, split_existing_genes
+from pcsec_pichia.screens import ScreenResult, resolve_oe_gene_reactions, split_existing_genes
+from pcsec_pichia.screens.planning import build_screen_plan
+from pcsec_pichia.services.gene_evidence import GeneExternalEvidence
 from pcsec_pichia.targets import target_spec_from_mapping
 
 
@@ -131,6 +133,49 @@ def test_gene_resolution_splits_existing_and_unresolved_ids() -> None:
     assert unresolved == ("NO_SUCH_GENE",)
 
 
+def test_pipeline_gene_evidence_annotation_uses_injected_cache_when_cwd_differs(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    result = ScreenResult(
+        target_id="OPN_ALPHA_FULL_PROJECT",
+        screen_type="knockout",
+        success=True,
+        candidate_count=1,
+        rows=(
+            {
+                "gene_id": "G1",
+                "input_gene_id": "ALIAS1",
+                "candidate_id": "G1",
+                "intervention_type": "KO",
+                "ko_support_status": "ko_runnable_gpr_gene_deletion",
+                "success": True,
+                "status": "optimal",
+            },
+        ),
+        constraint_counts={},
+        baseline_objective_value=1.0,
+        result_status="draft",
+        matlab_alignment_status="pending",
+    )
+    evidence = {
+        "G1": GeneExternalEvidence(
+            gene_id="G1",
+            canonical_gene_id="G1",
+            aliases=("ALIAS1",),
+            evidence_sources=("offline_cache",),
+            evidence_confidence="high_exact_locus_tag",
+        )
+    }
+
+    annotated = _annotate_gene_evidence(result, evidence_by_gene=evidence)
+
+    row = annotated.rows[0]
+    assert row["database_annotation_sources"] == ["offline_cache"]
+    assert row["database_annotation_confidence"] == "high_exact_locus_tag"
+    assert row["recommendation_tier"] == "model_executable"
+
 def test_screen_plan_uses_manual_candidates_without_solving() -> None:
     class TinyModel:
         rxns = ["R1", "R2", "R3"]
@@ -149,7 +194,7 @@ def test_screen_plan_uses_manual_candidates_without_solving() -> None:
         screen_candidate_limit=2,
     )
 
-    plan = _build_screen_plan(TinyModel(), request)
+    plan = build_screen_plan(TinyModel(), request)
 
     assert plan["ko_gene_ids"] == ["G1"]
     assert plan["unresolved_ko_gene_ids"] == ("NO_SUCH_KO_GENE",)

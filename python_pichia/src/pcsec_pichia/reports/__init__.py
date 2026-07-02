@@ -253,6 +253,37 @@ def _protein_cost_markdown_lines(protein_cost: dict[str, Any]) -> list[str]:
     return lines
 
 
+def _small_markdown_table(title: str, rows: Any, limit: int = 8) -> list[str]:
+    rows = list(rows or [])[:limit]
+    if not rows:
+        return []
+    keys = list(rows[0].keys())[:6]
+    lines = ["", f"#### {title}", "", "| " + " | ".join(keys) + " |", "| " + " | ".join("---" for _ in keys) + " |"]
+    for row in rows:
+        lines.append("| " + " | ".join(str(row.get(key, "")) for key in keys) + " |")
+    return lines
+
+def _yield_recommendation_markdown_lines(payload: dict[str, Any]) -> list[str]:
+    recommended = payload.get("recommended_candidates") or []
+    counts = payload.get("summary_counts") or {}
+    lines = [
+        "## 目标蛋白产量提升推荐",
+        "",
+        "- 当前推荐是 Python corrected draft 模型内决策排序，不代表真实发酵产量或实验成功率。",
+        "- `gene-level KO` 与 `reaction-level OE proxy` 是不同证据层级；OE proxy 不能直接等同于湿实验基因过表达。",
+        f"- 推荐状态: `{payload.get('result_status')}`.",
+        f"- 候选总数: `{payload.get('candidate_count')}`.",
+        f"- 分类计数: `{counts}`.",
+        "",
+    ]
+    lines.extend(_small_markdown_table("推荐候选 Top list", recommended, limit=10))
+    warnings = payload.get("warnings") or []
+    if warnings:
+        lines.extend(["", "推荐提示:"])
+        lines.extend(f"- {warning}" for warning in warnings)
+    lines.append("")
+    return lines
+
 def build_candidate_interpretation(candidate_rows: Iterable[dict[str, Any]], limit: int = 5) -> dict[str, Any]:
     rows = [normalize_candidate_explanation_row(row) for row in candidate_rows]
     counts: dict[str, int] = {}

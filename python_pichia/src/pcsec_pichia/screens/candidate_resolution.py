@@ -5,19 +5,19 @@ from typing import Any
 
 
 def reactions_for_gene(model: Any, gene_id: str) -> list[str]:
-    gene_index = getattr(model, "gene_index", {})
+    gene_index = getattr(model, "gene_index", {}) or {
+        str(gene): idx for idx, gene in enumerate(getattr(model, "genes", ()))
+    }
     if gene_id not in gene_index:
         return []
     gene_number = int(gene_index[gene_id]) + 1
     gene_pattern = re.compile(rf"(?<![A-Za-z0-9_.-]){re.escape(gene_id)}(?![A-Za-z0-9_.-])")
     reactions: list[str] = []
-    for reaction_id, rule, gr_rule in zip(
-        getattr(model, "rxns", []),
-        getattr(model, "rules", []),
-        getattr(model, "gr_rules", []),
-    ):
-        rule_text = str(rule or "")
-        gr_rule_text = str(gr_rule or "")
+    rules = list(getattr(model, "rules", []) or [])
+    gr_rules = list(getattr(model, "gr_rules", []) or [])
+    for idx, reaction_id in enumerate(getattr(model, "rxns", []) or []):
+        rule_text = str(rules[idx] if idx < len(rules) else "")
+        gr_rule_text = str(gr_rules[idx] if idx < len(gr_rules) else "")
         rule_matches = any(int(match.group(1)) == gene_number for match in re.finditer(r"x\((\d+)\)", rule_text))
         gr_rule_matches = bool(gene_pattern.search(gr_rule_text))
         if rule_matches or gr_rule_matches:

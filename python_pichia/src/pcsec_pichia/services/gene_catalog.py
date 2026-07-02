@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Literal
 
 
@@ -438,46 +439,276 @@ def get_ko_genes_for_selection(selected_names: list[str]) -> list[str]:
     return genes
 
 
+_SECRETION_GENE_EVIDENCE_CACHE: list[dict[str, object]] | None = None
+
+
+def build_secretion_gene_evidence_map(model=None) -> list[dict[str, object]]:
+    """Map curated secretion-engineering names to model GPR genes and reaction proxies.
+
+    This is an evidence layer, not a new perturbation algorithm. A curated name such as
+    PDI1 can be present as a MATLAB/secretory-pathway reaction proxy while still missing
+    from ``model.genes`` and therefore not being executable as a gene-level GPR KO/OE.
+    """
+    global _SECRETION_GENE_EVIDENCE_CACHE
+    use_cache = model is None
+    if use_cache and _SECRETION_GENE_EVIDENCE_CACHE is not None:
+        return _SECRETION_GENE_EVIDENCE_CACHE
+    if model is None:
+        from pcsec_pichia.loading import load_pcsec_pichia_inputs, repo_root
+
+        inputs = load_pcsec_pichia_inputs(repo_root())
+        model = inputs.prepared_model
+    full_genes = load_full_model_genes(model)
+    full_genes_by_id = {str(row.get("gene_id") or ""): row for row in full_genes}
+    rxns = [str(rxn_id) for rxn_id in getattr(model, "rxns", ())]
+    reaction_index = {rxn_id: idx for idx, rxn_id in enumerate(rxns)}
+    rules = list(getattr(model, "rules", ()) or ())
+    gr_rules = list(getattr(model, "gr_rules", ()) or ())
+    rows: list[dict[str, object]] = []
+    for entry in SECRETION_GENE_CATALOG:
+        model_gene = _model_gene_row_for_curated_entry(entry, full_genes, full_genes_by_id)
+        proxy_reactions = [value for value in (entry.ko_reaction_id, entry.oe_reaction_id) if value]
+        reaction_evidence = [
+            _reaction_proxy_evidence(reaction_id, reaction_index, rules=rules, gr_rules=gr_rules)
+            for reaction_id in dict.fromkeys(proxy_reactions)
+        ]
+        has_gpr_gene = bool(model_gene)
+        has_proxy = bool(reaction_evidence)
+        proxy_exists = any(bool(item["exists_in_model"]) for item in reaction_evidence)
+        proxy_has_gpr_rule = any(bool(item["has_gpr_rule"]) for item in reaction_evidence)
+        if has_gpr_gene:
+            mapping_status = "model_gpr_gene_available"
+            recommended_use = "gene_level_gpr_perturbation"
+        elif proxy_exists:
+            mapping_status = "reaction_proxy_only"
+            recommended_use = "reaction_level_proxy_requires_locus_review"
+        elif has_proxy:
+            mapping_status = "declared_proxy_missing_in_model"
+            recommended_use = "manual_review_required"
+        else:
+            mapping_status = "literature_name_only"
+            recommended_use = "manual_review_required"
+        rows.append(
+            {
+                "common_name": entry.common_name,
+                "category": entry.category,
+                "description": entry.description,
+                "curated_evidence": entry.evidence,
+                "homolog_note": entry.homolog_note,
+                "declared_model_gene_id": entry.gene_id,
+                "mapped_model_gene_id": str(model_gene.get("gene_id") or "") if model_gene else "",
+                "mapped_display_name": str(model_gene.get("display_name") or model_gene.get("protein_name") or "") if model_gene else "",
+                "mapped_aliases": list(model_gene.get("aliases") or []) if model_gene else [],
+                "mapping_status": mapping_status,
+                "recommended_use": recommended_use,
+                "ko_reaction_id": entry.ko_reaction_id,
+                "oe_reaction_id": entry.oe_reaction_id,
+                "reaction_evidence": reaction_evidence,
+                "proxy_exists_in_model": proxy_exists,
+                "proxy_has_gpr_rule": proxy_has_gpr_rule,
+                "gene_level_ready": has_gpr_gene,
+                "reaction_proxy_ready": proxy_exists,
+            }
+        )
+    if use_cache:
+        _SECRETION_GENE_EVIDENCE_CACHE = rows
+    return rows
+
+
+def search_secretion_gene_evidence(query: str = "", model=None) -> list[dict[str, object]]:
+    """Search curated secretion gene evidence mapping rows."""
+    rows = build_secretion_gene_evidence_map(model)
+    q = str(query or "").strip().lower()
+    if not q:
+        return rows
+    return [row for row in rows if _secretion_gene_evidence_matches(row, q)]
+
+
+def build_lightweight_secretion_gene_evidence(model=None) -> list[dict[str, object]]:
+    """Build curated evidence rows without the full 1025-gene capability scan."""
+    gene_ids = {str(gene_id) for gene_id in getattr(model, "genes", ())} if model is not None else set()
+    reaction_ids = {str(rxn_id) for rxn_id in getattr(model, "rxns", ())} if model is not None else set()
+    rows: list[dict[str, object]] = []
+    for entry in SECRETION_GENE_CATALOG:
+        proxy_reactions = [value for value in (entry.ko_reaction_id, entry.oe_reaction_id) if value]
+        proxy_exists = any(reaction_id in reaction_ids for reaction_id in proxy_reactions) if reaction_ids else bool(proxy_reactions)
+        has_gpr_gene = bool(entry.gene_id and (not gene_ids or entry.gene_id in gene_ids))
+        if has_gpr_gene:
+            mapping_status = "model_gpr_gene_available"
+            recommended_use = "gene_level_gpr_perturbation"
+        elif proxy_exists:
+            mapping_status = "reaction_proxy_only"
+            recommended_use = "reaction_level_proxy_requires_locus_review"
+        elif proxy_reactions:
+            mapping_status = "declared_proxy_missing_in_model"
+            recommended_use = "manual_review_required"
+        else:
+            mapping_status = "literature_name_only"
+            recommended_use = "manual_review_required"
+        rows.append(
+            {
+                "common_name": entry.common_name,
+                "category": entry.category,
+                "description": entry.description,
+                "curated_evidence": entry.evidence,
+                "homolog_note": entry.homolog_note,
+                "declared_model_gene_id": entry.gene_id,
+                "mapped_model_gene_id": entry.gene_id if has_gpr_gene else "",
+                "mapped_display_name": entry.common_name if has_gpr_gene else "",
+                "mapped_aliases": (),
+                "mapping_status": mapping_status,
+                "recommended_use": recommended_use,
+                "ko_reaction_id": entry.ko_reaction_id,
+                "oe_reaction_id": entry.oe_reaction_id,
+                "reaction_evidence": tuple(
+                    {
+                        "reaction_id": reaction_id,
+                        "exists_in_model": reaction_id in reaction_ids if reaction_ids else True,
+                        "reaction_index_1based": None,
+                        "has_gpr_rule": False,
+                        "rule": "",
+                        "gr_rule": "",
+                    }
+                    for reaction_id in dict.fromkeys(proxy_reactions)
+                ),
+                "proxy_exists_in_model": proxy_exists,
+                "proxy_has_gpr_rule": False,
+                "gene_level_ready": has_gpr_gene,
+                "reaction_proxy_ready": proxy_exists,
+            }
+        )
+    return rows
+
+
+def _model_gene_row_for_curated_entry(
+    entry: SecretionGeneEntry,
+    full_genes: list[dict[str, object]],
+    full_genes_by_id: dict[str, dict[str, object]],
+) -> dict[str, object] | None:
+    if entry.gene_id and entry.gene_id in full_genes_by_id:
+        return full_genes_by_id[entry.gene_id]
+    tokens = _curated_name_tokens(entry.common_name)
+    for row in full_genes:
+        searchable = {
+            str(row.get("gene_id") or ""),
+            str(row.get("canonical_gene_id") or ""),
+            str(row.get("standard_gene_symbol") or ""),
+            str(row.get("display_name") or ""),
+            str(row.get("protein_name") or ""),
+            str(row.get("ortholog_symbol") or ""),
+            *[str(alias) for alias in row.get("aliases") or []],
+        }
+        lowered = {item.lower() for item in searchable if item}
+        if any(token.lower() in lowered for token in tokens):
+            return row
+    return None
+
+
+def _curated_name_tokens(common_name: str) -> list[str]:
+    raw = str(common_name or "").replace("(", " ").replace(")", " ")
+    tokens: list[str] = []
+    for chunk in raw.replace("/", " ").replace(",", " ").split():
+        token = chunk.strip()
+        if token and token not in tokens:
+            tokens.append(token)
+    return tokens
+
+
+def _reaction_proxy_evidence(
+    reaction_id: str,
+    reaction_index: dict[str, int],
+    *,
+    rules: list[object],
+    gr_rules: list[object],
+) -> dict[str, object]:
+    index = reaction_index.get(reaction_id)
+    rule = str(rules[index]) if index is not None and index < len(rules) else ""
+    gr_rule = str(gr_rules[index]) if index is not None and index < len(gr_rules) else ""
+    return {
+        "reaction_id": reaction_id,
+        "exists_in_model": index is not None,
+        "reaction_index_1based": index + 1 if index is not None else None,
+        "has_gpr_rule": bool(rule.strip() or gr_rule.strip()),
+        "rule": rule,
+        "gr_rule": gr_rule,
+    }
+
+
+def _secretion_gene_evidence_matches(row: dict[str, object], query: str) -> bool:
+    reaction_text = " ".join(
+        str(item.get("reaction_id") or "")
+        for item in row.get("reaction_evidence") or []
+        if isinstance(item, dict)
+    )
+    fields = (
+        row.get("common_name"),
+        row.get("category"),
+        row.get("description"),
+        row.get("curated_evidence"),
+        row.get("declared_model_gene_id"),
+        row.get("mapped_model_gene_id"),
+        row.get("mapped_display_name"),
+        " ".join(str(alias) for alias in row.get("mapped_aliases") or []),
+        row.get("mapping_status"),
+        row.get("recommended_use"),
+        row.get("ko_reaction_id"),
+        row.get("oe_reaction_id"),
+        reaction_text,
+    )
+    return any(query in str(value or "").lower() for value in fields)
+
+
 _FULL_GENE_CACHE: list[dict[str, object]] | None = None
 
 
-def load_full_model_genes(model=None) -> list[dict[str, object]]:
+def clear_full_model_gene_cache() -> None:
     global _FULL_GENE_CACHE
-    if _FULL_GENE_CACHE is not None:
+    global _SECRETION_GENE_EVIDENCE_CACHE
+    _FULL_GENE_CACHE = None
+    _SECRETION_GENE_EVIDENCE_CACHE = None
+
+
+def load_full_model_genes(
+    model=None,
+    complex_subunits: dict[str, list[dict[str, object]]] | None = None,
+    evidence_cache_path: Path | str | None = None,
+) -> list[dict[str, object]]:
+    global _FULL_GENE_CACHE
+    use_cache = model is None and complex_subunits is None and evidence_cache_path is None
+    if use_cache and _FULL_GENE_CACHE is not None:
         return _FULL_GENE_CACHE
 
-    import re
     if model is None:
-        from pcsec_pichia.loading import load_pcsec_pichia_model, repo_root
-        model = load_pcsec_pichia_model(repo_root())
+        from pcsec_pichia.loading import load_pcsec_pichia_inputs, repo_root
+        inputs = load_pcsec_pichia_inputs(repo_root())
+        model = inputs.prepared_model
+        complex_subunits = inputs.secretory.complex_subunits
     from pcsec_pichia.screens import classify_secretory_process
+    from pcsec_pichia.screens import build_gene_capability_profile
+    from pcsec_pichia.screens import reactions_for_gene
+    from pcsec_pichia.services.gene_evidence import evidence_for_gene, load_gene_evidence_cache
 
-    # Build gene→reactions mapping in one pass
-    gene_map: dict[str, dict[str, object]] = {g: {"reactions": [], "processes": set()} for g in model.genes}
-    gene_id_set: set[str] = set(model.genes)
+    evidence_by_gene = load_gene_evidence_cache(evidence_cache_path)
 
-    for rxn_idx, rxn_id in enumerate(model.rxns):
-        rule = model.rules[rxn_idx] if rxn_idx < len(model.rules) else ""
-        gr_rule = model.gr_rules[rxn_idx] if rxn_idx < len(model.gr_rules) else ""
-        process = classify_secretory_process(rxn_id)
-        # Extract gene indices from rule
-        for match in re.finditer(r"x\((\d+)\)", rule):
-            gene_idx = int(match.group(1)) - 1
-            if 0 <= gene_idx < len(model.genes):
-                gid = model.genes[gene_idx]
-                data = gene_map[gid]
-                data["reactions"].append(rxn_id)
-                data["processes"].add(process)
-        # Only check gr_rule if it contains any known gene ID
-        if gr_rule and gene_id_set:
-            for gid in gene_id_set:
-                if gid in gr_rule:
-                    gene_map[gid]["reactions"].append(rxn_id)
-                    gene_map[gid]["processes"].add(process)
+    process_by_reaction = {str(rxn_id): classify_secretory_process(str(rxn_id)) for rxn_id in model.rxns}
+    gene_map: dict[str, dict[str, object]] = {}
+    for gene_id in model.genes:
+        matched = reactions_for_gene(model, str(gene_id))
+        gene_map[str(gene_id)] = {
+            "reactions": matched,
+            "processes": {process_by_reaction.get(str(reaction_id), "unknown") for reaction_id in matched},
+        }
 
     results = []
     for gene_idx, gene_id in enumerate(model.genes):
         data = gene_map[gene_id]
+        external_evidence = evidence_for_gene(gene_id, evidence_by_gene)
+        capability = build_gene_capability_profile(
+            model,
+            gene_id,
+            complex_subunits=complex_subunits,
+            aliases=external_evidence.aliases if external_evidence else (),
+        ).to_dict()
         procs: set[str] = data["processes"]
         if procs - {"unknown", "metabolic_or_other"}:
             primary = "分泌相关"
@@ -487,14 +718,41 @@ def load_full_model_genes(model=None) -> list[dict[str, object]]:
             primary = "未分类"
         results.append({
             "gene_id": gene_id,
+            "canonical_gene_id": capability["canonical_gene_id"],
+            "aliases": capability["aliases"],
             "gene_index": gene_idx + 1,
             "n_reactions": len(data["reactions"]),
             "processes": ", ".join(sorted(procs)) if procs else "unknown",
             "primary_category": primary,
             "sample_reactions": data["reactions"][:5],
+            "affected_reactions": capability["affected_reactions"],
+            "inactive_reactions_if_ko": capability["inactive_reactions_if_ko"],
+            "oe_executable_reactions": capability["oe_executable_reactions"],
+            "oe_explain_only_reactions": capability["oe_explain_only_reactions"],
+            "gpr_rules": capability["gpr_rules"],
+            "gpr_role": capability["gpr_role"],
+            "ko_support_status": capability["ko_support_status"],
+            "oe_support_status": capability["oe_support_status"],
+            "support_reason": capability["support_reason"],
+            "missing_information": capability["missing_information"],
+            "confidence": capability["confidence"],
+            "external_ids": (external_evidence.external_ids or {}) if external_evidence else {},
+            "standard_gene_symbol": external_evidence.standard_gene_symbol if external_evidence else "",
+            "display_name": external_evidence.display_name if external_evidence else "",
+            "protein_name": external_evidence.protein_name if external_evidence else "",
+            "function_annotation": external_evidence.function_annotation if external_evidence else "",
+            "subcellular_location": external_evidence.subcellular_location if external_evidence else "",
+            "ec_numbers": list(external_evidence.ec_numbers) if external_evidence else [],
+            "go_terms": list(external_evidence.go_terms) if external_evidence else [],
+            "ortholog_symbol": external_evidence.ortholog_symbol if external_evidence else "",
+            "wet_lab_readiness": external_evidence.wet_lab_readiness if external_evidence else "model_only_not_experiment_ready",
+            "evidence_sources": list(external_evidence.evidence_sources) if external_evidence else [],
+            "evidence_confidence": external_evidence.evidence_confidence if external_evidence else "",
+            "last_refreshed": external_evidence.last_refreshed if external_evidence else "",
         })
 
-    _FULL_GENE_CACHE = results
+    if use_cache:
+        _FULL_GENE_CACHE = results
     return results
 
 
@@ -504,7 +762,17 @@ def search_full_catalog(query: str, model=None) -> list[dict[str, object]]:
     all_genes = load_full_model_genes(model)
     if not q:
         return all_genes
-    return [g for g in all_genes if q in g["gene_id"].lower() or q in g["primary_category"]]
+    return [
+        g
+        for g in all_genes
+        if q in str(g["gene_id"]).lower()
+        or q in str(g.get("primary_category") or "").lower()
+        or q in " ".join(str(item) for item in g.get("aliases") or ()).lower()
+        or q in str(g.get("protein_name") or "").lower()
+        or q in str(g.get("function_annotation") or "").lower()
+        or q in str(g.get("ko_support_status") or "").lower()
+        or q in str(g.get("oe_support_status") or "").lower()
+    ]
 
 
 __all__ = [
@@ -526,7 +794,11 @@ __all__ = [
     "get_ko_genes_for_selection",
     "get_ko_reactions_for_selection",
     "get_oe_reactions_for_selection",
+    "build_lightweight_secretion_gene_evidence",
+    "build_secretion_gene_evidence_map",
+    "clear_full_model_gene_cache",
     "load_full_model_genes",
     "search_catalog",
+    "search_secretion_gene_evidence",
     "search_full_catalog",
 ]
