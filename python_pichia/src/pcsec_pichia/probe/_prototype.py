@@ -170,6 +170,7 @@ class SolveResult:
     objective_value: float | None
     message: str
     fluxes: dict[str, float]
+    sensitivity: dict[str, tuple[float, ...]] | None = None
 
 
 @dataclass(frozen=True)
@@ -798,6 +799,7 @@ def solve_maximize(model: CobraModel, objective_reaction: str, key_reactions: It
         objective_value=float(-result.fun) if result.success else None,
         message=str(result.message),
         fluxes=fluxes,
+        sensitivity=_linprog_sensitivity(result) if result.success else None,
     )
 
 
@@ -859,9 +861,26 @@ def solve_pcsec_maximize(
             objective_value=float(-result.fun) if result.success else None,
             message=str(result.message),
             fluxes=fluxes,
+            sensitivity=_linprog_sensitivity(result) if result.success else None,
         ),
         counts,
     )
+
+
+def _linprog_sensitivity(result) -> dict[str, tuple[float, ...]]:
+    return {
+        "eq_marginals": _marginal_tuple(getattr(getattr(result, "eqlin", None), "marginals", ())),
+        "ub_marginals": _marginal_tuple(getattr(getattr(result, "ineqlin", None), "marginals", ())),
+        "lower_marginals": _marginal_tuple(getattr(getattr(result, "lower", None), "marginals", ())),
+        "upper_marginals": _marginal_tuple(getattr(getattr(result, "upper", None), "marginals", ())),
+    }
+
+
+def _marginal_tuple(values) -> tuple[float, ...]:
+    try:
+        return tuple(float(value) for value in values)
+    except TypeError:
+        return ()
 
 
 def build_pcsec_constraint_matrices(

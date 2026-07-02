@@ -363,11 +363,84 @@ def test_markdown_report_renders_protein_cost_analysis_section() -> None:
             }
         ],
         "warnings": ["explanatory score only"],
+        "lp_attribution": {
+            "result_status": "draft_lp_sensitivity",
+            "objective_evidence": {
+                "objective_reaction": "r_OPN_ALPHA_FULL_PROJECT_exchange",
+                "secretion_flux": 0.006,
+            },
+            "dominant_constraint_blocks": [
+                {"block": "protein_mass", "sum_abs_marginal": 1.2, "row_count": 2},
+            ],
+            "top_constraint_marginals": [
+                {"block": "protein_mass", "row_index_1based": 1, "marginal": -1.2},
+            ],
+            "top_bound_marginals": [
+                {"reaction_id": "Ex_glc_D", "bound_type": "lower", "marginal": -0.5},
+            ],
+            "target_related_fluxes": [
+                {"reaction_id": "r_OPN_ALPHA_FULL_PROJECT_exchange", "flux": 0.006},
+            ],
+            "active_bound_counts": {"total_bound_marginal_nonzero": 1},
+            "warnings": ["draft lp sensitivity only"],
+        },
+        "cost_slope_compatibility": {
+            "enabled": True,
+            "success": True,
+            "result_status": "draft_matlab_compatible_cost_slope",
+            "secretion_ratio_policy": "capacity_fraction_ratios",
+            "capacity_reference": 2.0e-4,
+            "capacity_fractions": [0.10, 0.50],
+            "glucose_cost_slopes": [
+                {"mu": 0.1, "cost_key": "glucose_cost", "success": True, "slope": 123.0},
+            ],
+            "ribosome_cost_slopes": [],
+            "rows": [
+                {"mu": 0.1, "target_exchange_ratio": 5e-7, "glucose_cost": 1.0},
+            ],
+            "warnings": ["draft cost slope"],
+        },
     }
 
     markdown = build_markdown_report(summary)
 
     assert "## 目标蛋白成本分析" in markdown
     assert "draft_explanatory" in markdown
+    assert "draft_lp_sensitivity" in markdown
+    assert "draft_matlab_compatible_cost_slope" in markdown
+    assert "MATLAB-compatible" in markdown
+    assert "capacity_fraction_ratios" in markdown
+    assert "current corrected secretion capacity" in markdown
+    assert "LP 级归因证据" in markdown
     assert "translation" in markdown
     assert "不代表真实发酵产量" in markdown
+
+
+def test_markdown_report_renders_target_growth_analysis_section() -> None:
+    summary = build_summary_payload(_simulation_result("OPN_ALPHA_FULL_PROJECT"), None, ())
+    summary["target_growth_analysis"] = {
+        "result_status": "draft_explanatory",
+        "growth_sensitivity_label": "mixed",
+        "growth_sensitivity_reason": "contains_failed_or_missing_points",
+        "valid_point_count": 2,
+        "best_secretion_point": {"mu": 0.10},
+        "best_secretion_per_biomass_point": {"mu": 0.05},
+        "tradeoff_points": [
+            {
+                "mu": 0.05,
+                "success": True,
+                "secretion_flux": 0.004,
+                "secretion_per_biomass": 0.08,
+                "interpretation": "最高单位生物量分泌",
+            }
+        ],
+        "warnings": ["draft tradeoff only"],
+    }
+
+    markdown = build_markdown_report(summary)
+
+    assert "## 目标蛋白生长分析" in markdown
+    assert "draft_explanatory" in markdown
+    assert "mixed" in markdown
+    assert "contains_failed_or_missing_points" in markdown
+    assert "不代表真实发酵生长预测" in markdown

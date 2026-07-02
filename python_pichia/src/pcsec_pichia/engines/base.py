@@ -37,6 +37,11 @@ class PichiaSimulationRequest:
     oe_gene_ids: tuple[str, ...] = ()
     oe_reaction_ids: tuple[str, ...] = ()
     screen_candidate_limit: int = 20
+    enable_cost_slope_compatibility: bool = False
+    cost_slope_growth_rates: tuple[float, ...] = (0.05, 0.10)
+    cost_slope_secretion_ratios: tuple[float, ...] = ()
+    cost_slope_capacity_fractions: tuple[float, ...] = (0.10, 0.25, 0.50, 0.75, 0.90)
+    cost_slope_medium_compatibility_mode: str = "corrected"
     sequence_role: str = "unknown"
     normalization_mode: str = "as_provided"
     contains_signal_peptide: bool | None = None

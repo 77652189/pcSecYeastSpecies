@@ -5,9 +5,14 @@ from pathlib import Path
 from typing import Any
 
 from pcsec_pichia.analysis import (
+    analyze_target_growth_impact,
     analyze_target_protein_cost,
+    analyze_target_protein_lp_attribution,
     analyze_yield_improvement_candidates,
     summarize_protein_cost_analysis,
+    summarize_protein_cost_slope_compatibility,
+    summarize_protein_lp_attribution,
+    summarize_target_growth_analysis,
     summarize_yield_improvement_recommendations,
 )
 from pcsec_pichia.alignment import (
@@ -40,7 +45,11 @@ from pcsec_pichia.services.gene_evidence import (
     recommendation_tier_for_candidate,
 )
 from pcsec_pichia.services.gene_catalog import build_lightweight_secretion_gene_evidence
-from pcsec_pichia.simulation import run_growth_tradeoff, solve_secretion_capacity
+from pcsec_pichia.simulation import (
+    run_growth_tradeoff,
+    run_protein_cost_slope_compatibility,
+    solve_secretion_capacity,
+)
 from pcsec_pichia.targets import (
     TargetSpec,
     load_builtin_targets,
@@ -91,6 +100,33 @@ def run_pichia_secretion_simulation(
         write_ribosome_translation_constraint=request.enable_ribosome_translation_constraint,
         write_misfolding_constraints=request.enable_misfolding_constraint,
     )
+    lp_attribution = analyze_target_protein_lp_attribution(
+        target,
+        plan,
+        constraint_result.constraint_counts,
+        simulation,
+        reaction_ids=tuple(inputs.prepared_model.rxns),
+    )
+    cost_slope_compatibility = None
+    if request.enable_cost_slope_compatibility:
+        cost_slope_ratios, cost_slope_policy = _cost_slope_secretion_ratio_policy(request, simulation)
+        cost_slope_compatibility = run_protein_cost_slope_compatibility(
+            inputs.prepared_model,
+            target,
+            inputs.amino_acids,
+            inputs.metabolic,
+            inputs.secretory,
+            inputs.combined,
+            growth_rates=request.cost_slope_growth_rates,
+            secretion_ratios=cost_slope_ratios,
+            write_ribosome_translation_constraint=request.enable_ribosome_translation_constraint,
+            write_misfolding_constraints=request.enable_misfolding_constraint,
+            medium_compatibility_mode=request.cost_slope_medium_compatibility_mode,
+        )
+        cost_slope_compatibility = _with_cost_slope_ratio_policy(
+            cost_slope_compatibility,
+            cost_slope_policy,
+        )
     tradeoff = run_growth_tradeoff(
         inputs.prepared_model,
         target,
@@ -102,6 +138,8 @@ def run_pichia_secretion_simulation(
         write_ribosome_translation_constraint=request.enable_ribosome_translation_constraint,
         write_misfolding_constraints=request.enable_misfolding_constraint,
     )
+    growth_analysis = analyze_target_growth_impact(tradeoff, baseline_growth_rate=request.mu)
+
     evidence_by_gene = load_gene_evidence_cache(root / DEFAULT_GENE_EVIDENCE_CACHE)
     screen_plan = build_screen_plan(
         inputs.prepared_model,
@@ -222,6 +260,11 @@ def run_pichia_secretion_simulation(
     alignment_payload = summarize_alignment(alignment)
     alignment_payload["python_target_id"] = target.target_id
     alignment_payload["alignment_artifact_target_id"] = alignment_request["target_id"]
+    protein_cost_payload = summarize_protein_cost_analysis(protein_cost)
+    protein_cost_payload["lp_attribution"] = summarize_protein_lp_attribution(lp_attribution)
+    protein_cost_payload["cost_slope_compatibility"] = summarize_protein_cost_slope_compatibility(
+        cost_slope_compatibility
+    )
     summary_payload = _attach_pipeline_metadata(
         report.summary_path,
         {
@@ -231,7 +274,8 @@ def run_pichia_secretion_simulation(
                 "reaction_count": plan.reaction_count,
                 "ptm_counts": plan.ptm_counts,
             },
-            "protein_cost_analysis": summarize_protein_cost_analysis(protein_cost),
+            "protein_cost_analysis": protein_cost_payload,
+            "target_growth_analysis": summarize_target_growth_analysis(growth_analysis),
             "alignment_summary": alignment_payload,
             "target_metadata": _target_metadata(target, request),
             "target_warnings": _target_warnings(target),
@@ -442,6 +486,81 @@ def _growth_points(values: tuple[float, ...], fallback_mu: float) -> tuple[float
     return points or (fallback_mu,)
 
 
+def _cost_slope_secretion_ratio_policy(
+    request: PichiaSimulationRequest,
+    simulation: Any,
+) -> tuple[tuple[float, ...], dict[str, Any]]:
+    explicit = tuple(float(value) for value in request.cost_slope_secretion_ratios if float(value) > 0)
+    if explicit:
+        return explicit, {
+            "secretion_ratio_policy": "explicit_absolute_ratios",
+            "capacity_reference": None,
+            "capacity_fractions": (),
+            "warnings": (),
+        }
+    capacity = simulation.secretion_flux if getattr(simulation, "success", False) else None
+    fractions = tuple(float(value) for value in request.cost_slope_capacity_fractions if 0 < float(value) < 1)
+    if capacity is not None and capacity > 0 and fractions:
+        ratios = tuple(float(capacity) * fraction for fraction in fractions)
+        return ratios, {
+            "secretion_ratio_policy": "capacity_fraction_ratios",
+            "capacity_reference": float(capacity),
+            "capacity_fractions": fractions,
+            "warnings": (
+                "No explicit target secretion ratios were provided; cost slope ratios were generated from current secretion capacity fractions.",
+            ),
+        }
+    fallback = (5e-7, 1e-6, 5e-6, 1e-5, 2e-5)
+    return fallback, {
+        "secretion_ratio_policy": "fallback_absolute_ratios_capacity_unavailable",
+        "capacity_reference": None if capacity is None else float(capacity),
+        "capacity_fractions": fractions,
+        "warnings": (
+            "Secretion capacity was unavailable, so historical absolute protein-cost ratios were used as fallback.",
+        ),
+    }
+
+
+def _cost_slope_ratio_policy_lines(cost_slope: dict[str, Any]) -> list[str]:
+    policy = str(cost_slope.get("secretion_ratio_policy") or "explicit_absolute_ratios")
+    capacity = cost_slope.get("capacity_reference")
+    fractions = tuple(cost_slope.get("capacity_fractions") or ())
+    lines = [f"- secretion ratio policy: `{policy}`."]
+    if policy == "capacity_fraction_ratios":
+        fraction_text = ", ".join(f"{float(value):.0%}" for value in fractions)
+        lines.append(
+            "- target secretion ratios: generated from current corrected secretion capacity "
+            f"`{capacity}` using capacity fractions `{fraction_text}`."
+        )
+        lines.append(
+            "- interpretation: this is the default when experimental target secretion ratios are unknown; "
+            "explicit user ratios should override it when available."
+        )
+    elif policy == "explicit_absolute_ratios":
+        lines.append(
+            "- target secretion ratios: explicit absolute ratios supplied by the request; "
+            "these are treated as the historical MATLAB-style fixed secretion requirements."
+        )
+    else:
+        lines.append(
+            "- target secretion ratios: fallback historical absolute ratios because current secretion capacity "
+            "was unavailable; treat this as a diagnostic fallback, not calibrated biology."
+        )
+    return lines
+
+
+def _with_cost_slope_ratio_policy(result: Any, policy: dict[str, Any]) -> Any:
+    return type(result)(
+        **{
+            **result.__dict__,
+            "warnings": (*result.warnings, *tuple(policy.get("warnings") or ())),
+            "secretion_ratio_policy": str(policy["secretion_ratio_policy"]),
+            "capacity_reference": policy.get("capacity_reference"),
+            "capacity_fractions": tuple(policy.get("capacity_fractions") or ()),
+        }
+    )
+
+
 def _resolve_target(request: PichiaSimulationRequest, root: Path) -> TargetSpec:
     if request.target_input is not None and request.leader_candidate is not None:
         return target_spec_from_input(request.target_input, request.leader_candidate)
@@ -607,6 +726,7 @@ def _build_pipeline_report(summary: dict[str, Any]) -> str:
     target_metadata = summary.get("target_metadata") or {}
     target_warnings = summary.get("target_warnings") or []
     protein_cost = summary.get("protein_cost_analysis") or {}
+    target_growth = summary.get("target_growth_analysis") or {}
     lines = [
         f"# pcSecPichia Python 分泌仿真报告: {summary.get('target_id')}",
         "",
@@ -648,6 +768,8 @@ def _build_pipeline_report(summary: dict[str, Any]) -> str:
         lines.extend(["", "## 目标输入边界", "", *[f"- {item}" for item in target_warnings]])
     if protein_cost:
         lines.extend(_protein_cost_report_lines(protein_cost))
+    if target_growth:
+        lines.extend(_target_growth_report_lines(target_growth))
     screen_warnings = summary.get("screen_warnings") or []
     if screen_warnings:
         lines.extend(["", "## 基因扰动提示", "", *[f"- {item}" for item in screen_warnings]])
@@ -714,6 +836,103 @@ def _protein_cost_report_lines(protein_cost: dict[str, Any]) -> list[str]:
             f"{item.get('relative_score')} | {item.get('basis')} |"
         )
     warnings = protein_cost.get("warnings") or []
+    if warnings:
+        lines.extend(["", "提示:"])
+        lines.extend(f"- {warning}" for warning in warnings)
+    lp_attribution = protein_cost.get("lp_attribution") or {}
+    if lp_attribution:
+        lines.extend(_lp_attribution_report_lines(lp_attribution))
+    cost_slope = protein_cost.get("cost_slope_compatibility") or {}
+    if cost_slope:
+        lines.extend(_cost_slope_report_lines(cost_slope))
+    return lines
+
+
+def _lp_attribution_report_lines(lp_attribution: dict[str, Any]) -> list[str]:
+    objective = lp_attribution.get("objective_evidence") or {}
+    lines = [
+        "",
+        "### LP 级归因证据",
+        "",
+        "- 当前结果是 Python draft LP sensitivity，基于 SciPy HiGHS marginals；不是 MATLAB/SoPlex fully aligned shadow price。",
+        f"- LP 归因状态: `{lp_attribution.get('result_status')}`.",
+        f"- 目标反应: `{objective.get('objective_reaction')}`.",
+        f"- 分泌通量: `{objective.get('secretion_flux')}`.",
+        "",
+    ]
+    lines.extend(_markdown_table("主导约束块", lp_attribution.get("dominant_constraint_blocks") or ()))
+    lines.extend(_markdown_table("Top constraint marginals", lp_attribution.get("top_constraint_marginals") or ()))
+    lines.extend(_markdown_table("Top bound marginals", lp_attribution.get("top_bound_marginals") or ()))
+    lines.extend(_markdown_table("目标相关 flux", lp_attribution.get("target_related_fluxes") or ()))
+    warnings = lp_attribution.get("warnings") or []
+    if warnings:
+        lines.extend(["", "LP 归因提示:"])
+        lines.extend(f"- {warning}" for warning in warnings)
+    return lines
+
+
+def _cost_slope_report_lines(cost_slope: dict[str, Any]) -> list[str]:
+    lines = [
+        "",
+        "### MATLAB-compatible 成本 slope（可选）",
+        "",
+        f"- 开启状态: `{cost_slope.get('enabled')}`.",
+        f"- 结果状态: `{cost_slope.get('result_status')}`.",
+        "- 当前默认路线: 固定生长率、corrected medium、最大化目标蛋白分泌通量。",
+        "- 历史成本路线: 固定目标蛋白 exchange ratio 和生长率，优化 `Ex_glc_D`，再估计 glucose/ribosome cost slope。",
+        "- 该模式用于历史 MATLAB `Protein_cost_TP` 定义对比，不替代默认 Python corrected pipeline。",
+    ]
+    lines.extend(_cost_slope_ratio_policy_lines(cost_slope))
+    lines.append(f"- medium compatibility mode: `{cost_slope.get('medium_compatibility_mode', 'corrected')}`.")
+    overrides = cost_slope.get("medium_bound_overrides") or []
+    if overrides:
+        lines.extend(_markdown_table("medium bound overrides", overrides, limit=12))
+    lines.extend(_markdown_table("glucose cost slopes", cost_slope.get("glucose_cost_slopes") or ()))
+    lines.extend(_markdown_table("ribosome cost slopes", cost_slope.get("ribosome_cost_slopes") or ()))
+    lines.extend(_markdown_table("cost slope rows", cost_slope.get("rows") or (), limit=10))
+    warnings = cost_slope.get("warnings") or []
+    if warnings:
+        lines.extend(["", "cost slope 提示:"])
+        lines.extend(f"- {warning}" for warning in warnings)
+    return lines
+
+
+def _markdown_table(title: str, rows: Any, limit: int = 8) -> list[str]:
+    rows = list(rows or [])[:limit]
+    if not rows:
+        return []
+    keys = list(rows[0].keys())[:6]
+    lines = ["", f"#### {title}", "", "| " + " | ".join(keys) + " |", "| " + " | ".join("---" for _ in keys) + " |"]
+    for row in rows:
+        lines.append("| " + " | ".join(str(row.get(key, "")) for key in keys) + " |")
+    return lines
+
+
+def _target_growth_report_lines(target_growth: dict[str, Any]) -> list[str]:
+    items = target_growth.get("tradeoff_points") or []
+    best_flux = target_growth.get("best_secretion_point") or {}
+    best_per_biomass = target_growth.get("best_secretion_per_biomass_point") or {}
+    lines = [
+        "",
+        "## 目标蛋白生长分析",
+        "",
+        "- 当前结果是 Python draft explanatory tradeoff，不代表真实发酵生长预测。",
+        f"- 生长分析状态: `{target_growth.get('result_status')}`.",
+        f"- 趋势标签: `{target_growth.get('growth_sensitivity_label')}`.",
+        f"- 趋势原因: `{target_growth.get('growth_sensitivity_reason')}`.",
+        f"- 可比较生长点数量: `{target_growth.get('valid_point_count')}`.",
+        f"- 最高分泌通量生长点: `{best_flux.get('mu')}`.",
+        f"- 最高单位生物量分泌生长点: `{best_per_biomass.get('mu')}`.",
+        "",
+        "| mu | success | secretion flux | secretion / biomass | interpretation |",
+        "| ---: | --- | ---: | ---: | --- |",
+    ]
+    for item in items:
+        lines.append(
+            f"| {item.get('mu')} | {item.get('success')} | {item.get('secretion_flux')} | "
+            f"{item.get('secretion_per_biomass')} | {item.get('interpretation')} |"
+        )
+    warnings = target_growth.get("warnings") or []
     if warnings:
         lines.extend(["", "提示:"])
         lines.extend(f"- {warning}" for warning in warnings)

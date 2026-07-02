@@ -183,6 +183,7 @@ def build_markdown_report(summary: dict[str, Any]) -> str:
     constraint_counts = summary.get("constraint_counts") or {}
     candidate_interpretation = summary.get("candidate_interpretation") or {}
     protein_cost = summary.get("protein_cost_analysis") or {}
+    target_growth = summary.get("target_growth_analysis") or {}
     lines = [
             f"# pcSecPichia Python 分泌仿真报告: {target_id}",
             "",
@@ -223,6 +224,8 @@ def build_markdown_report(summary: dict[str, Any]) -> str:
         lines.append("")
     if protein_cost:
         lines.extend(_protein_cost_markdown_lines(protein_cost))
+    if target_growth:
+        lines.extend(_target_growth_markdown_lines(target_growth))
     return "\n".join(lines)
 
 
@@ -249,7 +252,90 @@ def _protein_cost_markdown_lines(protein_cost: dict[str, Any]) -> list[str]:
     if warnings:
         lines.extend(["", "提示:"])
         lines.extend(f"- {warning}" for warning in warnings)
+    lp_attribution = protein_cost.get("lp_attribution") or {}
+    if lp_attribution:
+        lines.extend(_lp_attribution_markdown_lines(lp_attribution))
+    cost_slope = protein_cost.get("cost_slope_compatibility") or {}
+    if cost_slope:
+        lines.extend(_cost_slope_markdown_lines(cost_slope))
     lines.append("")
+    return lines
+
+
+def _lp_attribution_markdown_lines(lp_attribution: dict[str, Any]) -> list[str]:
+    objective = lp_attribution.get("objective_evidence") or {}
+    lines = [
+        "",
+        "### LP 级归因证据",
+        "",
+        "- 当前结果是 Python draft LP sensitivity，基于 SciPy HiGHS marginals；不是 MATLAB/SoPlex fully aligned shadow price。",
+        f"- LP 归因状态: `{lp_attribution.get('result_status')}`.",
+        f"- 目标反应: `{objective.get('objective_reaction')}`.",
+        f"- 分泌通量: `{objective.get('secretion_flux')}`.",
+        "",
+    ]
+    lines.extend(_small_markdown_table("主导约束块", lp_attribution.get("dominant_constraint_blocks") or ()))
+    lines.extend(_small_markdown_table("Top constraint marginals", lp_attribution.get("top_constraint_marginals") or ()))
+    lines.extend(_small_markdown_table("Top bound marginals", lp_attribution.get("top_bound_marginals") or ()))
+    lines.extend(_small_markdown_table("目标相关 flux", lp_attribution.get("target_related_fluxes") or ()))
+    warnings = lp_attribution.get("warnings") or []
+    if warnings:
+        lines.extend(["", "LP 归因提示:"])
+        lines.extend(f"- {warning}" for warning in warnings)
+    return lines
+
+
+def _cost_slope_markdown_lines(cost_slope: dict[str, Any]) -> list[str]:
+    lines = [
+        "",
+        "### MATLAB-compatible 成本 slope（可选）",
+        "",
+        f"- 开启状态: `{cost_slope.get('enabled')}`.",
+        f"- 结果状态: `{cost_slope.get('result_status')}`.",
+        "- 当前默认路线: 固定生长率、corrected medium、最大化目标蛋白分泌通量。",
+        "- 历史成本路线: 固定目标蛋白 exchange ratio 和生长率，优化 `Ex_glc_D`，再估计 glucose/ribosome cost slope。",
+        "- 该模式用于历史 MATLAB `Protein_cost_TP` 定义对比，不替代默认 Python corrected pipeline。",
+    ]
+    lines.extend(_cost_slope_ratio_policy_markdown_lines(cost_slope))
+    lines.append(f"- medium compatibility mode: `{cost_slope.get('medium_compatibility_mode', 'corrected')}`.")
+    overrides = cost_slope.get("medium_bound_overrides") or []
+    if overrides:
+        lines.extend(_small_markdown_table("medium bound overrides", overrides, limit=12))
+    lines.extend(_small_markdown_table("glucose cost slopes", cost_slope.get("glucose_cost_slopes") or ()))
+    lines.extend(_small_markdown_table("ribosome cost slopes", cost_slope.get("ribosome_cost_slopes") or ()))
+    lines.extend(_small_markdown_table("cost slope rows", cost_slope.get("rows") or (), limit=10))
+    warnings = cost_slope.get("warnings") or []
+    if warnings:
+        lines.extend(["", "cost slope 提示:"])
+        lines.extend(f"- {warning}" for warning in warnings)
+    return lines
+
+
+def _cost_slope_ratio_policy_markdown_lines(cost_slope: dict[str, Any]) -> list[str]:
+    policy = str(cost_slope.get("secretion_ratio_policy") or "explicit_absolute_ratios")
+    capacity = cost_slope.get("capacity_reference")
+    fractions = tuple(cost_slope.get("capacity_fractions") or ())
+    lines = [f"- secretion ratio policy: `{policy}`."]
+    if policy == "capacity_fraction_ratios":
+        fraction_text = ", ".join(f"{float(value):.0%}" for value in fractions)
+        lines.append(
+            "- target secretion ratios: generated from current corrected secretion capacity "
+            f"`{capacity}` using capacity fractions `{fraction_text}`."
+        )
+        lines.append(
+            "- interpretation: this is the default when experimental target secretion ratios are unknown; "
+            "explicit user ratios should override it when available."
+        )
+    elif policy == "explicit_absolute_ratios":
+        lines.append(
+            "- target secretion ratios: explicit absolute ratios supplied by the request; "
+            "these are treated as the historical MATLAB-style fixed secretion requirements."
+        )
+    else:
+        lines.append(
+            "- target secretion ratios: fallback historical absolute ratios because current secretion capacity "
+            "was unavailable; treat this as a diagnostic fallback, not calibrated biology."
+        )
     return lines
 
 
@@ -262,6 +348,38 @@ def _small_markdown_table(title: str, rows: Any, limit: int = 8) -> list[str]:
     for row in rows:
         lines.append("| " + " | ".join(str(row.get(key, "")) for key in keys) + " |")
     return lines
+
+
+def _target_growth_markdown_lines(target_growth: dict[str, Any]) -> list[str]:
+    items = target_growth.get("tradeoff_points") or []
+    best_flux = target_growth.get("best_secretion_point") or {}
+    best_per_biomass = target_growth.get("best_secretion_per_biomass_point") or {}
+    lines = [
+        "## 目标蛋白生长分析",
+        "",
+        "- 当前结果是 Python draft explanatory tradeoff，不代表真实发酵生长预测。",
+        f"- 生长分析状态: `{target_growth.get('result_status')}`.",
+        f"- 趋势标签: `{target_growth.get('growth_sensitivity_label')}`.",
+        f"- 趋势原因: `{target_growth.get('growth_sensitivity_reason')}`.",
+        f"- 可比较生长点数量: `{target_growth.get('valid_point_count')}`.",
+        f"- 最高分泌通量生长点: `{best_flux.get('mu')}`.",
+        f"- 最高单位生物量分泌生长点: `{best_per_biomass.get('mu')}`.",
+        "",
+        "| mu | success | secretion flux | secretion / biomass | interpretation |",
+        "| ---: | --- | ---: | ---: | --- |",
+    ]
+    for item in items:
+        lines.append(
+            f"| {item.get('mu')} | {item.get('success')} | {item.get('secretion_flux')} | "
+            f"{item.get('secretion_per_biomass')} | {item.get('interpretation')} |"
+        )
+    warnings = target_growth.get("warnings") or []
+    if warnings:
+        lines.extend(["", "提示:"])
+        lines.extend(f"- {warning}" for warning in warnings)
+    lines.append("")
+    return lines
+
 
 def _yield_recommendation_markdown_lines(payload: dict[str, Any]) -> list[str]:
     recommended = payload.get("recommended_candidates") or []

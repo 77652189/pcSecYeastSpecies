@@ -4,6 +4,11 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 from pcsec_pichia.secretion_plan import SecretionPlanResult, build_secretion_plan
+from pcsec_pichia.simulation import (
+    GrowthTradeoffResult,
+    ProteinCostSlopeCompatibilityResult,
+    SecretionSimulationResult,
+)
 from pcsec_pichia.targets import TargetSpec, target_features
 from pcsec_pichia.services.gene_evidence import recommendation_tier_for_candidate
 
@@ -31,6 +36,43 @@ class ProteinCostAnalysisResult:
     dominant_cost_categories: tuple[str, ...]
     warnings: tuple[str, ...]
     result_status: str = "draft_explanatory"
+
+
+@dataclass(frozen=True)
+class GrowthTradeoffPoint:
+    mu: float
+    success: bool
+    secretion_flux: float | None
+    secretion_per_biomass: float | None
+    status: str
+    interpretation: str
+
+
+@dataclass(frozen=True)
+class TargetGrowthAnalysisResult:
+    target_id: str
+    growth_points: tuple[float, ...]
+    valid_point_count: int
+    best_secretion_point: dict[str, object] | None
+    best_secretion_per_biomass_point: dict[str, object] | None
+    growth_sensitivity_label: str
+    growth_sensitivity_reason: str
+    tradeoff_points: tuple[GrowthTradeoffPoint, ...]
+    warnings: tuple[str, ...]
+    result_status: str = "draft_explanatory"
+
+
+@dataclass(frozen=True)
+class ProteinLpAttributionResult:
+    target_id: str
+    result_status: str
+    objective_evidence: dict[str, object]
+    dominant_constraint_blocks: tuple[dict[str, object], ...]
+    top_constraint_marginals: tuple[dict[str, object], ...]
+    top_bound_marginals: tuple[dict[str, object], ...]
+    target_related_fluxes: tuple[dict[str, object], ...]
+    active_bound_counts: dict[str, int]
+    warnings: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -73,6 +115,7 @@ class YieldImprovementRecommendationResult:
     warnings: tuple[str, ...]
     result_status: str = "draft_model_recommendation"
 
+
 def analyze_target_protein_cost(
     target: TargetSpec,
     plan: SecretionPlanResult | None = None,
@@ -92,6 +135,64 @@ def analyze_target_protein_cost(
         total_relative_score=round(sum(item.relative_score for item in cost_items), 3),
         dominant_cost_categories=_dominant_categories(cost_items),
         warnings=tuple(_cost_warnings(target)),
+    )
+
+
+def analyze_target_protein_lp_attribution(
+    target: TargetSpec,
+    plan: SecretionPlanResult,
+    constraint_counts: dict[str, int],
+    simulation_result: SecretionSimulationResult,
+    reaction_ids: tuple[str, ...] = (),
+    top_n: int = 10,
+) -> ProteinLpAttributionResult:
+    sensitivity = simulation_result.lp_sensitivity or {}
+    if not simulation_result.success or not sensitivity:
+        return ProteinLpAttributionResult(
+            target_id=target.target_id,
+            result_status="draft_lp_sensitivity_unavailable",
+            objective_evidence=_objective_evidence(simulation_result),
+            dominant_constraint_blocks=(),
+            top_constraint_marginals=(),
+            top_bound_marginals=(),
+            target_related_fluxes=_target_related_fluxes(target, plan, simulation_result, reaction_ids),
+            active_bound_counts={},
+            warnings=(
+                "LP sensitivity is unavailable because the Python solve failed or did not return HiGHS marginals.",
+                "This does not change the corrected pipeline objective or constraints.",
+            ),
+        )
+
+    eq_marginals = tuple(float(value) for value in sensitivity.get("eq_marginals", ()))
+    ub_marginals = tuple(float(value) for value in sensitivity.get("ub_marginals", ()))
+    lower_marginals = tuple(float(value) for value in sensitivity.get("lower_marginals", ()))
+    upper_marginals = tuple(float(value) for value in sensitivity.get("upper_marginals", ()))
+    blocks = _constraint_blocks(constraint_counts, len(eq_marginals), len(ub_marginals))
+    return ProteinLpAttributionResult(
+        target_id=target.target_id,
+        result_status="draft_lp_sensitivity",
+        objective_evidence=_objective_evidence(simulation_result),
+        dominant_constraint_blocks=_dominant_constraint_blocks(blocks, eq_marginals, ub_marginals, top_n=top_n),
+        top_constraint_marginals=_top_constraint_marginals(blocks, eq_marginals, ub_marginals, top_n=top_n),
+        top_bound_marginals=_top_bound_marginals(
+            lower_marginals,
+            upper_marginals,
+            reaction_ids=reaction_ids,
+            target=target,
+            plan=plan,
+            top_n=top_n,
+        ),
+        target_related_fluxes=_target_related_fluxes(target, plan, simulation_result, reaction_ids),
+        active_bound_counts={
+            "lower_marginal_nonzero": _nonzero_count(lower_marginals),
+            "upper_marginal_nonzero": _nonzero_count(upper_marginals),
+            "total_bound_marginal_nonzero": _nonzero_count(lower_marginals) + _nonzero_count(upper_marginals),
+        },
+        warnings=(
+            "LP sensitivity is a Python draft based on SciPy HiGHS marginals; it is not MATLAB/SoPlex fully aligned shadow pricing.",
+            "The maximization problem is solved through SciPy minimization, so signs should be interpreted as draft sensitivity evidence.",
+            "Only compressed top-N attribution rows are written to reports and summaries.",
+        ),
     )
 
 
@@ -147,6 +248,39 @@ def analyze_yield_improvement_candidates(
         warnings=tuple(warnings),
     )
 
+
+def analyze_target_growth_impact(
+    tradeoff: GrowthTradeoffResult,
+    baseline_growth_rate: float | None = None,
+) -> TargetGrowthAnalysisResult:
+    points = tuple(_growth_tradeoff_points(tradeoff))
+    valid_points = tuple(point for point in points if point.success and point.secretion_flux is not None)
+    best_flux = _best_point(valid_points, key="secretion_flux")
+    best_per_biomass = _best_point(valid_points, key="secretion_per_biomass")
+    interpreted = tuple(
+        _with_growth_point_interpretation(point, best_flux, best_per_biomass, baseline_growth_rate)
+        for point in points
+    )
+    interpreted_valid_points = tuple(point for point in interpreted if point.success and point.secretion_flux is not None)
+    interpreted_best_flux = _best_point(interpreted_valid_points, key="secretion_flux")
+    interpreted_best_per_biomass = _best_point(interpreted_valid_points, key="secretion_per_biomass")
+    growth_sensitivity_label, growth_sensitivity_reason = _growth_sensitivity(points)
+    return TargetGrowthAnalysisResult(
+        target_id=tradeoff.target_id,
+        growth_points=tuple(float(value) for value in tradeoff.growth_points),
+        valid_point_count=len(valid_points),
+        best_secretion_point=asdict(interpreted_best_flux) if interpreted_best_flux else None,
+        best_secretion_per_biomass_point=asdict(interpreted_best_per_biomass) if interpreted_best_per_biomass else None,
+        growth_sensitivity_label=growth_sensitivity_label,
+        growth_sensitivity_reason=growth_sensitivity_reason,
+        tradeoff_points=interpreted,
+        warnings=(
+            "当前生长分析是 Python draft explanatory tradeoff，不代表真实发酵生长预测。",
+            "该分析只解释已有 small-grid tradeoff rows，不新增求解算法或长网格任务。",
+        ),
+    )
+
+
 def summarize_protein_cost_analysis(result: ProteinCostAnalysisResult) -> dict[str, object]:
     return {
         "target_id": result.target_id,
@@ -158,6 +292,35 @@ def summarize_protein_cost_analysis(result: ProteinCostAnalysisResult) -> dict[s
         "cost_items": build_cost_item_table(result),
         "total_relative_score": result.total_relative_score,
         "dominant_cost_categories": list(result.dominant_cost_categories),
+        "warnings": list(result.warnings),
+        "result_status": result.result_status,
+    }
+
+
+def summarize_protein_lp_attribution(result: ProteinLpAttributionResult) -> dict[str, object]:
+    return {
+        "target_id": result.target_id,
+        "result_status": result.result_status,
+        "objective_evidence": result.objective_evidence,
+        "dominant_constraint_blocks": list(result.dominant_constraint_blocks),
+        "top_constraint_marginals": list(result.top_constraint_marginals),
+        "top_bound_marginals": list(result.top_bound_marginals),
+        "target_related_fluxes": list(result.target_related_fluxes),
+        "active_bound_counts": result.active_bound_counts,
+        "warnings": list(result.warnings),
+    }
+
+
+def summarize_target_growth_analysis(result: TargetGrowthAnalysisResult) -> dict[str, object]:
+    return {
+        "target_id": result.target_id,
+        "growth_points": list(result.growth_points),
+        "valid_point_count": result.valid_point_count,
+        "best_secretion_point": result.best_secretion_point,
+        "best_secretion_per_biomass_point": result.best_secretion_per_biomass_point,
+        "growth_sensitivity_label": result.growth_sensitivity_label,
+        "growth_sensitivity_reason": result.growth_sensitivity_reason,
+        "tradeoff_points": build_growth_tradeoff_item_table(result),
         "warnings": list(result.warnings),
         "result_status": result.result_status,
     }
@@ -184,8 +347,52 @@ def summarize_yield_improvement_recommendations(
         "result_status": result.result_status,
     }
 
+
+def summarize_protein_cost_slope_compatibility(
+    result: ProteinCostSlopeCompatibilityResult | None,
+) -> dict[str, object]:
+    if result is None:
+        return {
+            "enabled": False,
+            "result_status": "disabled",
+            "warnings": [
+                "MATLAB-compatible protein cost slope mode is disabled by default.",
+            ],
+        }
+    return {
+        "target_id": result.target_id,
+        "enabled": result.enabled,
+        "success": result.success,
+        "growth_rates": list(result.growth_rates),
+        "secretion_ratios": list(result.secretion_ratios),
+        "secretion_ratio_policy": result.secretion_ratio_policy,
+        "capacity_reference": result.capacity_reference,
+        "capacity_fractions": list(result.capacity_fractions),
+        "rows": list(result.rows),
+        "glucose_cost_slopes": list(result.glucose_cost_slopes),
+        "ribosome_cost_slopes": list(result.ribosome_cost_slopes),
+        "medium_compatibility_mode": result.medium_compatibility_mode,
+        "medium_bound_overrides": list(result.medium_bound_overrides),
+        "result_status": result.result_status,
+        "warnings": list(result.warnings),
+        "comparison_scope": {
+            "matlab_reference": "Code/pcSecPichia/Simulation/SimulateProteinCost.m and Results/Protein_cost_TP/all_proteincost_gluPP.mat",
+            "definition": "fixed target exchange ratios, fixed growth rates, optimize Ex_glc_D, then estimate cost slopes",
+            "current_default_definition": "fixed growth rate, corrected medium, maximize target secretion flux",
+            "ratio_policy": result.secretion_ratio_policy,
+            "not_default_pipeline": True,
+            "medium_compatibility": result.medium_compatibility_mode,
+            "medium_note": "corrected keeps Python corrected medium; matlab_legacy_cost applies 9 historical exchange lower bounds only for MATLAB artifact comparison.",
+        },
+    }
+
+
 def build_cost_item_table(result: ProteinCostAnalysisResult) -> tuple[dict[str, object], ...]:
     return tuple(asdict(item) for item in result.cost_items)
+
+
+def build_growth_tradeoff_item_table(result: TargetGrowthAnalysisResult) -> tuple[dict[str, object], ...]:
+    return tuple(asdict(item) for item in result.tradeoff_points)
 
 
 def build_yield_recommendation_table(
@@ -540,6 +747,7 @@ def _optional_float(value: object) -> float | None:
     except (TypeError, ValueError):
         return None
 
+
 def _target_feature_payload(target: TargetSpec) -> dict[str, Any]:
     features = target_features(target)
     return {
@@ -686,10 +894,316 @@ def _cost_warnings(target: TargetSpec) -> list[str]:
     return warnings
 
 
+def _objective_evidence(simulation_result: SecretionSimulationResult) -> dict[str, object]:
+    return {
+        "success": simulation_result.success,
+        "objective_reaction": simulation_result.exchange_reaction_id,
+        "objective_value": simulation_result.objective_value,
+        "secretion_flux": simulation_result.secretion_flux,
+        "growth_rate": simulation_result.growth_rate,
+        "status": simulation_result.status,
+        "message": simulation_result.message,
+    }
+
+
+def _constraint_blocks(
+    constraint_counts: dict[str, int],
+    eq_length: int,
+    ub_length: int,
+) -> tuple[dict[str, object], ...]:
+    blocks: list[dict[str, object]] = []
+    start = 0
+    for name in (
+        "stoichiometric",
+        "metabolic_coupling",
+        "secretory_coupling",
+        "protein_mass",
+        "proteasome",
+        "ribosome_assembly",
+        "ribosome_translation",
+        "misfolding",
+    ):
+        count = max(0, int(constraint_counts.get(name, 0) or 0))
+        if count <= 0:
+            continue
+        end = min(eq_length, start + count)
+        blocks.append({"constraint_type": "eq", "block": name, "start": start, "end": end})
+        start += count
+    if start < eq_length:
+        blocks.append({"constraint_type": "eq", "block": "unknown", "start": start, "end": eq_length})
+    if ub_length > 0:
+        mito_count = max(0, int(constraint_counts.get("mitochondrial", 0) or 0))
+        mito_end = min(ub_length, mito_count)
+        if mito_end > 0:
+            blocks.append({"constraint_type": "ub", "block": "mitochondrial", "start": 0, "end": mito_end})
+        if mito_end < ub_length:
+            blocks.append({"constraint_type": "ub", "block": "unknown", "start": mito_end, "end": ub_length})
+    return tuple(blocks)
+
+
+def _dominant_constraint_blocks(
+    blocks: tuple[dict[str, object], ...],
+    eq_marginals: tuple[float, ...],
+    ub_marginals: tuple[float, ...],
+    top_n: int,
+) -> tuple[dict[str, object], ...]:
+    rows: list[dict[str, object]] = []
+    for block in blocks:
+        values = _block_values(block, eq_marginals, ub_marginals)
+        if not values:
+            continue
+        abs_values = [abs(value) for value in values]
+        rows.append(
+            {
+                "constraint_type": block["constraint_type"],
+                "block": block["block"],
+                "row_count": len(values),
+                "nonzero_marginal_count": _nonzero_count(values),
+                "sum_abs_marginal": round(sum(abs_values), 12),
+                "max_abs_marginal": round(max(abs_values), 12),
+            }
+        )
+    return tuple(sorted(rows, key=lambda row: float(row["sum_abs_marginal"]), reverse=True)[:top_n])
+
+
+def _top_constraint_marginals(
+    blocks: tuple[dict[str, object], ...],
+    eq_marginals: tuple[float, ...],
+    ub_marginals: tuple[float, ...],
+    top_n: int,
+) -> tuple[dict[str, object], ...]:
+    rows: list[dict[str, object]] = []
+    for block in blocks:
+        values = _block_values(block, eq_marginals, ub_marginals)
+        start = int(block["start"])
+        for offset, marginal in enumerate(values):
+            if abs(marginal) <= 1e-12:
+                continue
+            row_index = start + offset
+            rows.append(
+                {
+                    "constraint_type": block["constraint_type"],
+                    "block": block["block"],
+                    "row_index_0based": row_index,
+                    "row_index_1based": row_index + 1,
+                    "marginal": round(float(marginal), 12),
+                    "abs_marginal": round(abs(float(marginal)), 12),
+                }
+            )
+    return tuple(sorted(rows, key=lambda row: float(row["abs_marginal"]), reverse=True)[:top_n])
+
+
+def _top_bound_marginals(
+    lower_marginals: tuple[float, ...],
+    upper_marginals: tuple[float, ...],
+    reaction_ids: tuple[str, ...],
+    target: TargetSpec,
+    plan: SecretionPlanResult,
+    top_n: int,
+) -> tuple[dict[str, object], ...]:
+    rows: list[dict[str, object]] = []
+    for bound_type, values in (("lower", lower_marginals), ("upper", upper_marginals)):
+        for index, marginal in enumerate(values):
+            if abs(marginal) <= 1e-12:
+                continue
+            reaction_id = reaction_ids[index] if index < len(reaction_ids) else f"X{index + 1}"
+            rows.append(
+                {
+                    "bound_type": bound_type,
+                    "variable_index_0based": index,
+                    "variable_id": f"X{index + 1}",
+                    "reaction_id": reaction_id,
+                    "secretory_process": _lp_reaction_process(reaction_id, target, plan),
+                    "marginal": round(float(marginal), 12),
+                    "abs_marginal": round(abs(float(marginal)), 12),
+                }
+            )
+    return tuple(sorted(rows, key=lambda row: float(row["abs_marginal"]), reverse=True)[:top_n])
+
+
+def _target_related_fluxes(
+    target: TargetSpec,
+    plan: SecretionPlanResult,
+    simulation_result: SecretionSimulationResult,
+    reaction_ids: tuple[str, ...],
+) -> tuple[dict[str, object], ...]:
+    fluxes = simulation_result.key_fluxes or {}
+    rows: list[dict[str, object]] = []
+    for reaction_id, flux in sorted(fluxes.items()):
+        rows.append(
+            {
+                "reaction_id": reaction_id,
+                "flux": flux,
+                "secretory_process": _lp_reaction_process(reaction_id, target, plan),
+                "is_target_exchange": reaction_id == simulation_result.exchange_reaction_id,
+            }
+        )
+    if simulation_result.exchange_reaction_id and simulation_result.exchange_reaction_id not in fluxes:
+        rows.append(
+            {
+                "reaction_id": simulation_result.exchange_reaction_id,
+                "flux": simulation_result.secretion_flux,
+                "secretory_process": "target_exchange",
+                "is_target_exchange": True,
+            }
+        )
+    return tuple(rows)
+
+
+def _block_values(
+    block: dict[str, object],
+    eq_marginals: tuple[float, ...],
+    ub_marginals: tuple[float, ...],
+) -> tuple[float, ...]:
+    values = eq_marginals if block["constraint_type"] == "eq" else ub_marginals
+    start = int(block["start"])
+    end = int(block["end"])
+    return values[start:end]
+
+
+def _lp_reaction_process(reaction_id: str, target: TargetSpec, plan: SecretionPlanResult) -> str:
+    if reaction_id == "":
+        return "unknown"
+    if reaction_id in plan.reaction_ids:
+        return "target_secretory_reaction"
+    if reaction_id == f"r_{target.protein_id}_exchange" or reaction_id == f"{target.protein_id}_exchange":
+        return "target_exchange"
+    if target.protein_id and target.protein_id in reaction_id:
+        return "target_related"
+    lowered = reaction_id.lower()
+    if "ribosome" in lowered:
+        return "ribosome"
+    if "misfold" in lowered or "erad" in lowered:
+        return "misfolding_erad"
+    if "glyco" in lowered or "_ng" in lowered or "_og" in lowered:
+        return "glycosylation"
+    if "biomass" in lowered:
+        return "growth"
+    if reaction_id in {"Ex_glc_D", "Ex_o2"}:
+        return "medium_exchange"
+    return "unknown"
+
+
+def _nonzero_count(values: tuple[float, ...] | list[float]) -> int:
+    return sum(1 for value in values if abs(float(value)) > 1e-12)
+
+
+def _growth_tradeoff_points(tradeoff: GrowthTradeoffResult) -> list[GrowthTradeoffPoint]:
+    points: list[GrowthTradeoffPoint] = []
+    for row in tradeoff.tradeoff_rows:
+        success = _optional_bool(row.get("success"))
+        status = str(row.get("status") or "")
+        flux = _optional_float(row.get("secretion_flux"))
+        per_biomass = _optional_float(row.get("secretion_per_biomass"))
+        interpretation = "可比较生长点" if success and flux is not None else "求解失败或无可比较分泌值"
+        points.append(
+            GrowthTradeoffPoint(
+                mu=float(row.get("mu") or 0.0),
+                success=success,
+                secretion_flux=flux,
+                secretion_per_biomass=per_biomass,
+                status=status,
+                interpretation=interpretation,
+            )
+        )
+    return sorted(points, key=lambda point: point.mu)
+
+
+def _with_growth_point_interpretation(
+    point: GrowthTradeoffPoint,
+    best_flux: GrowthTradeoffPoint | None,
+    best_per_biomass: GrowthTradeoffPoint | None,
+    baseline_growth_rate: float | None,
+) -> GrowthTradeoffPoint:
+    if not point.success or point.secretion_flux is None:
+        interpretation = "求解失败或无可比较分泌值"
+    else:
+        labels: list[str] = []
+        if best_flux is not None and point.mu == best_flux.mu:
+            labels.append("最高分泌通量")
+        if best_per_biomass is not None and point.mu == best_per_biomass.mu:
+            labels.append("最高单位生物量分泌")
+        if baseline_growth_rate is not None and abs(point.mu - float(baseline_growth_rate)) <= 1e-9:
+            labels.append("基准生长点")
+        interpretation = "；".join(labels) if labels else "可比较生长点"
+    return GrowthTradeoffPoint(
+        mu=point.mu,
+        success=point.success,
+        secretion_flux=point.secretion_flux,
+        secretion_per_biomass=point.secretion_per_biomass,
+        status=point.status,
+        interpretation=interpretation,
+    )
+
+
+def _best_point(points: tuple[GrowthTradeoffPoint, ...], key: str) -> GrowthTradeoffPoint | None:
+    comparable = [point for point in points if getattr(point, key) is not None]
+    if not comparable:
+        return None
+    return max(comparable, key=lambda point: float(getattr(point, key) or 0.0))
+
+
+def _growth_sensitivity(points: tuple[GrowthTradeoffPoint, ...]) -> tuple[str, str]:
+    if len(points) < 2:
+        return "insufficient_points", "insufficient_tradeoff_rows"
+    if any((not point.success) or point.secretion_flux is None for point in points):
+        return "mixed", "contains_failed_or_missing_points"
+    valid_points = tuple(point for point in points if point.success and point.secretion_flux is not None)
+    if len(valid_points) < 2:
+        return "insufficient_points", "insufficient_comparable_points"
+    ordered = sorted(valid_points, key=lambda point: point.mu)
+    values = [float(point.secretion_flux or 0.0) for point in ordered]
+    deltas = [right - left for left, right in zip(values, values[1:])]
+    eps = 1e-12
+    if all(delta > eps for delta in deltas):
+        return "increasing", "monotonic_increasing_successful_grid"
+    if all(delta < -eps for delta in deltas):
+        return "decreasing", "monotonic_decreasing_successful_grid"
+    return "mixed", "non_monotonic_successful_grid"
+
+
+def _optional_bool(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    if text in {"true", "1", "yes", "y", "success", "ok"}:
+        return True
+    if text in {"false", "0", "no", "n", "failed", "failure", "none", ""}:
+        return False
+    return False
+
+
+def _optional_float(value: object) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 __all__ = [
+    "GrowthTradeoffPoint",
+    "ProteinLpAttributionResult",
     "ProteinCostAnalysisResult",
     "ProteinCostItem",
+    "TargetGrowthAnalysisResult",
+    "YieldImprovementCandidateRecommendation",
+    "YieldImprovementRecommendationResult",
     "analyze_target_protein_cost",
+    "analyze_target_protein_lp_attribution",
+    "analyze_target_growth_impact",
+    "analyze_yield_improvement_candidates",
     "build_cost_item_table",
+    "build_growth_tradeoff_item_table",
+    "build_yield_recommendation_table",
+    "summarize_protein_lp_attribution",
+    "summarize_protein_cost_slope_compatibility",
     "summarize_protein_cost_analysis",
+    "summarize_target_growth_analysis",
+    "summarize_yield_improvement_recommendations",
 ]
