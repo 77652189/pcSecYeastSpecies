@@ -36,6 +36,7 @@ class GenePerturbationFormState:
     oe_gene_text: str
     oe_reaction_text: str
     candidate_limit: int
+    enable_gene_rule_overlay: bool = False
 
     @property
     def ko_gene_ids(self) -> tuple[str, ...]:
@@ -60,10 +61,10 @@ def render_gene_perturbation_form(target_id: str) -> GenePerturbationFormState:
         render_gene_lookup_panel()
         with st.expander("输入说明", expanded=False):
             st.markdown(
-                "- 敲除基因：填写模型基因 ID，例如 `PAS_chr2-2_0107`。\n"
+                "- 敲除基因：正式基因级 KO，填写模型基因 ID，例如 `PAS_chr2-2_0107`；系统按 GPR 规则关闭会失活的反应。\n"
                 "- 敲除反应：用于没有明确基因 ID 的复合体级扰动，例如 `sec_Och1p_complex_formation`。\n"
-                "- 过表达基因：会先解析到该基因参与的反应，再按 reaction-level OE proxy 运行。\n"
-                "- 过表达反应：直接填写模型反应 ID，适合从上方策略库自动填入。"
+                "- 过表达基因：先做 GPR-aware 规划，只有单基因/同工酶等可解释场景才运行 reaction-level OE proxy。\n"
+                "- 过表达反应：高级诊断入口，直接填写模型反应 ID，不代表完整基因表达调控模型。"
             )
         ko_text = st.text_area(
             "敲除基因（KO gene）",
@@ -89,6 +90,15 @@ def render_gene_perturbation_form(target_id: str) -> GenePerturbationFormState:
             key="pichia_draft_oe_reactions",
             placeholder="例如：sec_Kar2p_complex_formation",
         )
+        enable_overlay = st.checkbox(
+            "使用外部证据补充 GPR（实验性，默认关闭）",
+            value=False,
+            key="pichia_enable_gene_rule_overlay",
+            help=(
+                "只在 KO/OE 预检和显式运行中使用 Python 侧证据 overlay；"
+                "不会写回原始模型，也不是 MATLAB 原始 GPR。"
+            ),
+        )
         limit = int(st.number_input("候选数上限", 1, 20, 20, 1, key="pichia_limit"))
         state = GenePerturbationFormState(
             ko_gene_text=ko_text,
@@ -96,6 +106,7 @@ def render_gene_perturbation_form(target_id: str) -> GenePerturbationFormState:
             oe_gene_text=oe_text,
             oe_reaction_text=oe_rxn,
             candidate_limit=limit,
+            enable_gene_rule_overlay=enable_overlay,
         )
         if st.button("预检 KO/OE 输入", key="pichia_preview_screen_inputs"):
             _render_screen_input_preview(target_id, state)
@@ -107,7 +118,8 @@ def gene_mapping_rows_for_display(rows: list[dict[str, Any]]) -> pd.DataFrame:
     for row in rows:
         display_rows.append(
             {
-                "基因": row.get("gene_id", ""),
+                "基因": row.get("input_gene_id") or row.get("gene_id", ""),
+                "模型基因": row.get("canonical_gene_id") or row.get("gene_id", ""),
                 "反应": row.get("reaction_id") or "未解析",
                 "分泌环节": row.get("secretory_process", ""),
                 "映射层级": MAPPING_LEVEL_LABELS.get(
@@ -136,12 +148,19 @@ def _render_screen_input_preview(target_id: str, state: GenePerturbationFormStat
         oe_gene_ids=state.oe_gene_ids,
         oe_reaction_ids=state.oe_reaction_ids,
         screen_candidate_limit=state.candidate_limit,
+        enable_gene_rule_overlay=state.enable_gene_rule_overlay,
     )
     with st.spinner("正在解析模型基因和反应 ID..."):
         preview = preview_screen_inputs(preview_request, PATHS)
     if preview.get("warnings"):
         for warning in preview["warnings"]:
             st.warning(warning)
+    overlay = preview.get("gene_rule_overlay") if isinstance(preview.get("gene_rule_overlay"), dict) else {}
+    if overlay:
+        st.caption(
+            "外部证据 GPR overlay：实验性 Python 分析副本；"
+            f"可执行补充规则 {overlay.get('entry_count', 0)} 条，不写回原始模型。"
+        )
 
     preview_rows = []
     for group_label, key in (
@@ -158,6 +177,11 @@ def _render_screen_input_preview(target_id: str, state: GenePerturbationFormStat
                     "状态": "已解析" if row.get("resolved") else "未解析",
                     "解析到的反应数": row.get("resolved_reaction_count"),
                     "反应预览": ", ".join(row.get("resolved_reactions_preview") or []),
+                    "KO 支持": row.get("ko_support_status") or "",
+                    "OE 支持": row.get("oe_support_status") or "",
+                    "GPR 角色": row.get("gpr_role") or "",
+                    "置信度": row.get("confidence") or row.get("mapping_confidence") or "",
+                    "缺失信息": ", ".join(str(item) for item in row.get("missing_information") or []),
                 }
             )
     if preview_rows:
