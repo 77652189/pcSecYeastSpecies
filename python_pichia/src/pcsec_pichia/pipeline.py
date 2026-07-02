@@ -73,7 +73,12 @@ def run_pichia_secretion_simulation(
     output_dir: Path,
 ) -> PichiaSimulationRunResult:
     root = Path(__file__).resolve().parents[3]
-    inputs = load_pcsec_pichia_inputs(root, media_type=request.media_type, compatibility_mode=request.compatibility_mode)
+    inputs = load_pcsec_pichia_inputs(
+        root,
+        media_type=request.media_type,
+        compatibility_mode=request.compatibility_mode,
+        carbon_source_id=request.carbon_source_id,
+    )
     target = _resolve_target(request, root)
 
     plan = build_secretion_plan(target)
@@ -265,6 +270,7 @@ def run_pichia_secretion_simulation(
     protein_cost_payload["cost_slope_compatibility"] = summarize_protein_cost_slope_compatibility(
         cost_slope_compatibility
     )
+    medium_condition = medium_condition_summary_for_inputs(inputs)
     summary_payload = _attach_pipeline_metadata(
         report.summary_path,
         {
@@ -281,6 +287,10 @@ def run_pichia_secretion_simulation(
             "target_warnings": _target_warnings(target),
             "compatibility_mode": request.compatibility_mode,
             "glycosylation_mode": request.glycosylation_mode,
+            "carbon_source_id": inputs.carbon_source_id,
+            "medium_condition_id": inputs.medium_condition_id,
+            "medium_condition": medium_condition,
+            "medium_condition_warnings": medium_condition.get("warnings") or [],
             "screen_warnings": screen_plan["warnings"],
             "screen_request": {
                 "ko_gene_ids": list(screen_plan["requested_ko_gene_ids"]),
@@ -727,6 +737,7 @@ def _build_pipeline_report(summary: dict[str, Any]) -> str:
     target_warnings = summary.get("target_warnings") or []
     protein_cost = summary.get("protein_cost_analysis") or {}
     target_growth = summary.get("target_growth_analysis") or {}
+    medium_condition = summary.get("medium_condition") or {}
     lines = [
         f"# pcSecPichia Python 分泌仿真报告: {summary.get('target_id')}",
         "",
@@ -766,6 +777,8 @@ def _build_pipeline_report(summary: dict[str, Any]) -> str:
             )
     if target_warnings:
         lines.extend(["", "## 目标输入边界", "", *[f"- {item}" for item in target_warnings]])
+    if medium_condition:
+        lines.extend(_medium_condition_report_lines(medium_condition))
     if protein_cost:
         lines.extend(_protein_cost_report_lines(protein_cost))
     if target_growth:
@@ -813,6 +826,34 @@ def _build_pipeline_report(summary: dict[str, Any]) -> str:
             lines.append(f"- {row.get('summary')}")
         lines.append("")
     return "\n".join(lines)
+
+
+def _medium_condition_report_lines(medium_condition: dict[str, Any]) -> list[str]:
+    warnings = medium_condition.get("warnings") or []
+    active_carbon = [
+        reaction_id
+        for reaction_id in medium_condition.get("active_uptake_reactions") or []
+        if reaction_id in {"Ex_glc_D", "Ex_glyc", "Ex_meoh"}
+    ]
+    closed_carbon = [
+        reaction_id
+        for reaction_id in medium_condition.get("closed_uptake_reactions") or []
+        if reaction_id in {"Ex_glc_D", "Ex_glyc", "Ex_meoh"}
+    ]
+    lines = [
+        "",
+        "## 培养基条件",
+        "",
+        f"- condition id: `{medium_condition.get('condition_id')}`.",
+        f"- carbon source: `{medium_condition.get('carbon_source_id')}`.",
+        f"- scientific status: `{medium_condition.get('scientific_status')}`.",
+        f"- active carbon uptake: `{active_carbon}`.",
+        f"- closed carbon uptake: `{closed_carbon}`.",
+    ]
+    if warnings:
+        lines.extend(["", "培养基提示:"])
+        lines.extend(f"- {warning}" for warning in warnings)
+    return lines
 
 
 def _protein_cost_report_lines(protein_cost: dict[str, Any]) -> list[str]:

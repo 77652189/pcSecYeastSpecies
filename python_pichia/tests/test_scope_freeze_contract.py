@@ -10,7 +10,15 @@ from scipy import sparse
 from pcsec_pichia.alignment import AlignmentSummary
 from pcsec_pichia.constraints import build_pcsec_constraint_matrices
 from pcsec_pichia.engines.base import PichiaSimulationRequest, PichiaSimulationRunResult
-from pcsec_pichia.loading import CobraModel, PcSecPichiaInputs, load_pcsec_pichia_inputs, prepare_glucose_model, set_media_pp
+from pcsec_pichia.loading import (
+    CobraModel,
+    PcSecPichiaInputs,
+    load_pcsec_pichia_inputs,
+    medium_condition_id_for,
+    prepare_carbon_source_model,
+    prepare_glucose_model,
+    set_media_pp,
+)
 from pcsec_pichia.reports import build_candidate_table, write_outputs
 from pcsec_pichia.screens import run_pcsec_ko_screen, run_pcsec_oe_screen
 from pcsec_pichia.secretion_plan import target_reaction_plan
@@ -118,6 +126,62 @@ def test_medium_compatibility_modes_remain_explicit() -> None:
     default_glucose = prepare_glucose_model(model, media_type=4)
     for reaction_id in minimal:
         assert default_glucose.lb[default_glucose.reaction_index[reaction_id]] == -1000.0
+
+
+def test_carbon_source_model_preparation_switches_exchange_bounds() -> None:
+    model = _tiny_exchange_model()
+
+    expected = {
+        "glucose": {
+            "Ex_glc_D": (-1000.0, 1000.0),
+            "Ex_glyc": (0.0, 1000.0),
+            "BIOMASS_glyc": (0.0, 0.0),
+            "Ex_meoh": (0.0, 1000.0),
+            "BIOMASS_meoh": (0.0, 0.0),
+        },
+        "glycerol": {
+            "Ex_glc_D": (0.0, 1000.0),
+            "Ex_glyc": (-1000.0, 1000.0),
+            "BIOMASS_glyc": (0.0, 1000.0),
+            "Ex_meoh": (0.0, 1000.0),
+            "BIOMASS_meoh": (0.0, 0.0),
+        },
+        "methanol": {
+            "Ex_glc_D": (0.0, 1000.0),
+            "Ex_glyc": (0.0, 1000.0),
+            "BIOMASS_glyc": (0.0, 0.0),
+            "Ex_meoh": (-1000.0, 1000.0),
+            "BIOMASS_meoh": (0.0, 1000.0),
+        },
+        "glucose_glycerol": {
+            "Ex_glc_D": (-1000.0, 1000.0),
+            "Ex_glyc": (-1000.0, 1000.0),
+            "BIOMASS_glyc": (0.0, 1000.0),
+            "Ex_meoh": (0.0, 1000.0),
+            "BIOMASS_meoh": (0.0, 0.0),
+        },
+        "glycerol_methanol": {
+            "Ex_glc_D": (0.0, 1000.0),
+            "Ex_glyc": (-1000.0, 1000.0),
+            "BIOMASS_glyc": (0.0, 1000.0),
+            "Ex_meoh": (-1000.0, 1000.0),
+            "BIOMASS_meoh": (0.0, 1000.0),
+        },
+    }
+
+    for carbon_source_id, bounds in expected.items():
+        prepared = prepare_carbon_source_model(model, media_type=4, carbon_source_id=carbon_source_id)
+        for reaction_id, (lower_bound, upper_bound) in bounds.items():
+            index = prepared.reaction_index[reaction_id]
+            assert prepared.lb[index] == lower_bound
+            assert prepared.ub[index] == upper_bound
+
+
+def test_medium_condition_id_tracks_carbon_source_and_supplement_layer() -> None:
+    assert medium_condition_id_for(4, "corrected", "methanol") == "methanol_ynb_core_aa_corrected"
+    assert medium_condition_id_for(2, "corrected", "glycerol") == "glycerol_ynb_minimal_corrected"
+    assert medium_condition_id_for(4, "corrected", "glucose_glycerol") == "glucose_glycerol_ynb_core_aa_corrected"
+    assert medium_condition_id_for(5, "corrected", "glycerol_methanol") == "glycerol_methanol_ynb_all_aa_corrected"
 
 
 def test_stage3_optional_constraint_artifacts_remain_valid() -> None:
