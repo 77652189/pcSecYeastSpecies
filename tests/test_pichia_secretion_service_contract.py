@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import ast
+import json
+import os
+import time
 from pathlib import Path
 
 import pandas as pd
@@ -10,9 +13,17 @@ from app.services.pichia_request_mapping_service import (
     sequence_contract_for_engine,
     target_input_payload,
 )
-from app.services.pichia_background_tasks import response_to_summary
+from app.services.pichia_background_tasks import (
+    BACKGROUND_TASK_STALE_SECONDS,
+    load_latest_completed_background_result,
+    load_last_result,
+    poll_background_simulation,
+    response_to_summary,
+    status_path_for_background_task,
+)
 from app.services.pichia_screen_preview_service import _preview_screen_inputs_for_model
 from app.services.pichia_secretion_schema import SecretionRunRequest, SecretionRunResponse
+from app.services.pichia_secretion_runner import _ensure_pcsec_pichia_analysis_api
 from app.services.pichia_target_catalog_service import (
     _builtin_target_semantics,
 )
@@ -22,9 +33,11 @@ from app.services.pichia_target_catalog_service import (
 )
 from app.ui.views.simulation_display import (
     candidate_effect_counts,
+    candidate_row_label,
     normalise_candidate_frame_for_display,
     target_semantics_label,
 )
+from app.ui.views.simulation_builder import medium_type_label
 from app.ui.views.simulation_gene_inputs import gene_mapping_rows_for_display
 from app.ui.views.simulation_gene_text import merge_candidate_text, parse_candidate_text
 from app.services.pichia_secretion_service import (
@@ -40,6 +53,32 @@ def test_public_pichia_secretion_facade_exposes_run_entrypoint_and_paths() -> No
     assert callable(run_pichia_secretion_draft)
     paths = discover_project_paths()
     assert paths.repo_root == REPO_ROOT
+
+
+def test_runner_refreshes_stale_pcsec_analysis_module(monkeypatch) -> None:
+    import sys
+    import types
+
+    import app.services.pichia_secretion_runner as runner
+
+    stale_module = types.ModuleType("pcsec_pichia.analysis")
+    actual_module = sys.modules.get("pcsec_pichia.analysis")
+
+    def fake_reload(module):
+        module.analyze_target_growth_impact = lambda *args, **kwargs: None
+        module.analyze_yield_improvement_candidates = lambda *args, **kwargs: None
+        module.summarize_protein_cost_slope_compatibility = lambda *args, **kwargs: {}
+        module.summarize_yield_improvement_recommendations = lambda *args, **kwargs: {}
+        return module
+
+    monkeypatch.setitem(sys.modules, "pcsec_pichia.analysis", stale_module)
+    monkeypatch.setattr(runner.importlib, "reload", fake_reload)
+    try:
+        _ensure_pcsec_pichia_analysis_api()
+        assert hasattr(stale_module, "analyze_target_growth_impact")
+    finally:
+        if actual_module is not None:
+            monkeypatch.setitem(sys.modules, "pcsec_pichia.analysis", actual_module)
 
 
 def test_pichia_secretion_facade_exports_only_reviewed_public_symbols() -> None:
@@ -256,6 +295,22 @@ def test_simulation_view_reaches_legacy_matlab_only_through_reference_tab() -> N
     assert not any(module_name.startswith("app.engines") for module_name in imported_modules)
 
 
+def test_simulation_run_button_switches_to_results_page() -> None:
+    source = (REPO_ROOT / "app" / "ui" / "views" / "simulation.py").read_text(encoding="utf-8")
+
+    assert 'key="pichia_run_simulation_button"' in source
+    assert 'key="pichia_clear_last_result_button"' in source
+    assert 'st.session_state.get("pichia_draft_task_status_path")' in source
+    assert 'st.session_state.pop("pichia_switch_to_results", False)' in source
+    assert 'st.session_state[tab_key] = "仿真结果"' in source
+    assert 'st.session_state["pichia_switch_to_results"] = True' in source
+    assert "st.rerun()" in source
+    results_source = (REPO_ROOT / "app" / "ui" / "views" / "simulation_results.py").read_text(encoding="utf-8")
+    assert "刷新仿真状态" in results_source
+    assert "load_latest_completed_background_result(PATHS)" in results_source
+    assert "time.sleep" not in results_source
+
+
 def test_streamlit_display_helpers_localize_candidate_status_without_engine_logic() -> None:
     frame = pd.DataFrame(
         [
@@ -266,6 +321,9 @@ def test_streamlit_display_helpers_localize_candidate_status_without_engine_logi
                 "effect_label": "提升分泌",
                 "mapping_level": "complex_subunit",
                 "mapping_confidence": "medium",
+                "gpr_role": "complex_subunit",
+                "capacity_effect": "complex_subunit_limited",
+                "simulation_basis": "explain_only",
             },
         ]
     )
@@ -277,6 +335,9 @@ def test_streamlit_display_helpers_localize_candidate_status_without_engine_logi
     assert display_frame.loc[0, "effect_label"] == "约束不可行"
     assert display_frame.loc[1, "mapping_level"] == "复合体亚基"
     assert display_frame.loc[1, "mapping_confidence"] == "中"
+    assert display_frame.loc[1, "gpr_role"] == "复合体亚基"
+    assert display_frame.loc[1, "capacity_effect"] == "复合体亚基受限"
+    assert display_frame.loc[1, "simulation_basis"] == "仅解释"
     assert counts == {"提升分泌": 1, "约束不可行": 1}
     assert target_semantics_label("project_defined_hLF") == "项目定义 hLF（用户提供序列）"
 
@@ -557,6 +618,26 @@ def test_response_summary_exposes_target_metadata_and_warnings() -> None:
             "result_status": "draft_explanatory",
             "total_relative_score": 100.0,
             "dominant_cost_categories": ["translation"],
+            "lp_attribution": {
+                "result_status": "draft_lp_sensitivity",
+                "top_constraint_marginals": [{"block": "protein_mass", "marginal": 1.0}],
+            },
+        },
+        target_growth_analysis={
+            "result_status": "draft_explanatory",
+            "growth_sensitivity_label": "increasing",
+            "growth_sensitivity_reason": "monotonic_increasing_successful_grid",
+            "valid_point_count": 1,
+        },
+        yield_improvement_recommendations={
+            "result_status": "draft_model_recommendation",
+            "summary_counts": {"recommended": 1, "not_recommended": 0, "unresolved": 0},
+            "recommended_candidates": [{"display_name": "PEP4"}],
+        },
+        medium_condition={
+            "condition_id": "glucose_glycerol_ynb_core_aa_corrected",
+            "carbon_source_id": "glucose_glycerol",
+            "scientific_status": "draft_co_carbon_boundary_requires_promoter_context",
         },
     )
 
@@ -572,3 +653,11 @@ def test_response_summary_exposes_target_metadata_and_warnings() -> None:
     assert summary["target_warnings"] == ["hLF 使用用户提供的 710aa 目标序列。"]
     assert summary["protein_cost_analysis"]["result_status"] == "draft_explanatory"
     assert summary["protein_cost_analysis"]["total_relative_score"] == 100.0
+    assert summary["protein_cost_analysis"]["lp_attribution"]["result_status"] == "draft_lp_sensitivity"
+    assert summary["target_growth_analysis"]["result_status"] == "draft_explanatory"
+    assert summary["target_growth_analysis"]["growth_sensitivity_label"] == "increasing"
+    assert summary["target_growth_analysis"]["growth_sensitivity_reason"] == "monotonic_increasing_successful_grid"
+    assert summary["yield_improvement_recommendations"]["result_status"] == "draft_model_recommendation"
+    assert summary["yield_improvement_recommendations"]["recommended_candidates"][0]["display_name"] == "PEP4"
+    assert summary["medium_condition"]["condition_id"] == "glucose_glycerol_ynb_core_aa_corrected"
+    assert summary["medium_condition"]["scientific_status"] == "draft_co_carbon_boundary_requires_promoter_context"

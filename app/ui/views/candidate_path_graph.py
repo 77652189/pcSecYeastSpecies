@@ -34,6 +34,7 @@ def render_secretion_path_graph(row: dict[str, object], summary: dict[str, objec
     reaction = display_value(row.get("resolved_reaction_id") or row.get("reaction_id"))
     confidence = display_value(row.get("mapping_confidence"), "未解析")
     interpretation = display_value(row.get("mapping_interpretation"))
+    basis = display_value(row.get("simulation_basis"), "未声明")
     ptm = _target_ptm_counts(summary)
     ptm_label = f"目标 PTM\nDSB={ptm.get('DSB')} / NG={ptm.get('NG')} / OG={ptm.get('OG')}"
 
@@ -42,7 +43,7 @@ def render_secretion_path_graph(row: dict[str, object], summary: dict[str, objec
         "Intervention": {"label": f"扰动\n{intervention}", "fill": "#e5e7eb"},
         "Reaction": {"label": f"反应/复合体\n{reaction[:30]}", "fill": "#e5e7eb"},
         "Process": {"label": f"分泌环节\n{process[:30]}", "fill": "#dbeafe"},
-        "Evidence": {"label": f"解释置信度\n{confidence}", "fill": "#fef9c3"},
+        "Evidence": {"label": f"解释置信度\n{confidence}\n{basis[:24]}", "fill": "#fef9c3"},
         "PTM": {"label": ptm_label, "fill": "#fef3c7"},
         "Secretion": {
             "label": f"分泌通量变化\n{effect}",

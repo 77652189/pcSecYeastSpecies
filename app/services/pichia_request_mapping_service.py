@@ -125,7 +125,10 @@ def request_warnings(request: SecretionRunRequest) -> list[str]:
         elif request.sequence.strip().endswith("*"):
             warnings.append("序列末尾包含终止符 *，如需移除请选择「移除末尾终止符」规范化模式。")
     if request.oe_gene_ids:
-        warnings.append("过表达基因会解析到模型反应，按 reaction-level OE proxy 运行；这不是完整的基因表达调控模拟。")
+        warnings.append(
+            "过表达基因会先进行 GPR-aware 规划；只有可解释的单基因/同工酶场景才运行 "
+            "reaction-level OE proxy，这不是完整的基因表达调控模拟。"
+        )
     if request.growth_points != (0.10,):
         warnings.append("生长权衡使用指定的小网格生长速率，为快速 smoke 而非完整扫描。")
     return warnings

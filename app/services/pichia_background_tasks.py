@@ -11,6 +11,8 @@ from pcsec_pichia.core.paths import ProjectPaths
 
 from app.services.pichia_secretion_schema import SecretionRunRequest, SecretionRunResponse
 
+BACKGROUND_TASK_STALE_SECONDS = 10 * 60
+
 
 def save_last_result(result_dict: dict[str, object], paths: ProjectPaths) -> None:
     """Save the most recent simulation result to a local cache file."""
@@ -29,7 +31,7 @@ def load_last_result(paths: ProjectPaths) -> dict[str, object] | None:
     try:
         data = json.loads(cache_path.read_text(encoding="utf-8"))
         return data if isinstance(data, dict) else None
-    except (json.JSONDecodeError, OSError):
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError):
         return None
 
 
@@ -68,18 +70,42 @@ def poll_background_simulation(status_path: Path) -> tuple[str, str, dict[str, A
     """Poll the status of a background simulation task.
 
     Returns (status, message, result_dict_or_None).
-    Status is one of: "pending", "running", "done", "error", "lost".
+    Status is one of: "pending", "running", "done", "error", "lost", "stale".
     """
     if not status_path.exists():
         return "lost", "状态文件不存在", None
     try:
         data = json.loads(status_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError):
         return "lost", "无法读取状态文件", None
     status: str = data.get("status", "unknown")
     message: str = data.get("message", "")
     result: dict[str, Any] | None = data.get("result")
+    if status in {"pending", "running"} and _is_stale_status_file(status_path):
+        return (
+            "stale",
+            "任务状态长时间未更新，可能是应用重启或后台线程中断；正在尝试回收最近完成结果。",
+            None,
+        )
     return status, message, result
+
+
+def load_latest_completed_background_result(paths: ProjectPaths) -> dict[str, Any] | None:
+    """Load the newest completed background-task result, if one exists."""
+    candidates = sorted(
+        _background_dir(paths).glob("*/status.json"),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+    for status_path in candidates:
+        try:
+            payload = json.loads(status_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError, UnicodeDecodeError):
+            continue
+        result = payload.get("result")
+        if payload.get("status") == "done" and isinstance(result, dict):
+            return result
+    return None
 
 
 def status_path_for_background_task(task_id: str, paths: ProjectPaths | None = None) -> Path:
@@ -108,6 +134,9 @@ def response_to_summary(response: SecretionRunResponse) -> dict[str, Any]:
         "target_metadata": response.target_metadata,
         "target_warnings": response.target_warnings,
         "protein_cost_analysis": response.protein_cost_analysis,
+        "target_growth_analysis": response.target_growth_analysis,
+        "yield_improvement_recommendations": response.yield_improvement_recommendations,
+        "medium_condition": response.medium_condition,
     }
 
 
@@ -117,16 +146,13 @@ def _last_result_dir(paths: ProjectPaths) -> Path:
     return directory
 
 
-_BACKGROUND_DIR: Path | None = None
 _BACKGROUND_LOCK = threading.Lock()
 
 
 def _background_dir(paths: ProjectPaths) -> Path:
-    global _BACKGROUND_DIR
-    if _BACKGROUND_DIR is None:
-        _BACKGROUND_DIR = paths.local_runs_dir / "streamlit_pichia_runs" / ".background_tasks"
-        _BACKGROUND_DIR.mkdir(parents=True, exist_ok=True)
-    return _BACKGROUND_DIR
+    directory = paths.local_runs_dir / "streamlit_pichia_runs" / ".background_tasks"
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory
 
 
 def _write_status(path: Path, status: str, *, message: str = "", result: dict[str, Any] | None = None) -> None:
@@ -138,6 +164,14 @@ def _write_status(path: Path, status: str, *, message: str = "", result: dict[st
     if result is not None:
         data["result"] = result
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _is_stale_status_file(path: Path) -> bool:
+    try:
+        age_seconds = datetime.now().timestamp() - path.stat().st_mtime
+    except OSError:
+        return False
+    return age_seconds > BACKGROUND_TASK_STALE_SECONDS
 
 
 def _run_background_task(request: SecretionRunRequest, paths: ProjectPaths, status_path: Path) -> None:
@@ -153,7 +187,9 @@ def _run_background_task(request: SecretionRunRequest, paths: ProjectPaths, stat
 
 
 __all__ = [
+    "BACKGROUND_TASK_STALE_SECONDS",
     "clear_last_result",
+    "load_latest_completed_background_result",
     "load_last_result",
     "poll_background_simulation",
     "response_to_summary",

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 import json
 from pathlib import Path
 from typing import Any
@@ -17,6 +18,7 @@ def run_pichia_pipeline_draft(
     sequence_contract: dict[str, Any],
 ) -> SecretionRunResponse:
     """Run the formal python_pichia pipeline for the app service facade."""
+    _ensure_pcsec_pichia_analysis_api()
     from pcsec_pichia.engines.base import PichiaSimulationRequest
     from pcsec_pichia.pipeline import run_pichia_secretion_simulation
 
@@ -38,6 +40,12 @@ def run_pichia_pipeline_draft(
             oe_gene_ids=tuple(request.oe_gene_ids),
             oe_reaction_ids=tuple(request.oe_reaction_ids or request.oe_candidates),
             screen_candidate_limit=int(request.screen_candidate_limit),
+            enable_gene_rule_overlay=bool(request.enable_gene_rule_overlay),
+            enable_cost_slope_compatibility=bool(request.enable_cost_slope_compatibility),
+            cost_slope_growth_rates=tuple(request.cost_slope_growth_rates),
+            cost_slope_secretion_ratios=tuple(request.cost_slope_secretion_ratios),
+            cost_slope_capacity_fractions=tuple(request.cost_slope_capacity_fractions),
+            cost_slope_medium_compatibility_mode=str(request.cost_slope_medium_compatibility_mode),
             **sequence_contract,
         )
         result = run_pichia_secretion_simulation(engine_request, output_dir=output_dir)
@@ -54,11 +62,27 @@ def run_pichia_pipeline_draft(
 
     summary_payload = _result_summary_payload(result.summary_path)
     summary_warnings = [str(item) for item in summary_payload.get("screen_warnings") or []]
+    medium_warnings = [str(item) for item in summary_payload.get("medium_condition_warnings") or []]
     target_warnings = [str(item) for item in summary_payload.get("target_warnings") or []]
     target_metadata = summary_payload.get("target_metadata") if isinstance(summary_payload.get("target_metadata"), dict) else {}
     protein_cost = (
         summary_payload.get("protein_cost_analysis")
         if isinstance(summary_payload.get("protein_cost_analysis"), dict)
+        else {}
+    )
+    target_growth = (
+        summary_payload.get("target_growth_analysis")
+        if isinstance(summary_payload.get("target_growth_analysis"), dict)
+        else {}
+    )
+    yield_recommendations = (
+        summary_payload.get("yield_improvement_recommendations")
+        if isinstance(summary_payload.get("yield_improvement_recommendations"), dict)
+        else {}
+    )
+    medium_condition = (
+        summary_payload.get("medium_condition")
+        if isinstance(summary_payload.get("medium_condition"), dict)
         else {}
     )
 
@@ -70,7 +94,7 @@ def run_pichia_pipeline_draft(
         objective_value=result.objective_value,
         secretion_flux=result.objective_value,
         constraint_counts=dict(result.constraint_counts),
-        warnings=[*warnings, *summary_warnings],
+        warnings=[*warnings, *medium_warnings, *summary_warnings],
         output_dir=output_dir,
         summary_path=result.summary_path,
         report_path=result.report_path,
@@ -80,6 +104,9 @@ def run_pichia_pipeline_draft(
         target_metadata=dict(target_metadata),
         target_warnings=target_warnings,
         protein_cost_analysis=dict(protein_cost),
+        target_growth_analysis=dict(target_growth),
+        yield_improvement_recommendations=dict(yield_recommendations),
+        medium_condition=dict(medium_condition),
     )
 
 
@@ -91,6 +118,29 @@ def _result_summary_payload(summary_path: Path | None) -> dict[str, Any]:
     except Exception:
         return {}
     return payload if isinstance(payload, dict) else {}
+
+
+def _ensure_pcsec_pichia_analysis_api() -> None:
+    """Refresh long-lived Streamlit imports after engine modules change on disk."""
+    runtime = importlib.import_module("sys")
+    module = runtime.modules.get("pcsec_pichia.analysis")
+    required = {
+        "analyze_target_growth_impact",
+        "analyze_yield_improvement_candidates",
+        "summarize_protein_cost_slope_compatibility",
+        "summarize_yield_improvement_recommendations",
+    }
+    if module is not None and not required.issubset(set(dir(module))):
+        module = importlib.reload(module)
+    if module is None:
+        module = importlib.import_module("pcsec_pichia.analysis")
+    missing = sorted(name for name in required if not hasattr(module, name))
+    if missing:
+        source = getattr(module, "__file__", "<unknown>")
+        raise ImportError(
+            f"pcsec_pichia.analysis is missing {', '.join(missing)} "
+            f"after reload from {source}"
+        )
 
 
 __all__ = ["run_pichia_pipeline_draft"]

@@ -10,6 +10,23 @@ from app.ui.common import PATHS
 from app.ui.views.simulation_display import target_semantics_label
 
 
+MEDIA_TYPE_LABELS: dict[int, str] = {
+    2: "YNB 基础培养基（维生素，无氨基酸）",
+    4: "YNB + 核心氨基酸（15 种，默认）",
+    5: "YNB + 全氨基酸（20 种）",
+}
+
+MEDIA_TYPE_DESCRIPTIONS: dict[int, str] = {
+    2: "碳源 + 无机盐 + YNB 维生素 7 种 @ -2.0 mmol·gDCW⁻¹·h⁻¹\n不开放氨基酸补料",
+    4: "碳源 + 无机盐 + YNB 维生素\n开放 15 种核心氨基酸 @ -0.08\n不含: Ala, Asn, Cys, Gln, Pro, Ser",
+    5: "碳源 + 无机盐 + YNB 维生素\n开放全 20 种氨基酸 @ -0.08",
+}
+
+
+def medium_type_label(media_type: int) -> str:
+    return MEDIA_TYPE_LABELS.get(int(media_type), f"未知培养基配方（media_type={media_type}）")
+
+
 @dataclass(frozen=True)
 class TargetBuildFormState:
     build_mode: str
@@ -24,8 +41,11 @@ class TargetBuildFormState:
     mature_sequence: str
     enable_ribosome: bool
     enable_misfolding: bool
+    enable_cost_slope_compatibility: bool
+    cost_slope_medium_compatibility_mode: str
     mu: float
     media_type: int
+    carbon_source_id: str
 
 
 def render_target_build_form() -> TargetBuildFormState:
@@ -125,18 +145,63 @@ def render_target_build_form() -> TargetBuildFormState:
 
     enable_ribosome = st.checkbox("启用核糖体约束", value=True)
     enable_misfolding = st.checkbox("启用错误折叠约束", value=True)
-    col_mu, col_media = st.columns(2)
+    enable_cost_slope_compatibility = st.checkbox(
+        "启用蛋白成本斜率对比（MATLAB 历史路线，可选，较慢）",
+        value=False,
+        help=(
+            "当前默认路线：固定生长率 μ，在 corrected 培养基下最大化目标蛋白分泌通量，"
+            "用于估计当前条件下的分泌能力。"
+            "历史 MATLAB 成本路线：固定生长率 μ，再固定一组目标蛋白分泌比例，"
+            "然后优化葡萄糖摄取反应 Ex_glc_D；通过葡萄糖摄取变化和核糖体通量变化估算 protein cost slope。"
+            "打开此项只会额外运行历史成本路线用于对比/解释，不会替换或改变当前默认 corrected pipeline 的数值结果。"
+        ),
+    )
+    cost_slope_medium_compatibility_mode = "corrected"
+    if enable_cost_slope_compatibility:
+        cost_slope_medium_compatibility_mode = st.selectbox(
+            "蛋白成本对比使用的培养基边界",
+            ["corrected", "matlab_legacy_cost"],
+            format_func=lambda value: {
+                "corrected": "Python corrected：使用当前修正后的培养基边界",
+                "matlab_legacy_cost": "MATLAB 历史 artifact：仅为旧 Protein_cost_TP 对齐关闭 9 个 exchange",
+            }[value],
+            help=(
+                "只影响上面的蛋白成本斜率对比，不影响默认分泌仿真。"
+                "Python corrected 更适合当前模型解释；MATLAB 历史 artifact 用于复现旧 MATLAB 成本分析的培养基边界，"
+                "不代表更推荐的默认科学设置。"
+            ),
+            key="pichia_cost_slope_medium_mode",
+        )
+    col_mu, col_media, col_carbon = st.columns(3)
     with col_mu:
         mu = st.number_input("μ (h⁻¹)", 0.01, 0.44, 0.10, 0.01, format="%.2f", key="pichia_mu")
     with col_media:
-        media_type = int(st.selectbox("培养基", {"2": "YNB基础", "4": "YNB+核心aa", "5": "YNB+全aa"}, index=1, key="pichia_media"))
+        media_type = int(
+            st.selectbox(
+                "培养基配方",
+                list(MEDIA_TYPE_LABELS),
+                index=1,
+                format_func=medium_type_label,
+                key="pichia_media",
+                help="这里显示的是成分名称；内部仍映射到 MATLAB/Python 使用的 media_type 编号，数值行为不变。",
+            )
+        )
         with st.expander("成分", expanded=False):
-            media_info = {
-                2: "维生素 7 种 @ -2.0 mmol·gDCW⁻¹·h⁻¹\n无氨基酸",
-                4: "维生素 + 15 种核心aa @ -0.08\n不含: Ala, Asn, Cys, Gln, Pro, Ser",
-                5: "维生素 + 全 20aa @ -0.08",
-            }
-            st.code(media_info.get(media_type, ""), language="text")
+            st.code(MEDIA_TYPE_DESCRIPTIONS.get(media_type, ""), language="text")
+    with col_carbon:
+        carbon_source_id = st.selectbox(
+            "碳源",
+            ["glucose", "methanol", "glycerol", "glucose_glycerol", "glycerol_methanol"],
+            format_func=lambda value: {
+                "glucose": "葡萄糖 glucose",
+                "methanol": "甲醇 methanol",
+                "glycerol": "甘油 glycerol",
+                "glucose_glycerol": "葡萄糖 + 甘油",
+                "glycerol_methanol": "甘油 + 甲醇",
+            }[value],
+            key="pichia_carbon_source",
+            help="切换模型中允许摄取的主要碳源。葡萄糖是当前默认 corrected 条件；甲醇/甘油为 Python draft 边界配置，仍需按目标场景验证。",
+        )
 
     return TargetBuildFormState(
         build_mode=build_mode,
@@ -151,9 +216,12 @@ def render_target_build_form() -> TargetBuildFormState:
         mature_sequence=mature_sequence,
         enable_ribosome=enable_ribosome,
         enable_misfolding=enable_misfolding,
+        enable_cost_slope_compatibility=enable_cost_slope_compatibility,
+        cost_slope_medium_compatibility_mode=cost_slope_medium_compatibility_mode,
         mu=float(mu),
         media_type=media_type,
+        carbon_source_id=str(carbon_source_id),
     )
 
 
-__all__ = ["TargetBuildFormState", "render_target_build_form"]
+__all__ = ["TargetBuildFormState", "medium_type_label", "render_target_build_form"]

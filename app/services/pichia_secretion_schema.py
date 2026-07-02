@@ -39,6 +39,11 @@ class SecretionRunRequest:
     ko_candidates: tuple[str, ...] = ()
     oe_candidates: tuple[str, ...] = ()
     growth_points: tuple[float, ...] = (0.10,)
+    enable_cost_slope_compatibility: bool = False
+    cost_slope_growth_rates: tuple[float, ...] = (0.05, 0.10)
+    cost_slope_secretion_ratios: tuple[float, ...] = ()
+    cost_slope_capacity_fractions: tuple[float, ...] = (0.10, 0.25, 0.50, 0.75, 0.90)
+    cost_slope_medium_compatibility_mode: str = "corrected"
     mu: float = 0.10
     media_type: int = 4
     carbon_source_id: str = "glucose"
@@ -65,6 +70,9 @@ class SecretionRunResponse:
     target_metadata: dict[str, Any] = field(default_factory=dict)
     target_warnings: list[str] = field(default_factory=list)
     protein_cost_analysis: dict[str, Any] = field(default_factory=dict)
+    target_growth_analysis: dict[str, Any] = field(default_factory=dict)
+    yield_improvement_recommendations: dict[str, Any] = field(default_factory=dict)
+    medium_condition: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
