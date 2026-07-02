@@ -24,6 +24,7 @@ CANDIDATE_COLUMNS: tuple[str, ...] = (
     "screen_type",
     "candidate_id",
     "gene_id",
+    "canonical_gene_id",
     "reaction_id",
     "input_gene_id",
     "resolved_reaction_id",
@@ -36,6 +37,26 @@ CANDIDATE_COLUMNS: tuple[str, ...] = (
     "mapping_confidence",
     "mapping_interpretation",
     "complex_id",
+    "affected_reactions",
+    "inactive_reactions",
+    "inactive_reactions_preview",
+    "inactive_reaction_count",
+    "gpr_rules",
+    "gpr_role",
+    "capacity_effect",
+    "simulation_basis",
+    "ko_support_status",
+    "oe_support_status",
+    "support_reason",
+    "missing_information",
+    "warnings",
+    "database_annotation_sources",
+    "database_annotation_confidence",
+    "model_gpr_executable",
+    "oe_reaction_proxy",
+    "phenotype_evidence",
+    "recommendation_tier",
+    "recommendation_tier_reason",
     "success",
     "status",
     "objective_value",
@@ -50,6 +71,7 @@ CORE_CANDIDATE_EXPLANATION_COLUMNS: tuple[str, ...] = (
     "screen_type",
     "candidate_id",
     "gene_id",
+    "canonical_gene_id",
     "reaction_id",
     "input_gene_id",
     "resolved_reaction_id",
@@ -60,6 +82,16 @@ CORE_CANDIDATE_EXPLANATION_COLUMNS: tuple[str, ...] = (
     "mapping_confidence",
     "mapping_interpretation",
     "complex_id",
+    "affected_reactions",
+    "inactive_reactions",
+    "inactive_reaction_count",
+    "gpr_role",
+    "capacity_effect",
+    "simulation_basis",
+    "ko_support_status",
+    "oe_support_status",
+    "support_reason",
+    "missing_information",
     "success",
     "status",
     "objective_value",
@@ -184,6 +216,7 @@ def build_markdown_report(summary: dict[str, Any]) -> str:
     candidate_interpretation = summary.get("candidate_interpretation") or {}
     protein_cost = summary.get("protein_cost_analysis") or {}
     target_growth = summary.get("target_growth_analysis") or {}
+    yield_recommendations = summary.get("yield_improvement_recommendations") or {}
     lines = [
             f"# pcSecPichia Python 分泌仿真报告: {target_id}",
             "",
@@ -226,6 +259,8 @@ def build_markdown_report(summary: dict[str, Any]) -> str:
         lines.extend(_protein_cost_markdown_lines(protein_cost))
     if target_growth:
         lines.extend(_target_growth_markdown_lines(target_growth))
+    if yield_recommendations:
+        lines.extend(_yield_recommendation_markdown_lines(yield_recommendations))
     return "\n".join(lines)
 
 
@@ -402,6 +437,7 @@ def _yield_recommendation_markdown_lines(payload: dict[str, Any]) -> list[str]:
     lines.append("")
     return lines
 
+
 def build_candidate_interpretation(candidate_rows: Iterable[dict[str, Any]], limit: int = 5) -> dict[str, Any]:
     rows = [normalize_candidate_explanation_row(row) for row in candidate_rows]
     counts: dict[str, int] = {}
@@ -493,6 +529,9 @@ def normalize_candidate_explanation_row(row: dict[str, Any]) -> dict[str, Any]:
     mapping_level = _text(row.get("mapping_level"), "unresolved")
     mapping_confidence = _text(row.get("mapping_confidence"), "unresolved")
     mapping_interpretation = _text(row.get("mapping_interpretation"))
+    gpr_role = _text(row.get("gpr_role"), "unresolved")
+    capacity_effect = _text(row.get("capacity_effect"), "unknown")
+    simulation_basis = _text(row.get("simulation_basis"), "unknown")
     effect_label = _effect_bucket(row)
     delta = row.get("delta_objective")
     status = _text(row.get("status"))
@@ -502,8 +541,11 @@ def normalize_candidate_explanation_row(row: dict[str, Any]) -> dict[str, Any]:
     summary = (
         f"{intervention_type} `{candidate_id}`：{effect_label}；"
         f"关联环节：{process}；映射置信度：{_confidence_label(mapping_confidence)}；"
+        f"GPR：{gpr_role}；依据：{simulation_basis}；"
         f"Δobjective={delta_text}。{status_note}"
     )
+    if capacity_effect:
+        summary = f"{summary} capacity_effect={capacity_effect}。"
     if mapping_interpretation:
         summary = f"{summary} {mapping_interpretation}"
     return {
@@ -514,6 +556,9 @@ def normalize_candidate_explanation_row(row: dict[str, Any]) -> dict[str, Any]:
         "mapping_level": mapping_level,
         "mapping_confidence": mapping_confidence,
         "mapping_interpretation": mapping_interpretation,
+        "gpr_role": gpr_role,
+        "capacity_effect": capacity_effect,
+        "simulation_basis": simulation_basis,
         "delta_objective": delta,
         "status": status,
         "solver_status_label": solver_status,
@@ -533,6 +578,8 @@ def _effect_bucket(row: dict[str, Any]) -> str:
         return "降低分泌"
     if "无明显" in effect:
         return "无明显变化"
+    if status in {"not_run_complex_subunit_limited", "not_run_gene_oe_proxy", "not_run_no_gpr_effect"} or "未运行" in effect:
+        return "未运行"
     if "未解析" in effect or status in {"unresolved_gene", "unresolved_reaction", "missing_reaction"}:
         return "未解析"
     if str(row.get("success")).lower() not in {"true", "1"}:
@@ -546,8 +593,9 @@ def _candidate_explanation_sort_key(row: dict[str, Any]) -> tuple[int, float, st
         "降低分泌": 1,
         "约束不可行": 2,
         "求解失败": 3,
-        "未解析": 4,
-        "无明显变化": 5,
+        "未运行": 4,
+        "未解析": 5,
+        "无明显变化": 6,
     }.get(str(row.get("effect_bucket")), 9)
     delta = row.get("delta_objective")
     try:
@@ -562,6 +610,8 @@ def _status_note(status: str, solver_status: str, effect_label: str) -> str:
         return "固定生长下约束不可行，需要降低生长点、放宽扰动或单独诊断。"
     if effect_label == "未解析":
         return "候选 ID 未解析到当前模型对象。"
+    if effect_label == "未运行":
+        return "该基因扰动仅做 GPR/复合体解释，本轮未运行 capacity proxy。"
     if solver_status and solver_status != "求解成功":
         return f"求解状态：{solver_status}。"
     return "该解释仅表示当前模型约束下的相对分泌能力变化。"

@@ -5,6 +5,7 @@ import csv
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -12,12 +13,14 @@ from pcsec_pichia.engines.base import PichiaSimulationRequest, PichiaSimulationR
 from pcsec_pichia.pipeline import (
     _alignment_request_for_target,
     _annotate_gene_evidence,
+    _annotate_gene_input_ids,
     _build_pipeline_report,
+    _cost_slope_secretion_ratio_policy,
     _target_metadata,
     run_pichia_secretion_simulation,
 )
-from pcsec_pichia.screens import ScreenResult, resolve_oe_gene_reactions, split_existing_genes
-from pcsec_pichia.screens.planning import build_screen_plan
+from pcsec_pichia.screens import ScreenResult, plan_gene_overexpression, split_existing_genes
+from pcsec_pichia.screens.planning import _canonicalize_gene_ids, build_screen_plan
 from pcsec_pichia.services.gene_evidence import GeneExternalEvidence
 from pcsec_pichia.targets import target_spec_from_mapping
 
@@ -51,6 +54,72 @@ def test_pipeline_solve_tests_are_slow_gated() -> None:
     assert ungated == []
 
 
+def test_pipeline_report_includes_medium_condition_warnings() -> None:
+    report = _build_pipeline_report(
+        {
+            "target_id": "OPN_ALPHA_FULL_PROJECT",
+            "result_status": "corrected_condition",
+            "matlab_alignment_status": "pending",
+            "target_parameter_status": "draft",
+            "success": True,
+            "objective_value": 0.1,
+            "growth_rate": 0.10,
+            "constraint_counts": {},
+            "candidate_count": 0,
+            "tradeoff": {"tradeoff_rows": []},
+            "medium_condition": {
+                "condition_id": "glucose_glycerol_ynb_core_aa_corrected",
+                "carbon_source_id": "glucose_glycerol",
+                "scientific_status": "draft_co_carbon_boundary_requires_promoter_context",
+                "active_uptake_reactions": ["Ex_glc_D", "Ex_glyc", "Ex_o2"],
+                "closed_uptake_reactions": ["Ex_meoh"],
+                "warnings": [
+                    "葡萄糖+甘油条件只打开共碳源摄取；当前模型未加入摄取比例、碳源偏好或启动子阻遏约束。"
+                ],
+            },
+        }
+    )
+
+    assert "## 培养基条件" in report
+    assert "glucose_glycerol_ynb_core_aa_corrected" in report
+    assert "draft_co_carbon_boundary_requires_promoter_context" in report
+    assert "共碳源摄取" in report
+
+
+def test_cost_slope_ratio_policy_defaults_to_capacity_fractions() -> None:
+    request = PichiaSimulationRequest(
+        target_id="OPN_ALPHA_FULL_PROJECT",
+        candidate_id="OPN_ALPHA_FULL_PROJECT",
+        cost_slope_secretion_ratios=(),
+        cost_slope_capacity_fractions=(0.10, 0.50),
+    )
+    simulation = SimpleNamespace(success=True, secretion_flux=2.0e-4)
+
+    ratios, policy = _cost_slope_secretion_ratio_policy(request, simulation)
+
+    assert ratios == (2.0e-5, 1.0e-4)
+    assert policy["secretion_ratio_policy"] == "capacity_fraction_ratios"
+    assert policy["capacity_reference"] == 2.0e-4
+    assert policy["capacity_fractions"] == (0.10, 0.50)
+    assert "capacity fractions" in policy["warnings"][0]
+
+
+def test_cost_slope_ratio_policy_respects_explicit_absolute_ratios() -> None:
+    request = PichiaSimulationRequest(
+        target_id="OPN_ALPHA_FULL_PROJECT",
+        candidate_id="OPN_ALPHA_FULL_PROJECT",
+        cost_slope_secretion_ratios=(5.0e-7, 1.0e-6),
+        cost_slope_capacity_fractions=(0.10, 0.50),
+    )
+    simulation = SimpleNamespace(success=True, secretion_flux=2.0e-4)
+
+    ratios, policy = _cost_slope_secretion_ratio_policy(request, simulation)
+
+    assert ratios == (5.0e-7, 1.0e-6)
+    assert policy["secretion_ratio_policy"] == "explicit_absolute_ratios"
+    assert policy["capacity_reference"] is None
+
+
 def _assert_common_pipeline_outputs(result: PichiaSimulationRunResult, output_dir: Path) -> dict[str, object]:
     assert isinstance(result, PichiaSimulationRunResult)
     assert result.success is True
@@ -74,6 +143,23 @@ def _assert_common_pipeline_outputs(result: PichiaSimulationRunResult, output_di
     assert summary["compatibility_mode"] == "corrected"
     assert summary["protein_cost_analysis"]["result_status"] == "draft_explanatory"
     assert summary["protein_cost_analysis"]["total_relative_score"] == pytest.approx(100.0, abs=0.01)
+    lp_attribution = summary["protein_cost_analysis"]["lp_attribution"]
+    assert lp_attribution["result_status"] in {
+        "draft_lp_sensitivity",
+        "draft_lp_sensitivity_unavailable",
+    }
+    assert "eq_marginals" not in lp_attribution
+    assert "lower_marginals" not in lp_attribution
+    cost_slope = summary["protein_cost_analysis"]["cost_slope_compatibility"]
+    assert cost_slope["enabled"] is False
+    assert cost_slope["result_status"] == "disabled"
+    assert summary["target_growth_analysis"]["result_status"] == "draft_explanatory"
+    assert summary["target_growth_analysis"]["growth_sensitivity_label"] in {
+        "increasing",
+        "decreasing",
+        "mixed",
+        "insufficient_points",
+    }
     assert result.result_status == "corrected_condition"
     assert result.matlab_alignment_status != "aligned"
 
@@ -82,6 +168,7 @@ def _assert_common_pipeline_outputs(result: PichiaSimulationRunResult, output_di
     assert candidate_rows
     assert {
         "gene_id",
+        "canonical_gene_id",
         "reaction_id",
         "input_gene_id",
         "resolved_reaction_id",
@@ -94,6 +181,17 @@ def _assert_common_pipeline_outputs(result: PichiaSimulationRunResult, output_di
         "mapping_confidence",
         "mapping_interpretation",
         "complex_id",
+        "affected_reactions",
+        "inactive_reactions",
+        "inactive_reaction_count",
+        "gpr_rules",
+        "gpr_role",
+        "capacity_effect",
+        "simulation_basis",
+        "ko_support_status",
+        "oe_support_status",
+        "support_reason",
+        "missing_information",
         "objective_value",
         "baseline_objective_value",
         "delta_objective",
@@ -115,12 +213,16 @@ def test_oe_gene_resolution_expands_model_rules() -> None:
         gene_index = {"G1": 0, "G2": 1}
         reaction_index = {"R1": 0, "R2": 1, "R3": 2}
 
-    reactions, mapping, unresolved, warnings = resolve_oe_gene_reactions(TinyModel(), ("G1", "G2", "NO_SUCH_GENE"), 10)
+    g1 = plan_gene_overexpression(TinyModel(), "G1")
+    g2 = plan_gene_overexpression(TinyModel(), "G2")
+    unresolved = plan_gene_overexpression(TinyModel(), "NO_SUCH_GENE")
 
-    assert reactions == ["R1", "R2"]
-    assert mapping == {"R1": "G1", "R2": "G1,G2"}
-    assert unresolved == ("NO_SUCH_GENE",)
-    assert warnings == []
+    assert g1.executable_reactions == ("R1", "R2")
+    assert g1.gpr_role == "mixed"
+    assert g1.capacity_effect == "reaction_capacity_proxy"
+    assert g2.executable_reactions == ("R2",)
+    assert g2.gpr_role == "isoenzyme"
+    assert unresolved.resolved is False
 
 
 def test_gene_resolution_splits_existing_and_unresolved_ids() -> None:
@@ -131,6 +233,74 @@ def test_gene_resolution_splits_existing_and_unresolved_ids() -> None:
 
     assert existing == ["G1", "G2"]
     assert unresolved == ("NO_SUCH_GENE",)
+
+
+def test_pipeline_gene_alias_canonicalization_preserves_user_input_id() -> None:
+    class TinyModel:
+        gene_index = {"G1": 0}
+
+    evidence = {
+        "G1": GeneExternalEvidence(
+            gene_id="G1",
+            canonical_gene_id="G1",
+            aliases=("ALIAS1",),
+        )
+    }
+    canonical_ids, warnings, input_by_gene = _canonicalize_gene_ids(TinyModel(), ["ALIAS1"], evidence)
+    result = ScreenResult(
+        target_id="OPN_ALPHA_FULL_PROJECT",
+        screen_type="knockout",
+        success=True,
+        candidate_count=1,
+        rows=(
+            {
+                "gene_id": "G1",
+                "input_gene_id": "G1",
+                "candidate_id": "G1",
+                "success": True,
+                "status": "0",
+            },
+        ),
+        constraint_counts={},
+        baseline_objective_value=1.0,
+        result_status="draft",
+        matlab_alignment_status="pending",
+    )
+
+    annotated = _annotate_gene_input_ids(result, input_by_gene)
+
+    assert canonical_ids == ["G1"]
+    assert input_by_gene == {"G1": "ALIAS1"}
+    assert any("ALIAS1" in item and "G1" in item for item in warnings)
+    assert annotated.rows[0]["canonical_gene_id"] == "G1"
+    assert annotated.rows[0]["input_gene_id"] == "ALIAS1"
+
+
+def test_pipeline_gene_alias_annotation_handles_merged_oe_reaction_genes() -> None:
+    result = ScreenResult(
+        target_id="OPN_ALPHA_FULL_PROJECT",
+        screen_type="overexpression",
+        success=True,
+        candidate_count=1,
+        rows=(
+            {
+                "gene_id": None,
+                "input_gene_id": "G1,G2",
+                "candidate_id": "R1",
+                "success": True,
+                "status": "0",
+            },
+        ),
+        constraint_counts={},
+        baseline_objective_value=1.0,
+        result_status="draft",
+        matlab_alignment_status="pending",
+    )
+
+    annotated = _annotate_gene_input_ids(result, {"G1": "ALIAS1", "G2": "ALIAS2"})
+
+    assert annotated.rows[0]["canonical_gene_id"] == "G1,G2"
+    assert annotated.rows[0]["input_gene_id"] == "ALIAS1,ALIAS2"
 
 
 def test_pipeline_gene_evidence_annotation_uses_injected_cache_when_cwd_differs(
@@ -175,6 +345,7 @@ def test_pipeline_gene_evidence_annotation_uses_injected_cache_when_cwd_differs(
     assert row["database_annotation_sources"] == ["offline_cache"]
     assert row["database_annotation_confidence"] == "high_exact_locus_tag"
     assert row["recommendation_tier"] == "model_executable"
+
 
 def test_screen_plan_uses_manual_candidates_without_solving() -> None:
     class TinyModel:
@@ -347,6 +518,23 @@ def test_pipeline_report_includes_draft_and_candidate_interpretation() -> None:
                     }
                 ],
             },
+            "yield_improvement_recommendations": {
+                "result_status": "draft_model_recommendation",
+                "candidate_count": 1,
+                "summary_counts": {"recommended": 1, "not_recommended": 0, "unresolved": 0},
+                "recommended_candidates": [
+                    {
+                        "display_name": "PEP4",
+                        "intervention_type": "KO",
+                        "execution_mode": "gene_level_ko",
+                        "recommendation_label": "strong_model_candidate",
+                        "delta_objective": 1e-6,
+                        "evidence_tier": "模型可执行 GPR + curated 证据",
+                        "rationale": "模型显示分泌目标提升。",
+                    }
+                ],
+                "warnings": ["Python corrected draft 模型内推荐"],
+            },
         }
     )
 
@@ -354,6 +542,9 @@ def test_pipeline_report_includes_draft_and_candidate_interpretation() -> None:
     assert "MATLAB 对齐状态" in report
     assert "## 候选解释" in report
     assert "提升分泌" in report
+    assert "## 目标蛋白产量提升推荐" in report
+    assert "strong_model_candidate" in report
+    assert "gene-level KO" in report
 
 
 def test_pipeline_report_keeps_hlf_project_710_alignment_semantics() -> None:
@@ -500,11 +691,95 @@ def test_pipeline_report_includes_protein_cost_analysis_section() -> None:
                     }
                 ],
                 "warnings": ["draft explanatory score"],
+                "lp_attribution": {
+                    "result_status": "draft_lp_sensitivity",
+                    "objective_evidence": {
+                        "objective_reaction": "r_OPN_ALPHA_FULL_PROJECT_exchange",
+                        "secretion_flux": 0.006,
+                    },
+                    "dominant_constraint_blocks": [
+                        {"block": "secretory_coupling", "sum_abs_marginal": 1.1, "row_count": 5},
+                    ],
+                    "top_constraint_marginals": [
+                        {"block": "secretory_coupling", "row_index_1based": 7, "marginal": 1.1},
+                    ],
+                    "top_bound_marginals": [
+                        {"reaction_id": "r_OPN_ALPHA_FULL_PROJECT_exchange", "bound_type": "upper", "marginal": 0.3},
+                    ],
+                    "target_related_fluxes": [
+                        {"reaction_id": "r_OPN_ALPHA_FULL_PROJECT_exchange", "flux": 0.006},
+                    ],
+                    "active_bound_counts": {"total_bound_marginal_nonzero": 1},
+                    "warnings": ["draft lp sensitivity only"],
+                },
+                "cost_slope_compatibility": {
+                    "enabled": True,
+                    "success": True,
+                    "result_status": "draft_matlab_compatible_cost_slope",
+                    "secretion_ratio_policy": "capacity_fraction_ratios",
+                    "capacity_reference": 2.0e-4,
+                    "capacity_fractions": [0.10, 0.50],
+                    "glucose_cost_slopes": [
+                        {"mu": 0.1, "cost_key": "glucose_cost", "success": True, "slope": 123.0},
+                    ],
+                    "ribosome_cost_slopes": [],
+                    "rows": [
+                        {"mu": 0.1, "target_exchange_ratio": 5e-7, "glucose_cost": 1.0},
+                    ],
+                    "warnings": ["draft cost slope"],
+                },
             },
         }
     )
 
     assert "## 目标蛋白成本分析" in report
     assert "draft_explanatory" in report
+    assert "draft_lp_sensitivity" in report
+    assert "draft_matlab_compatible_cost_slope" in report
+    assert "MATLAB-compatible" in report
+    assert "capacity_fraction_ratios" in report
+    assert "current corrected secretion capacity" in report
+    assert "LP 级归因证据" in report
     assert "o_glycosylation" in report
     assert "不代表真实发酵产量" in report
+
+
+def test_pipeline_report_includes_target_growth_analysis_section() -> None:
+    report = _build_pipeline_report(
+        {
+            "target_id": "OPN_ALPHA_FULL_PROJECT",
+            "result_status": "draft",
+            "matlab_alignment_status": "pending",
+            "target_parameter_status": "draft",
+            "success": True,
+            "objective_value": 0.1,
+            "growth_rate": 0.1,
+            "constraint_counts": {},
+            "candidate_count": 0,
+            "tradeoff": {"tradeoff_rows": []},
+            "target_growth_analysis": {
+                "result_status": "draft_explanatory",
+                "growth_sensitivity_label": "increasing",
+                "growth_sensitivity_reason": "monotonic_increasing_successful_grid",
+                "valid_point_count": 2,
+                "best_secretion_point": {"mu": 0.1},
+                "best_secretion_per_biomass_point": {"mu": 0.05},
+                "tradeoff_points": [
+                    {
+                        "mu": 0.1,
+                        "success": True,
+                        "secretion_flux": 0.006,
+                        "secretion_per_biomass": 0.06,
+                        "interpretation": "最高分泌通量",
+                    }
+                ],
+                "warnings": ["draft tradeoff only"],
+            },
+        }
+    )
+
+    assert "## 目标蛋白生长分析" in report
+    assert "draft_explanatory" in report
+    assert "increasing" in report
+    assert "monotonic_increasing_successful_grid" in report
+    assert "不代表真实发酵生长预测" in report

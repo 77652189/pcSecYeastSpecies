@@ -37,6 +37,7 @@ class PichiaSimulationRequest:
     oe_gene_ids: tuple[str, ...] = ()
     oe_reaction_ids: tuple[str, ...] = ()
     screen_candidate_limit: int = 20
+    enable_gene_rule_overlay: bool = False
     enable_cost_slope_compatibility: bool = False
     cost_slope_growth_rates: tuple[float, ...] = (0.05, 0.10)
     cost_slope_secretion_ratios: tuple[float, ...] = ()

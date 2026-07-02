@@ -23,21 +23,18 @@ from pcsec_pichia.alignment import (
 )
 from pcsec_pichia.constraints import build_pcsec_constraints
 from pcsec_pichia.engines.base import PichiaSimulationRequest, PichiaSimulationRunResult
-from pcsec_pichia.loading import CobraModel, load_pcsec_pichia_inputs
+from pcsec_pichia.loading import load_pcsec_pichia_inputs
+from pcsec_pichia.loading import medium_condition_summary_for_inputs
 from pcsec_pichia.reports import write_simulation_outputs
 from pcsec_pichia.screens import (
     ScreenResult,
-    default_ko_genes,
-    default_oe_reactions,
-    resolve_oe_gene_reactions,
+    explain_only_gene_overexpression_rows,
     run_knockout_screen,
     run_overexpression_screen,
     run_reaction_knockout_screen,
-    split_existing_genes,
-    split_existing_reactions,
 )
-from pcsec_pichia.secretion_plan import build_secretion_plan
 from pcsec_pichia.screens.planning import build_screen_plan
+from pcsec_pichia.secretion_plan import build_secretion_plan
 from pcsec_pichia.services.gene_evidence import (
     DEFAULT_GENE_EVIDENCE_CACHE,
     evidence_for_gene,
@@ -45,6 +42,12 @@ from pcsec_pichia.services.gene_evidence import (
     recommendation_tier_for_candidate,
 )
 from pcsec_pichia.services.gene_catalog import build_lightweight_secretion_gene_evidence
+from pcsec_pichia.services.gene_rule_overlay import (
+    DEFAULT_GENE_RULE_EVIDENCE_CACHE,
+    apply_gpr_overlay_for_analysis,
+    build_gpr_overlay,
+    load_gene_rule_evidence_cache,
+)
 from pcsec_pichia.simulation import (
     run_growth_tradeoff,
     run_protein_cost_slope_compatibility,
@@ -144,18 +147,34 @@ def run_pichia_secretion_simulation(
         write_misfolding_constraints=request.enable_misfolding_constraint,
     )
     growth_analysis = analyze_target_growth_impact(tradeoff, baseline_growth_rate=request.mu)
-
+    screen_model = inputs.prepared_model
+    gene_rule_overlay_payload: dict[str, object] = {}
+    gene_rule_overlay_warnings: list[str] = []
+    gene_rule_evidence_by_name = {}
+    gene_rule_overlay = None
+    if request.enable_gene_rule_overlay:
+        gene_rule_evidence_by_name = load_gene_rule_evidence_cache(root / DEFAULT_GENE_RULE_EVIDENCE_CACHE)
+        gene_rule_overlay = build_gpr_overlay(screen_model, gene_rule_evidence_by_name)
+        screen_model = apply_gpr_overlay_for_analysis(screen_model, gene_rule_overlay)
+        gene_rule_overlay_payload = gene_rule_overlay.to_dict()
+        gene_rule_overlay_warnings.extend(str(item) for item in gene_rule_overlay.warnings)
+        if not gene_rule_overlay.entries:
+            gene_rule_overlay_warnings.append(
+                "External GPR overlay was enabled, but no high-confidence executable rules were available."
+            )
     evidence_by_gene = load_gene_evidence_cache(root / DEFAULT_GENE_EVIDENCE_CACHE)
     screen_plan = build_screen_plan(
-        inputs.prepared_model,
+        screen_model,
         request,
         inputs.secretory.complex_subunits,
+        gene_rule_evidence_by_name=gene_rule_evidence_by_name,
+        gene_rule_overlay=gene_rule_overlay,
         evidence_by_gene=evidence_by_gene,
     )
 
     # Keep smoke screens sequential so shared model/enzyme inputs stay easy to
     # reason about while the pipeline is still draft-alignment code.
-    model = inputs.prepared_model
+    model = screen_model
     aa, met, sec, comb = inputs.amino_acids, inputs.metabolic, inputs.secretory, inputs.combined
     mu = request.mu
     rib = request.enable_ribosome_translation_constraint
@@ -196,9 +215,21 @@ def run_pichia_secretion_simulation(
         growth_rate=mu,
         intervention_type="OE_gene_proxy",
         input_gene_ids_by_reaction=screen_plan["oe_gene_by_reaction"],
+        gene_intervention_plans_by_gene=screen_plan["oe_gene_plans_by_gene"],
         write_ribosome_translation_constraint=rib,
         write_misfolding_constraints=mis,
     )
+    ko = _annotate_gene_input_ids(ko, screen_plan["ko_input_by_gene"])
+    oe_gene = _append_unresolved_rows(
+        oe_gene,
+        explain_only_gene_overexpression_rows(
+            target.target_id,
+            screen_plan["oe_gene_explain_only_plans"],
+            oe_gene.baseline_objective_value,
+            sec.complex_subunits,
+        ),
+    )
+    oe_gene = _annotate_gene_input_ids(oe_gene, screen_plan["oe_input_by_gene"])
     oe_reaction = run_overexpression_screen(
         model,
         target,
@@ -230,14 +261,15 @@ def run_pichia_secretion_simulation(
                         baseline_objective_value=oe_reaction.baseline_objective_value)
         for rid in screen_plan["unresolved_oe_reaction_ids"]))
     screens_list = [ko, ko_reaction, oe_gene, oe_reaction]
-    screens_list = [_annotate_gene_evidence(result) for result in screens_list]
+    screens_list = [_annotate_gene_evidence(result, evidence_by_gene=evidence_by_gene) for result in screens_list]
     candidate_rows = tuple(row for result in screens_list for row in result.rows)
     yield_recommendations = analyze_yield_improvement_candidates(
         candidate_rows,
         target_id=target.target_id,
+        medium_condition=medium_condition_summary_for_inputs(inputs),
         baseline_objective=simulation.objective_value,
         baseline_secretion_flux=simulation.secretion_flux,
-        curated_gene_evidence=tuple(build_lightweight_secretion_gene_evidence(model)),
+        curated_gene_evidence=tuple(build_lightweight_secretion_gene_evidence(screen_model)),
     )
     report = write_simulation_outputs(
         simulation,
@@ -282,6 +314,7 @@ def run_pichia_secretion_simulation(
             },
             "protein_cost_analysis": protein_cost_payload,
             "target_growth_analysis": summarize_target_growth_analysis(growth_analysis),
+            "yield_improvement_recommendations": summarize_yield_improvement_recommendations(yield_recommendations),
             "alignment_summary": alignment_payload,
             "target_metadata": _target_metadata(target, request),
             "target_warnings": _target_warnings(target),
@@ -291,13 +324,15 @@ def run_pichia_secretion_simulation(
             "medium_condition_id": inputs.medium_condition_id,
             "medium_condition": medium_condition,
             "medium_condition_warnings": medium_condition.get("warnings") or [],
-            "screen_warnings": screen_plan["warnings"],
+            "gene_rule_overlay": gene_rule_overlay_payload,
+            "screen_warnings": [*gene_rule_overlay_warnings, *screen_plan["warnings"]],
             "screen_request": {
                 "ko_gene_ids": list(screen_plan["requested_ko_gene_ids"]),
                 "ko_reaction_ids": list(screen_plan["requested_ko_rxn_ids"]),
                 "oe_gene_ids": list(screen_plan["requested_oe_gene_ids"]),
                 "oe_reaction_ids": list(screen_plan["requested_oe_reaction_ids"]),
                 "screen_candidate_limit": screen_plan["candidate_limit"],
+                "enable_gene_rule_overlay": request.enable_gene_rule_overlay,
             },
         },
     )
@@ -339,6 +374,40 @@ def _append_unresolved_rows(result: ScreenResult, rows: tuple[dict[str, Any], ..
         result_status=result.result_status,
         matlab_alignment_status=result.matlab_alignment_status,
     )
+
+
+def _annotate_gene_input_ids(result: ScreenResult, input_by_gene: dict[str, str]) -> ScreenResult:
+    if not input_by_gene:
+        return result
+    rows: list[dict[str, Any]] = []
+    for row in result.rows:
+        gene_id = str(row.get("gene_id") or row.get("input_gene_id") or "")
+        if not gene_id:
+            rows.append(row)
+            continue
+        annotated = dict(row)
+        annotated["canonical_gene_id"] = gene_id
+        input_ids = [input_by_gene.get(item, item) for item in _split_gene_id_text(gene_id)]
+        annotated["input_gene_id"] = ",".join(input_ids) if input_ids else input_by_gene.get(
+            gene_id,
+            annotated.get("input_gene_id") or gene_id,
+        )
+        rows.append(annotated)
+    return ScreenResult(
+        target_id=result.target_id,
+        screen_type=result.screen_type,
+        success=result.success,
+        candidate_count=result.candidate_count,
+        rows=tuple(rows),
+        constraint_counts=result.constraint_counts,
+        baseline_objective_value=result.baseline_objective_value,
+        result_status=result.result_status,
+        matlab_alignment_status=result.matlab_alignment_status,
+    )
+
+
+def _split_gene_id_text(value: str) -> list[str]:
+    return [item.strip() for item in str(value or "").split(",") if item.strip()]
 
 
 def _annotate_gene_evidence(
@@ -439,6 +508,7 @@ def _candidate_evidence_tier_fields(
         "recommendation_tier_reason": reason,
     }
 
+
 def _unresolved_row(
     target_id: str,
     screen_type: str,
@@ -454,6 +524,7 @@ def _unresolved_row(
         "screen_type": screen_type,
         "candidate_id": candidate_id,
         "gene_id": input_gene_id if intervention_type == "KO" else None,
+        "canonical_gene_id": None,
         "reaction_id": reaction_id,
         "input_gene_id": input_gene_id,
         "resolved_reaction_id": None,
@@ -471,24 +542,20 @@ def _unresolved_row(
         "complex_id": None,
         "complex_subunit_ids": [],
         "complex_subunit_stoichiometry": [],
+        "affected_reactions": [],
+        "inactive_reactions": [],
+        "inactive_reactions_preview": [],
+        "inactive_reaction_count": 0,
+        "gpr_rules": [],
+        "gpr_role": "unresolved",
+        "capacity_effect": "unresolved",
+        "simulation_basis": "unresolved",
+        "ko_support_status": "unresolved_gene" if intervention_type == "KO" else "",
+        "oe_support_status": "unresolved_gene" if intervention_type == "OE_gene_proxy" else "",
+        "support_reason": "Candidate could not be resolved to the current model gene or reaction index.",
+        "missing_information": ["model_gene_id_or_alias_mapping"],
+        "warnings": ["candidate could not be resolved to the current model."],
     }
-
-
-def _candidate_limit(value: int) -> int:
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        return 20
-    return max(0, min(parsed, 20))
-
-
-def _dedupe_nonempty(values: tuple[str, ...]) -> list[str]:
-    deduped: list[str] = []
-    for value in values:
-        item = str(value).strip()
-        if item and item not in deduped:
-            deduped.append(item)
-    return deduped
 
 
 def _growth_points(values: tuple[float, ...], fallback_mu: float) -> tuple[float, ...]:
@@ -737,6 +804,7 @@ def _build_pipeline_report(summary: dict[str, Any]) -> str:
     target_warnings = summary.get("target_warnings") or []
     protein_cost = summary.get("protein_cost_analysis") or {}
     target_growth = summary.get("target_growth_analysis") or {}
+    yield_recommendations = summary.get("yield_improvement_recommendations") or {}
     medium_condition = summary.get("medium_condition") or {}
     lines = [
         f"# pcSecPichia Python 分泌仿真报告: {summary.get('target_id')}",
@@ -783,6 +851,8 @@ def _build_pipeline_report(summary: dict[str, Any]) -> str:
         lines.extend(_protein_cost_report_lines(protein_cost))
     if target_growth:
         lines.extend(_target_growth_report_lines(target_growth))
+    if yield_recommendations:
+        lines.extend(_yield_recommendation_report_lines(yield_recommendations))
     screen_warnings = summary.get("screen_warnings") or []
     if screen_warnings:
         lines.extend(["", "## 基因扰动提示", "", *[f"- {item}" for item in screen_warnings]])
@@ -976,6 +1046,28 @@ def _target_growth_report_lines(target_growth: dict[str, Any]) -> list[str]:
     warnings = target_growth.get("warnings") or []
     if warnings:
         lines.extend(["", "提示:"])
+        lines.extend(f"- {warning}" for warning in warnings)
+    return lines
+
+
+def _yield_recommendation_report_lines(payload: dict[str, Any]) -> list[str]:
+    recommended = payload.get("recommended_candidates") or []
+    counts = payload.get("summary_counts") or {}
+    lines = [
+        "",
+        "## 目标蛋白产量提升推荐",
+        "",
+        "- 当前推荐是 Python corrected draft 模型内决策排序，不代表真实发酵产量或实验成功率。",
+        "- `gene-level KO` 与 `reaction-level OE proxy` 是不同证据层级；OE proxy 不能直接等同于湿实验基因过表达。",
+        f"- 推荐状态: `{payload.get('result_status')}`.",
+        f"- 候选总数: `{payload.get('candidate_count')}`.",
+        f"- 分类计数: `{counts}`.",
+        "",
+    ]
+    lines.extend(_markdown_table("推荐候选 Top list", recommended, limit=10))
+    warnings = payload.get("warnings") or []
+    if warnings:
+        lines.extend(["", "推荐提示:"])
         lines.extend(f"- {warning}" for warning in warnings)
     return lines
 

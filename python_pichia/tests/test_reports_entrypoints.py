@@ -84,6 +84,7 @@ def _screen_results(target_id: str) -> tuple[ScreenResult, ScreenResult]:
                 "screen_type": "knockout",
                 "candidate_id": "AT250_GQ_6803479",
                 "gene_id": "AT250_GQ_6803479",
+                "canonical_gene_id": "AT250_GQ_6803479",
                 "reaction_id": "RPE_no_1_fwd",
                 "input_gene_id": "AT250_GQ_6803479",
                 "resolved_reaction_id": "RPE_no_1_fwd",
@@ -93,6 +94,24 @@ def _screen_results(target_id: str) -> tuple[ScreenResult, ScreenResult]:
                 "mapping_confidence": "low",
                 "mapping_interpretation": "该基因关联代谢或其它反应；可能间接影响分泌，解释置信度较低。",
                 "complex_id": None,
+                "affected_reactions": ["RPE_no_1_fwd"],
+                "inactive_reactions": ["RPE_no_1_fwd"],
+                "inactive_reaction_count": 1,
+                "gpr_rules": [{"reaction_id": "RPE_no_1_fwd", "rule": "x(1)", "gr_rule": "AT250_GQ_6803479"}],
+                "gpr_role": "single_gene",
+                "capacity_effect": "disables_reactions",
+                "simulation_basis": "gpr_gene_deletion",
+                "ko_support_status": "ko_runnable_gpr_gene_deletion",
+                "oe_support_status": "",
+                "support_reason": "Gene KO is simulated by disabling reactions whose GPR rule becomes false.",
+                "missing_information": [],
+                "database_annotation_sources": ["UniProt", "KEGG"],
+                "database_annotation_confidence": "high_exact_locus_tag",
+                "model_gpr_executable": True,
+                "oe_reaction_proxy": False,
+                "phenotype_evidence": {"essentiality_status": "nonessential"},
+                "recommendation_tier": "model_executable",
+                "recommendation_tier_reason": "Current model can execute the GPR KO.",
                 "intervention_type": "KO",
                 "success": True,
                 "status": "0",
@@ -119,6 +138,7 @@ def _screen_results(target_id: str) -> tuple[ScreenResult, ScreenResult]:
                 "screen_type": "overexpression",
                 "candidate_id": "sec_BIP_NEFS_complex_formation",
                 "gene_id": None,
+                "canonical_gene_id": None,
                 "reaction_id": "sec_BIP_NEFS_complex_formation",
                 "input_gene_id": None,
                 "resolved_reaction_id": "sec_BIP_NEFS_complex_formation",
@@ -128,6 +148,24 @@ def _screen_results(target_id: str) -> tuple[ScreenResult, ScreenResult]:
                 "mapping_confidence": "medium",
                 "mapping_interpretation": "该基因关联分泌复合体反应（ER 折叠 / 分子伴侣）；OE gene 应解释为 reaction-level OE proxy。",
                 "complex_id": "sec_BIP_NEFS_complex",
+                "affected_reactions": ["sec_BIP_NEFS_complex_formation"],
+                "inactive_reactions": [],
+                "inactive_reaction_count": 0,
+                "gpr_rules": [],
+                "gpr_role": "reaction_level",
+                "capacity_effect": "reaction_capacity_proxy",
+                "simulation_basis": "reaction_level_capacity_proxy",
+                "ko_support_status": "",
+                "oe_support_status": "reaction_level_diagnostic",
+                "support_reason": "OE is represented as a reaction-level capacity proxy.",
+                "missing_information": [],
+                "database_annotation_sources": [],
+                "database_annotation_confidence": "",
+                "model_gpr_executable": False,
+                "oe_reaction_proxy": True,
+                "phenotype_evidence": {},
+                "recommendation_tier": "model_executable",
+                "recommendation_tier_reason": "Current model can execute the reaction-level OE proxy.",
                 "intervention_type": "OE_reaction",
                 "success": True,
                 "status": "0",
@@ -210,8 +248,23 @@ def test_write_simulation_outputs_creates_stable_report_bundle(tmp_path: Path, t
         "mapping_confidence",
         "mapping_interpretation",
         "complex_id",
+        "gpr_role",
+        "capacity_effect",
+        "simulation_basis",
+        "affected_reactions",
+        "inactive_reactions",
+        "inactive_reaction_count",
+        "database_annotation_sources",
+        "database_annotation_confidence",
+        "model_gpr_executable",
+        "oe_reaction_proxy",
+        "phenotype_evidence",
+        "recommendation_tier",
+        "recommendation_tier_reason",
     ):
         assert field in (reader.fieldnames or [])
+    assert candidate_rows[0]["recommendation_tier"] == "model_executable"
+    assert "UniProt" in candidate_rows[0]["database_annotation_sources"]
 
     with result.tradeoff_path.open(newline="", encoding="utf-8") as handle:
         tradeoff_rows = list(csv.DictReader(handle))
@@ -249,6 +302,9 @@ def test_candidate_interpretation_summarizes_effects_and_infeasible_rows() -> No
             "mapping_level": "complex_subunit",
             "mapping_confidence": "medium",
             "mapping_interpretation": "该反应映射到分子伴侣复合体。",
+            "gpr_role": "reaction_level",
+            "capacity_effect": "reaction_capacity_proxy",
+            "simulation_basis": "reaction_level_capacity_proxy",
             "success": True,
             "status": "0",
             "delta_objective": 0.0001,
@@ -263,6 +319,9 @@ def test_candidate_interpretation_summarizes_effects_and_infeasible_rows() -> No
             "mapping_level": "complex_subunit",
             "mapping_confidence": "medium",
             "mapping_interpretation": "该反应映射到 N-糖基化复合体。",
+            "gpr_role": "reaction_level",
+            "capacity_effect": "reaction_disabled",
+            "simulation_basis": "reaction_deletion",
             "success": False,
             "status": "2",
             "delta_objective": None,
@@ -276,6 +335,9 @@ def test_candidate_interpretation_summarizes_effects_and_infeasible_rows() -> No
             "mapping_level": "unresolved",
             "mapping_confidence": "unresolved",
             "mapping_interpretation": "未解析到可解释的模型反应。",
+            "gpr_role": "unresolved",
+            "capacity_effect": "unresolved",
+            "simulation_basis": "unresolved",
             "success": False,
             "status": "unresolved_gene",
             "delta_objective": None,
@@ -444,3 +506,33 @@ def test_markdown_report_renders_target_growth_analysis_section() -> None:
     assert "mixed" in markdown
     assert "contains_failed_or_missing_points" in markdown
     assert "不代表真实发酵生长预测" in markdown
+
+
+def test_markdown_report_renders_yield_improvement_recommendations_section() -> None:
+    summary = build_summary_payload(_simulation_result("OPN_ALPHA_FULL_PROJECT"), None, ())
+    summary["yield_improvement_recommendations"] = {
+        "result_status": "draft_model_recommendation",
+        "candidate_count": 2,
+        "summary_counts": {"recommended": 1, "not_recommended": 1, "unresolved": 0},
+        "recommended_candidates": [
+            {
+                "display_name": "PEP4",
+                "intervention_type": "KO",
+                "execution_mode": "gene_level_ko",
+                "recommendation_label": "strong_model_candidate",
+                "delta_objective": 1e-5,
+                "evidence_tier": "模型可执行 GPR + curated 证据",
+                "recommendation_score": 60.0,
+                "rationale": "模型显示分泌目标提升。",
+            }
+        ],
+        "warnings": ["draft model recommendation only"],
+    }
+
+    markdown = build_markdown_report(summary)
+
+    assert "## 目标蛋白产量提升推荐" in markdown
+    assert "draft_model_recommendation" in markdown
+    assert "PEP4" in markdown
+    assert "strong_model_candidate" in markdown
+    assert "不代表真实发酵产量" in markdown
