@@ -146,14 +146,15 @@ def render_target_build_form() -> TargetBuildFormState:
     enable_ribosome = st.checkbox("启用核糖体约束", value=True)
     enable_misfolding = st.checkbox("启用错误折叠约束", value=True)
     enable_cost_slope_compatibility = st.checkbox(
-        "启用蛋白成本斜率对比（MATLAB 历史路线，可选，较慢）",
+        "启用蛋白成本分析（固定生长率+分泌比例网格测算成本斜率，较慢）",
         value=False,
         help=(
-            "当前默认路线：固定生长率 μ，在 corrected 培养基下最大化目标蛋白分泌通量，"
-            "用于估计当前条件下的分泌能力。"
-            "历史 MATLAB 成本路线：固定生长率 μ，再固定一组目标蛋白分泌比例，"
-            "然后优化葡萄糖摄取反应 Ex_glc_D；通过葡萄糖摄取变化和核糖体通量变化估算 protein cost slope。"
-            "打开此项只会额外运行历史成本路线用于对比/解释，不会替换或改变当前默认 corrected pipeline 的数值结果。"
+            "这是目标蛋白成本分析功能本身：固定生长率 μ，再固定一组目标蛋白分泌比例，"
+            "然后优化葡萄糖摄取反应 Ex_glc_D；通过葡萄糖摄取变化和核糖体通量变化的斜率，"
+            "估算增加单位分泌量需要多少额外代谢成本（移植自 MATLAB SimulateProteinCost.m 的做法）。"
+            "不勾选时不会展示任何蛋白成本分析——没有不使用LP结果的简化替代版本，"
+            "因为那类替代版本不代表真实成本，容易造成误导。"
+            "勾选后会多跑一组LP求解（默认2个生长率×5个分泌比例=10次），不影响默认分泌仿真本身的数值结果。"
         ),
     )
     cost_slope_medium_compatibility_mode = "corrected"

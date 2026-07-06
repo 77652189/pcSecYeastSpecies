@@ -236,35 +236,10 @@ def _yield_recommendation_payload(data: dict[str, object]) -> dict[str, object]:
 
 
 def _render_protein_cost_analysis(protein_cost: dict[str, object]) -> None:
+    # Only rendered when 启用蛋白成本斜率对比 was on (pipeline.py sets protein_cost_analysis
+    # to None otherwise) - everything shown here is LP-solve-derived, not a heuristic score.
     with st.expander("目标蛋白成本分析", expanded=True):
-        st.caption("解释型相对评分，不代表真实发酵产量、培养成本或湿实验结果。")
-        c1, c2, c3 = st.columns([1, 2, 2])
-        with c1:
-            st.metric("总相对成本分", protein_cost.get("total_relative_score", "—"))
-        with c2:
-            st.write("**主要成本类别**")
-            st.write(", ".join(str(item) for item in protein_cost.get("dominant_cost_categories") or []) or "—")
-        with c3:
-            st.write("**状态**")
-            st.write(protein_cost.get("result_status", "draft_explanatory"))
-
-        items = protein_cost.get("cost_items") or []
-        if items:
-            frame = pd.DataFrame(items)
-            display_columns = {
-                "category": "类别",
-                "label": "成本项",
-                "relative_score": "相对分",
-                "basis": "依据",
-                "interpretation": "解释",
-                "raw_value": "原始值",
-            }
-            columns = [key for key in display_columns if key in frame.columns]
-            st.dataframe(
-                frame[columns].rename(columns=display_columns),
-                use_container_width=True,
-                hide_index=True,
-            )
+        st.caption(f"状态: {protein_cost.get('result_status', 'draft_cost_slope_analysis')}")
         lp_attribution = protein_cost.get("lp_attribution")
         if isinstance(lp_attribution, dict) and lp_attribution:
             _render_lp_attribution(lp_attribution)

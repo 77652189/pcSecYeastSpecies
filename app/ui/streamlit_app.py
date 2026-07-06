@@ -15,6 +15,7 @@ st.set_page_config(
 )
 
 from app.ui.common import app_css, page_header, sidebar_navigation  # noqa: E402
+from app.ui.views.genome_wide_screen import render_genome_wide_screen  # noqa: E402
 from app.ui.views.logs import render_logs  # noqa: E402
 from app.ui.views.overview import render_overview  # noqa: E402
 from app.ui.views.results import render_results_browser  # noqa: E402
@@ -39,6 +40,8 @@ def main() -> None:
         render_results_browser()
     elif page == "仿真验证":
         _render_simulation_reloaded()
+    elif page == "全基因组KO/OE筛查":
+        render_genome_wide_screen()
     elif page == "运行日志":
         render_logs()
     else:

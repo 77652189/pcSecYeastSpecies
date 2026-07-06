@@ -38,7 +38,7 @@ class SecretionRunRequest:
     enable_gene_rule_overlay: bool = False
     ko_candidates: tuple[str, ...] = ()
     oe_candidates: tuple[str, ...] = ()
-    growth_points: tuple[float, ...] = (0.10,)
+    growth_points: tuple[float, ...] = ()  # empty = auto grid around mu; see pipeline._growth_points
     enable_cost_slope_compatibility: bool = False
     cost_slope_growth_rates: tuple[float, ...] = (0.05, 0.10)
     cost_slope_secretion_ratios: tuple[float, ...] = ()

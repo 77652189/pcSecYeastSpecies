@@ -129,8 +129,7 @@ def request_warnings(request: SecretionRunRequest) -> list[str]:
             "过表达基因会先进行 GPR-aware 规划；只有可解释的单基因/同工酶场景才运行 "
             "reaction-level OE proxy，这不是完整的基因表达调控模拟。"
         )
-    if request.growth_points != (0.10,):
-        warnings.append("生长权衡使用指定的小网格生长速率，为快速 smoke 而非完整扫描。")
+    warnings.append("生长权衡使用小网格生长速率（默认为 mu 的 100%/50%/10%，或指定的自定义点），为快速 smoke 而非完整扫描。")
     return warnings
 
 

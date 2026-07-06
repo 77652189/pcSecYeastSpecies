@@ -51,7 +51,7 @@ class PichiaSecretionRunRequest(BaseModel):
     oe_reaction_ids: list[str] = Field(default_factory=list)
     screen_candidate_limit: int = 20
     enable_gene_rule_overlay: bool = False
-    growth_points: list[float] = Field(default_factory=lambda: [0.10])
+    growth_points: list[float] = Field(default_factory=list)  # empty = auto grid around mu
     enable_cost_slope_compatibility: bool = False
     cost_slope_medium_compatibility_mode: str = "corrected"
     mu: float = 0.10
@@ -84,7 +84,7 @@ class PichiaSecretionRunRequest(BaseModel):
             oe_reaction_ids=tuple(_compact_ids(self.oe_reaction_ids)),
             screen_candidate_limit=self.screen_candidate_limit,
             enable_gene_rule_overlay=self.enable_gene_rule_overlay,
-            growth_points=tuple(self.growth_points or [0.10]),
+            growth_points=tuple(self.growth_points),
             enable_cost_slope_compatibility=self.enable_cost_slope_compatibility,
             cost_slope_medium_compatibility_mode=self.cost_slope_medium_compatibility_mode,
             mu=self.mu,

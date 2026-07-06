@@ -54,6 +54,8 @@ CAT_GOLGI = "Golgi 加工"
 CAT_COPI = "COPI 逆向转运"
 CAT_EXOCYTOSIS = "胞吐与分泌"
 CAT_PROTEASOME = "蛋白酶体与降解"
+CAT_GPI = "GPI 锚定加工"
+CAT_VACUOLAR_SORTING = "液泡/内体分选（竞争性分流）"
 CAT_GENERAL = "通用/其他"
 
 # ---------------------------------------------------------------------------
@@ -102,6 +104,46 @@ SECRETION_GENE_CATALOG: tuple[SecretionGeneEntry, ...] = (
         intervention="OE",
         evidence="模型 sec_RAC 复合体",
     ),
+    SecretionGeneEntry(
+        category=CAT_ER_TRANSLOCATION,
+        common_name="SEC61C",
+        description="ER 易位通道的另一种模型反应变体，区别于已有条目对应的 SEC61/SEC63 复合体",
+        oe_reaction_id="sec_SEC61C_complex_formation",
+        intervention="OE",
+        evidence="模型 sec_SEC61C 复合体，SEC61 主条目之外的第二个可测试反应",
+    ),
+    SecretionGeneEntry(
+        category=CAT_ER_TRANSLOCATION,
+        common_name="SRC",
+        description="SRP 受体复合体，与已有 SRP/SRP受体 条目对应不同的模型反应",
+        oe_reaction_id="sec_SRC_complex_formation",
+        intervention="OE",
+        evidence="模型 sec_SRC 复合体",
+    ),
+    SecretionGeneEntry(
+        category=CAT_ER_TRANSLOCATION,
+        common_name="GET1/GET2",
+        description="尾锚定蛋白 ER 插入受体复合体（GET 通路），翻译后插入，是 SEC61/SRP 共翻译路径之外的独立 ER 蛋白插入机制",
+        oe_reaction_id="sec_Get1_Get2_complex_formation",
+        intervention="OE",
+        evidence="模型 sec_Get1_Get2 复合体；GET 通路是尾锚定蛋白插入 ER 膜的经典机制",
+    ),
+    SecretionGeneEntry(
+        category=CAT_ER_TRANSLOCATION,
+        common_name="GET3",
+        description="GET 通路胞质穿梭 ATP 酶，识别尾锚定蛋白疏水结构域并递送到 ER 膜受体",
+        oe_reaction_id="sec_Get3_complex_formation",
+        intervention="OE",
+        evidence="模型 sec_Get3 复合体",
+    ),
+    SecretionGeneEntry(
+        category=CAT_ER_TRANSLOCATION,
+        common_name="SGT2/GET4/GET5",
+        description="GET 通路前体识别复合体，捕获新生尾锚定蛋白并交给 GET3",
+        oe_reaction_id="sec_Sgt2_Get4_Get5_complex_formation",
+        intervention="OE",
+        evidence="模型 sec_Sgt2_Get4_Get5 复合体",
+    ),
 
     # ======================== ER 折叠与分子伴侣 ========================
     SecretionGeneEntry(
@@ -136,6 +178,14 @@ SECRETION_GENE_CATALOG: tuple[SecretionGeneEntry, ...] = (
         intervention="OE",
         evidence="模型 sec_Ssa1_Ydj1_Snl1 复合体",
     ),
+    SecretionGeneEntry(
+        category=CAT_ER_FOLDING,
+        common_name="KAR2（辅助型）",
+        description="Kar2/BiP 的另一种模型反应变体，与已有 KAR2/BiP 条目对应不同反应",
+        oe_reaction_id="sec_acc_Kar2p_complex_formation",
+        intervention="OE",
+        evidence="模型 sec_acc_Kar2p 复合体，KAR2 主条目之外的第二个可测试反应",
+    ),
 
     # ======================== 二硫键 ========================
     SecretionGeneEntry(
@@ -161,6 +211,30 @@ SECRETION_GENE_CATALOG: tuple[SecretionGeneEntry, ...] = (
         oe_reaction_id="sec_PDI1_ERV2_Ero1p_complex_formation",
         intervention="OE",
         evidence="模型 sec_PDI1_ERV2_Ero1p 复合体",
+    ),
+    SecretionGeneEntry(
+        category=CAT_DSB,
+        common_name="PDI1（单独）",
+        description="PDI1 单独形成的模型反应，区别于 PDI1/ERO1/ERV2 三元复合体条目",
+        oe_reaction_id="sec_Pdi1p_complex_formation",
+        intervention="OE",
+        evidence="模型 sec_Pdi1p 复合体",
+    ),
+    SecretionGeneEntry(
+        category=CAT_DSB,
+        common_name="PDI1/ERO1（无ERV2）",
+        description="PDI1 与 ERO1 形成的二元复合体反应，不含 ERV2，是三元复合体条目之外的独立测试点",
+        oe_reaction_id="sec_pdi1p_ero1p_complex_formation",
+        intervention="OE",
+        evidence="模型 sec_pdi1p_ero1p 复合体",
+    ),
+    SecretionGeneEntry(
+        category=CAT_DSB,
+        common_name="MNL1/PDI1",
+        description="Mnl1（ER 甘露糖苷酶样蛋白，识别错误折叠糖蛋白）与 PDI1 形成的复合体",
+        oe_reaction_id="sec_Mnl1p_Pdi1p_complex_formation",
+        intervention="OE",
+        evidence="模型 sec_Mnl1p_Pdi1p 复合体",
     ),
 
     # ======================== N-糖基化 ========================
@@ -207,19 +281,43 @@ SECRETION_GENE_CATALOG: tuple[SecretionGeneEntry, ...] = (
     ),
     SecretionGeneEntry(
         category=CAT_N_GLYCAN,
-        common_name="MPOLI/MPoLII",
-        description="Golgi 甘露糖基转移酶复合体",
+        common_name="MPOLI",
+        description="Golgi 甘露糖基转移酶复合体 MPOLI",
         oe_reaction_id="sec_MPOLI_complex_formation",
         intervention="OE",
-        evidence="模型 sec_MPOLI/MPoLII 复合体",
+        evidence="模型 sec_MPOLI 复合体",
     ),
     SecretionGeneEntry(
         category=CAT_N_GLYCAN,
-        common_name="MNN2",
-        description="Golgi 甘露糖基转移酶",
+        common_name="MPoLII",
+        description="Golgi 甘露糖基转移酶复合体 MPoLII，此前目录里的\"MPOLI/MPoLII\"条目名字含两者，实际只测了 MPOLI，MPoLII 从未被单独测试过（本轮修复）",
+        oe_reaction_id="sec_MPoLII_complex_formation",
+        intervention="OE",
+        evidence="模型 sec_MPoLII 复合体",
+    ),
+    SecretionGeneEntry(
+        category=CAT_N_GLYCAN,
+        common_name="MNN2（A）",
+        description="Golgi 甘露糖基转移酶 Mnn2p 的一种模型反应变体",
         oe_reaction_id="sec_Mnn2pA_complex_formation",
         intervention="OE",
-        evidence="模型 sec_Mnn2pA/Mnn2pB/Mnn2pC",
+        evidence="模型 sec_Mnn2pA 复合体",
+    ),
+    SecretionGeneEntry(
+        category=CAT_N_GLYCAN,
+        common_name="MNN2（B）",
+        description="Golgi 甘露糖基转移酶 Mnn2p 的另一种模型反应变体，此前从未被单独测试过（本轮修复）",
+        oe_reaction_id="sec_Mnn2pB_complex_formation",
+        intervention="OE",
+        evidence="模型 sec_Mnn2pB 复合体",
+    ),
+    SecretionGeneEntry(
+        category=CAT_N_GLYCAN,
+        common_name="MNN2（C）",
+        description="Golgi 甘露糖基转移酶 Mnn2p 的第三种模型反应变体，此前从未被单独测试过（本轮修复）",
+        oe_reaction_id="sec_Mnn2pC_complex_formation",
+        intervention="OE",
+        evidence="模型 sec_Mnn2pC 复合体",
     ),
 
     # ======================== O-糖基化 ========================
@@ -289,6 +387,38 @@ SECRETION_GENE_CATALOG: tuple[SecretionGeneEntry, ...] = (
         intervention="OE",
         evidence="模型 GPI-COPII 复合体",
     ),
+    SecretionGeneEntry(
+        category=CAT_COPII,
+        common_name="SEC23/SEC24（核心版）",
+        description="COPII 核心出芽复合体，不含 EMP24/ERV29 等货物受体的简化版本",
+        oe_reaction_id="sec_Sec12p_Sar1p_Sec23p_Sec24p_Bet1p_Bos1p_complex_formation",
+        intervention="OE",
+        evidence="模型 COPII 核心复合体",
+    ),
+    SecretionGeneEntry(
+        category=CAT_COPII,
+        common_name="SHL23/LST1",
+        description="SEC23/SEC24 的旁系同源蛋白 SHL23/LST1 构成的平行 COPII 复合体（核心版），可能有不同的货物选择性",
+        oe_reaction_id="sec_Sec12p_Sar1p_Shl23p_Lst1p_Bet1p_Bos1p_complex_formation",
+        intervention="OE",
+        evidence="模型 SHL23/LST1 COPII 复合体",
+    ),
+    SecretionGeneEntry(
+        category=CAT_COPII,
+        common_name="SHL23/LST1 + EMP24/ERP",
+        description="SHL23/LST1 平行 COPII 复合体，含 EMP24/ERP 货物受体",
+        oe_reaction_id="sec_Sec12p_Sar1p_Shl23p_Lst1p_Emp24p_Erp1p_Erp2p_Erv25p_Bos1p_Bet1p_complex_formation",
+        intervention="OE",
+        evidence="模型 SHL23/LST1 COPII 复合体",
+    ),
+    SecretionGeneEntry(
+        category=CAT_COPII,
+        common_name="SHL23/LST1 + ERV29",
+        description="SHL23/LST1 平行 COPII 复合体，含 ERV29 货物受体",
+        oe_reaction_id="sec_Sec12p_Sar1p_Shl23p_Lst1p_Erv29p_Bet1p_Bos1p_complex_formation",
+        intervention="OE",
+        evidence="模型 SHL23/LST1 COPII 复合体",
+    ),
 
     # ======================== ERAD ========================
     SecretionGeneEntry(
@@ -324,6 +454,31 @@ SECRETION_GENE_CATALOG: tuple[SecretionGeneEntry, ...] = (
         intervention="OE",
         evidence="模型 ERAD-M 复合体",
     ),
+    SecretionGeneEntry(
+        category=CAT_ERAD,
+        common_name="HRD 核心复合体（无YOS9/USA1）",
+        description="HRD1/HRD3/DER1 核心 ERAD 复合体，不含 YOS9/USA1 的简化版本，是已有 HRD1/HRD3/DER1 条目（含 YOS9/USA1）之外的独立测试点",
+        ko_reaction_id="sec_Ubc6p_Ubc7p_Hrd1p_Hrd3p_Der1p_complex_formation",
+        oe_reaction_id="sec_Ubc6p_Ubc7p_Hrd1p_Hrd3p_Der1p_complex_formation",
+        intervention="OE",
+        evidence="模型 ERAD 核心复合体",
+    ),
+    SecretionGeneEntry(
+        category=CAT_ERAD,
+        common_name="DSK2/RAD23/PNG1/UBA1",
+        description="ERAD 泛素-蛋白酶体穿梭因子，把去糖基化（Png1p）后的错误折叠蛋白递送到蛋白酶体，补充已有的 HRD1/CDC48/DOA10 条目",
+        oe_reaction_id="sec_Dsk2p_Rad23p_Png1p_Uba1p_complex_formation",
+        intervention="OE",
+        evidence="模型 ERAD 穿梭复合体",
+    ),
+    SecretionGeneEntry(
+        category=CAT_ERAD,
+        common_name="DSK2/RAD23/UBA1",
+        description="ERAD 泛素-蛋白酶体穿梭因子（不含 Png1p 去糖基化酶的版本）",
+        oe_reaction_id="sec_Dsk2p_Rad23p_Uba1p_complex_formation",
+        intervention="OE",
+        evidence="模型 ERAD 穿梭复合体",
+    ),
 
     # ======================== COPI 逆向转运 ========================
     SecretionGeneEntry(
@@ -333,6 +488,14 @@ SECRETION_GENE_CATALOG: tuple[SecretionGeneEntry, ...] = (
         oe_reaction_id="sec_Arf1p_Gea2p_Rer1p_Erd2p_Cop1p_Sec26p_Sec27p_Sec21p_Ret2p_Sec28p_Ret3p_complex_formation",
         intervention="OE",
         evidence="模型 COPI 复合体",
+    ),
+    SecretionGeneEntry(
+        category=CAT_COPI,
+        common_name="RER1/RET2/COP1（变体）",
+        description="COPI 衣壳的另一种模型反应变体（含 Rer1p 货物识别受体），不同于已有的 ARF1 条目",
+        oe_reaction_id="sec_Rer1p_Ret2p_Cop1p_Sec27p_Sec21p_Bet1p_complex_formation",
+        intervention="OE",
+        evidence="模型 COPI 复合体（Rer1p 变体）",
     ),
 
     # ======================== 胞吐 ========================
@@ -371,14 +534,121 @@ SECRETION_GENE_CATALOG: tuple[SecretionGeneEntry, ...] = (
         evidence="模型蛋白酶体复合体",
     ),
 
-    # ======================== GPI 锚定 ========================
+    # ======================== 液泡/内体分选（竞争性分流） ========================
+    # 这些复合体把蛋白从 Golgi/内体分流到液泡降解，和分泌路线竞争同一批货物；
+    # 逻辑上和 PEP4/PRB1（下调液泡蛋白酶）类似，但作用在更早的分选步骤——
+    # KO 可能减少目标蛋白被错误分流走，而不是减少已到液泡后的降解。
     SecretionGeneEntry(
-        category=CAT_GENERAL,
+        category=CAT_VACUOLAR_SORTING,
+        common_name="AP-3 衔接蛋白复合体",
+        description="把货物从 Golgi 直接分选到液泡的衔接蛋白复合体，和分泌通路竞争资源",
+        oe_reaction_id="sec_Apl6p_Aps3p_Apm3p_Apl5p_Vam3p_Clc1p_Chc1p_Arf1p_Swa2p_Vps1p_complex_formation",
+        intervention="KO",
+        evidence="模型 AP-3 衔接蛋白复合体",
+    ),
+    SecretionGeneEntry(
+        category=CAT_VACUOLAR_SORTING,
+        common_name="AP-1 衔接蛋白复合体",
+        description="Golgi-内体间双向分选的衔接蛋白复合体",
+        oe_reaction_id="sec_Arf1p_Pep12p_Swa2p_Chc1p_Clc1p_Apl4p_Apl2p_Apm1p_Aps1p_complex_formation",
+        intervention="KO",
+        evidence="模型 AP-1 衔接蛋白复合体",
+    ),
+    SecretionGeneEntry(
+        category=CAT_VACUOLAR_SORTING,
+        common_name="GGA 衔接蛋白",
+        description="TGN 到内体的货物分选衔接蛋白",
+        oe_reaction_id="sec_Gga1p_Gga2p_Arf1p_Apl4p_Apl2p_Apm1p_Aps1p_Chc1p_Clc1p_Pep12p_Vps45p_Vps5p_Swa2p_complex_formation",
+        intervention="KO",
+        evidence="模型 GGA 衔接蛋白复合体",
+    ),
+    SecretionGeneEntry(
+        category=CAT_VACUOLAR_SORTING,
+        common_name="VPS1/CHC1/CLC1",
+        description="网格蛋白衣壳囊泡形成的核心机制（动力蛋白样 GTP 酶 + 网格蛋白重链/轻链）",
+        oe_reaction_id="sec_Vps1p_Chc1p_Clc1p_complex_formation",
+        intervention="KO",
+        evidence="模型网格蛋白/动力蛋白样复合体",
+    ),
+    SecretionGeneEntry(
+        category=CAT_VACUOLAR_SORTING,
+        common_name="VPS4/VPS27（ESCRT）",
+        description="ESCRT 相关分选机制，货物进入多囊泡体/液泡",
+        oe_reaction_id="sec_Vps4p_Vps27p_Apl6p_Aps3p_Apm3p_Apl5p_Vam3p_complex_formation",
+        intervention="KO",
+        evidence="模型 ESCRT 相关复合体",
+    ),
+
+    # ======================== GPI 锚定加工 ========================
+    # BST1→(GUP1/PER1 与 CWH43)→TED1 是 GPI 锚脂质重塑的已知顺序：Bst1p 先脱去肌醇上的
+    # 脂肪酸（也参与错误折叠 GPI 蛋白的质量控制），Gup1p/Per1p 把 sn-2 脂肪酸从 C18 换成
+    # C26，Cwh43 further 把甘油二酯替换成神经酰胺，Ted1p 最后监控 GPI 聚糖臂的重塑状态、
+    # 决定是否放行出 ER。
+    SecretionGeneEntry(
+        category=CAT_GPI,
         common_name="GPI 锚定复合体",
         description="GPI 锚定蛋白修饰（对跨膜/GPI 蛋白重要）",
         oe_reaction_id="sec_GPIR_complex_formation",
         intervention="OE",
         evidence="模型 GPI 锚定复合体",
+    ),
+    SecretionGeneEntry(
+        category=CAT_GPI,
+        common_name="BST1",
+        description="GPI 肌醇脱酰基酶，GPI 锚重塑的第一步，也参与错误折叠 GPI 锚定蛋白的质量控制",
+        oe_reaction_id="sec_Bst1p_complex_formation",
+        intervention="OE",
+        evidence="Fujita et al. 2005, Mol Biol Cell, PMID 16319176, DOI 10.1091/mbc.e05-05-0443（据PubMed）",
+    ),
+    SecretionGeneEntry(
+        category=CAT_GPI,
+        common_name="GUP1",
+        description="GPI 锚脂肪酸重塑（sn-2 位 C18→C26），与 Per1p 协同",
+        oe_reaction_id="sec_Gup1p_complex_formation",
+        intervention="OE",
+        evidence="Ghugtyal et al. 2007, Mol Microbiol, PMID 17714445, DOI 10.1111/j.1365-2958.2007.05883.x（据PubMed）",
+    ),
+    SecretionGeneEntry(
+        category=CAT_GPI,
+        common_name="PER1",
+        description="GPI 锚脂肪酸重塑，与 Gup1p 协同",
+        oe_reaction_id="sec_Per1p_complex_formation",
+        intervention="OE",
+        evidence="Ghugtyal et al. 2007, Mol Microbiol, PMID 17714445, DOI 10.1111/j.1365-2958.2007.05883.x（据PubMed）",
+    ),
+    SecretionGeneEntry(
+        category=CAT_GPI,
+        common_name="CWH43/LAS21/MCD4",
+        description="GPI 锚脂质重塑：Cwh43 把 GPI 锚上的甘油二酯替换为神经酰胺",
+        oe_reaction_id="sec_Cwh43p_Las21p_Mcd4p_complex_formation",
+        intervention="OE",
+        evidence="Ghugtyal et al. 2007, Mol Microbiol, PMID 17714445, DOI 10.1111/j.1365-2958.2007.05883.x（据PubMed）",
+    ),
+    SecretionGeneEntry(
+        category=CAT_GPI,
+        common_name="TED1",
+        description="GPI 聚糖重塑酶（去除甘露糖2上的乙醇胺磷酸），监控 GPI 锚定蛋白质量、决定选择性 ER 出口",
+        oe_reaction_id="sec_Ted1p_complex_formation",
+        intervention="OE",
+        evidence="Rodriguez-Gallardo et al. 2022, Cell Reports, PMID 35508142, DOI 10.1016/j.celrep.2022.110768（据PubMed）",
+    ),
+
+    # ======================== 通用/其他 ========================
+    SecretionGeneEntry(
+        category=CAT_GENERAL,
+        common_name="核糖体",
+        description="核糖体整体装配，翻译能力的核心限制因素——不是分泌通路特异性，而是整体蛋白合成产能的杠杆",
+        oe_reaction_id="Mach_Ribosome_complex_formation",
+        intervention="OE",
+        evidence="模型核糖体装配复合体",
+    ),
+    SecretionGeneEntry(
+        category=CAT_GENERAL,
+        common_name="核糖体装配因子",
+        description="核糖体装配辅助因子",
+        oe_reaction_id="Mach_Ribosome_Assembly_Factors_complex_formation",
+        intervention="OE",
+        evidence="模型核糖体装配因子复合体",
     ),
 )
 
@@ -787,6 +1057,8 @@ __all__ = [
     "CAT_COPI",
     "CAT_EXOCYTOSIS",
     "CAT_PROTEASOME",
+    "CAT_GPI",
+    "CAT_VACUOLAR_SORTING",
     "CAT_GENERAL",
     "SECRETION_GENE_CATALOG",
     "SecretionGeneEntry",

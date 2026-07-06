@@ -350,11 +350,15 @@ def test_background_task_status_path_is_scoped_to_project_paths(tmp_path: Path) 
 def test_curated_gene_catalog_supports_advanced_oe_reaction_proxy_inputs() -> None:
     source = (REPO_ROOT / "app" / "ui" / "views" / "simulation_gene_catalog.py").read_text(encoding="utf-8")
 
-    assert "get_pichia_oe_reactions_for_selection" in source
-    assert "pichia_draft_oe_reactions" in source
-    assert "添加到过表达反应代理" in source
-    assert "不是 gene-level 扰动" in source
-    assert "没有可靠的敲除模型基因或 KO 反应 ID" in source
+    # Selection routing is built dynamically (f"pichia_draft_{action}_reactions"/"_genes"),
+    # not as separate literal keys per action - check for the template pieces instead.
+    assert 'f"pichia_draft_{action}_genes"' in source
+    assert 'f"pichia_draft_{action}_reactions"' in source
+    assert "添加到过表达输入" in source
+    assert "添加到敲除输入" in source
+    # A curated entry's oe_reaction_id/ko_reaction_id are surfaced as "反应" kind rows so
+    # they route to the *_reactions input, distinct from gene-level *_genes input.
+    assert '"类型": "基因" if kind == "gene" else "反应"' in source
 
 
 def test_simulation_view_reaches_legacy_matlab_only_through_reference_tab() -> None:
@@ -457,7 +461,7 @@ def test_gene_rule_overlay_is_explicit_experimental_request_option() -> None:
     assert "proposed_gr_rule" not in preview_source
     assert "候选 locus tag" in catalog_source
     assert "GPR 补充状态" in catalog_source
-    assert "补充建议" in catalog_source
+    assert "推荐动作" in catalog_source
 
 
 def test_streamlit_medium_type_labels_use_composition_names_not_internal_numbers() -> None:
@@ -467,18 +471,16 @@ def test_streamlit_medium_type_labels_use_composition_names_not_internal_numbers
     assert "media_type=99" in medium_type_label(99)
 
 
-def test_streamlit_cost_slope_option_explains_matlab_compatibility_route() -> None:
+def test_streamlit_cost_slope_option_explains_it_is_the_protein_cost_analysis_feature() -> None:
     source = (REPO_ROOT / "app" / "ui" / "views" / "simulation_builder.py").read_text(encoding="utf-8")
     results_source = (REPO_ROOT / "app" / "ui" / "views" / "simulation_results.py").read_text(encoding="utf-8")
 
-    assert "启用蛋白成本斜率对比（MATLAB 历史路线，可选，较慢）" in source
-    assert "当前默认路线" in source
-    assert "最大化目标蛋白分泌通量" in source
-    assert "历史 MATLAB 成本路线" in source
+    assert "启用蛋白成本分析（固定生长率+分泌比例网格测算成本斜率，较慢）" in source
+    assert "这是目标蛋白成本分析功能本身" in source
     assert "固定生长率 μ" in source
     assert "固定一组目标蛋白分泌比例" in source
     assert "优化葡萄糖摄取反应 Ex_glc_D" in source
-    assert "不会替换或改变当前默认 corrected pipeline 的数值结果" in source
+    assert "不勾选时不会展示任何蛋白成本分析" in source
     assert "capacity_fraction_ratios" in results_source
     assert "按当前 corrected 分泌 capacity" in results_source
 
@@ -998,61 +1000,50 @@ def test_verified_secretion_gene_library_classifies_execution_status() -> None:
     assert by_name["PDI1"]["detail_payload"]["curated"]["mapping_status"] == "reaction_proxy_only"
 
 
-def test_full_model_gene_catalog_ui_exposes_cache_and_capability_filters() -> None:
+def test_gene_lookup_panel_is_a_single_search_not_three_separate_browsers() -> None:
+    """候选库合并成一个搜索入口（策展库+全模型基因），只保留外部证据overlay作为独立高级区。
+
+    genome-wide screen 已经系统覆盖了全部模型基因和策展反应级候选，候选库不再需要自己的
+    发现型大浏览器（分页/多重筛选器/单独的"加载"开关）——那些已经被筛查结果+核实跳转取代。
+    """
     source = (REPO_ROOT / "app" / "ui" / "views" / "simulation_gene_catalog.py").read_text(encoding="utf-8")
     input_source = (REPO_ROOT / "app" / "ui" / "views" / "simulation_gene_inputs.py").read_text(encoding="utf-8")
 
-    assert "已验证分泌工程候选库" in source
+    # One merged search, not three separately-toggled browser panels.
     assert "list_verified_secretion_gene_library" in source
-    assert "高级：全模型 GPR 基因库" in source
-    assert "高级：反应级代理" in source
-    assert "高级：外部证据 GPR overlay / 证据维护" in source
-    assert "默认不加载" in source
+    assert "load_pichia_full_model_gene_catalog" in source
+    assert "全基因组KO/OE筛查已经系统覆盖了全部1025个模型基因和策展库的反应级候选" in source
+    assert "在仿真验证中核实" in source
+    assert '"高级：全模型 GPR 基因库' not in source
+    assert '"高级：反应级代理' not in source
+    assert "加载全模型 GPR 基因库" not in source
+    assert "加载反应级代理" not in source
+    assert "pichia_gene_show_full" not in source
+    assert "pichia_gene_show_reaction_proxies" not in source
+
+    # No more pagination/filter-toolbar chrome for browsing all genes.
+    assert "_paginate_full_model_gene_rows" not in source
+    assert "_page_input_widget_key" not in source
+    assert "只显示可敲除基因" not in source
+    assert "只显示可过表达代理" not in source
+    assert "每页最大行数" not in source
+    assert "上一页" not in source
+    assert "下一页" not in source
+
+    # External evidence GPR overlay is kept as its own advanced section - it is the one
+    # thing genome-wide screening does not cover at all.
+    assert "高级：外部证据 GPR overlay / 候选库维护" in source
     assert "暂无可执行补充规则" in source
-    assert "加载全模型 GPR 基因库" in source
-    assert "加载反应级代理" in source
     assert "显示外部证据 GPR overlay" in source
-    assert "显示名称" in source
-    assert "模型基因 ID" in source
-    assert "功能 / 依据" in source
-    assert "可用操作" in source
-    assert "湿实验状态" in source
-    assert "pichia_gene_show_full" in source
-    assert 'key="pichia_gene_show_reaction_proxies"' in source
-    assert 'key="pichia_gene_show_matlab_genes"' not in source
-    assert 'value=True' not in source[source.find("def render_gene_lookup_panel"):source.find("def _render_full_model_gene_lookup")]
-    assert "分泌工程基因名（带证据映射）" in source
-    assert "反应级代理" in source
-    assert "模型 GPR gene ID" in source
     assert "刷新常用基因证据缓存" in source
-    assert "pichia_secretion_gene_evidence_cache_path" in (
-        REPO_ROOT / "app" / "services" / "pichia_gene_catalog_service.py"
-    ).read_text(encoding="utf-8")
-    assert "无模型 GPR gene ID" in source
-    assert "不能直接作为 gene-level KO/OE 输入" in source
-    assert "可用于反应级代理；湿实验需确认 locus ID" in source
-    assert "代理反应无 GPR 规则" in source
-    assert "它们不是 gene-level 扰动" in source
-    assert "在线刷新湿实验注释缓存" in source
-    assert "只显示可敲除基因" in source
-    assert "只显示可过表达代理" in source
-    assert "刷新基因目录缓存" in source
-    assert "基因目录缓存" in source
-    assert "每页最大行数" in source
-    assert "上一页" in source
-    assert "下一页" in source
-    assert "页码" in source
-    assert "_page_input_widget_key" in source
-    assert "pichia_gene_page_input_" in source
-    assert 'key="pichia_gene_page_input"' not in source
-    assert 'st.session_state["pichia_gene_page_input"]' not in source
-    assert "最多显示行数" not in source
-    assert "ko_runnable_gpr_gene_deletion" in source
-    assert "oe_runnable_reaction_proxy" in source
-    assert "未注释模型基因" in source
-    assert "database_supported_experiment_candidate" in source
+    assert "在线重建全模型湿实验注释缓存" in source
+
+    # Combination testing (multi-select -> add to KO/OE) is preserved.
+    assert "选择候选（可多选，用于组合测试）" in source
+    assert 'key="pichia_gene_search_add_ko"' in source
+    assert 'key="pichia_gene_search_add_oe"' in source
+
     assert "render_gene_lookup_panel()" in input_source
-    assert "pichia_gene_lookup_enabled" not in input_source
 
 
 def test_full_model_gene_catalog_filter_helper_supports_ko_and_oe_modes() -> None:
@@ -1091,40 +1082,72 @@ def test_full_model_gene_catalog_filter_helper_supports_ko_and_oe_modes() -> Non
     assert [row["gene_id"] for row in _filter_full_model_gene_rows(rows, wet_lab_filter="仅模型级候选")] == ["G_BOTH"]
 
 
-def test_full_model_gene_catalog_pagination_helper_clamps_pages() -> None:
-    from app.ui.views.simulation_gene_catalog import _paginate_full_model_gene_rows
+def test_gene_search_selection_routes_genes_and_reactions_to_separate_inputs() -> None:
+    from app.ui.views.simulation_gene_catalog import _partition_selection_by_kind
 
-    rows = [{"gene_id": f"G{i}"} for i in range(1, 251)]
+    rows = [
+        {"来源": "策展库", "ID": "PAS_chr2-2_0107", "kind": "gene"},
+        {"来源": "策展库", "ID": "sec_PDI1_ERV2_Ero1p_complex_formation", "kind": "reaction"},
+        {"来源": "全模型", "ID": "PAS_chr1-1_0013", "kind": "gene"},
+    ]
 
-    page_rows, page_number, total_pages = _paginate_full_model_gene_rows(rows, page_number=1, page_size=100)
-    assert page_number == 1
-    assert total_pages == 3
-    assert len(page_rows) == 100
-    assert page_rows[0]["gene_id"] == "G1"
+    genes, reactions = _partition_selection_by_kind(rows)
 
-    page_rows, page_number, total_pages = _paginate_full_model_gene_rows(rows, page_number=3, page_size=100)
-    assert page_number == 3
-    assert total_pages == 3
-    assert len(page_rows) == 50
-    assert page_rows[0]["gene_id"] == "G201"
+    assert genes == ["PAS_chr2-2_0107", "PAS_chr1-1_0013"]
+    assert reactions == ["sec_PDI1_ERV2_Ero1p_complex_formation"]
 
-    page_rows, page_number, total_pages = _paginate_full_model_gene_rows(rows, page_number=99, page_size=100)
-    assert page_number == 3
-    assert total_pages == 3
-    assert len(page_rows) == 50
+
+def test_gene_search_merges_curated_and_full_model_sources_without_duplicates(monkeypatch) -> None:
+    import app.ui.views.simulation_gene_catalog as catalog_ui
+
+    monkeypatch.setattr(
+        catalog_ui,
+        "list_verified_secretion_gene_library",
+        lambda query: [
+            {
+                "display_name": "PEP4",
+                "model_gene_id": "PAS_chr2-2_0107",
+                "oe_reaction_id": "",
+                "ko_reaction_id": "",
+                "function_annotation": "液泡蛋白酶 A",
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        catalog_ui,
+        "load_pichia_full_model_gene_catalog",
+        lambda: [
+            # Same gene_id the curated row already returned, plus one full-model-only
+            # match the curated library doesn't know about - both should still be
+            # matched by _filter_full_model_gene_rows's own query check.
+            {
+                "gene_id": "PAS_chr2-2_0107",
+                "display_name": "PEP4",
+                "ko_support_status": "ko_runnable_gpr_gene_deletion",
+                "oe_support_status": "oe_no_gpr_effect",
+            },
+            {
+                "gene_id": "PAS_chr1-1_0099",
+                "display_name": "PEP4-like paralog",
+                "ko_support_status": "ko_no_gpr_effect",
+                "oe_support_status": "oe_runnable_reaction_proxy",
+            },
+        ],
+    )
+
+    rows, truncated_count = catalog_ui._collect_search_rows("pep4")
+
+    assert truncated_count == 0
+    ids = [(row["kind"], row["ID"]) for row in rows]
+    # PAS_chr2-2_0107 appears in both sources but must be deduplicated to one row.
+    assert ids.count(("gene", "PAS_chr2-2_0107")) == 1
+    assert ("gene", "PAS_chr1-1_0099") in ids
 
 
 def test_full_model_gene_catalog_display_helpers_prefer_names_and_reaction_evidence() -> None:
     from app.ui.views.simulation_gene_catalog import (
-        _external_id_summary,
         _full_model_gene_display_name,
         _full_model_gene_function_summary,
-        _gene_action_label,
-        _gpr_role_label,
-        _ko_status_label,
-        _oe_status_label,
-        _process_label,
-        _wet_lab_readiness_label,
     )
 
     annotated = {
@@ -1132,7 +1155,6 @@ def test_full_model_gene_catalog_display_helpers_prefer_names_and_reaction_evide
         "protein_name": "Protein disulfide-isomerase",
         "display_name": "Protein disulfide-isomerase",
         "function_annotation": "Catalyzes disulfide bond formation.",
-        "external_ids": {"uniprot": "P12345", "kegg": "ppa:G1"},
         "ko_support_status": "ko_runnable_gpr_gene_deletion",
         "oe_support_status": "oe_runnable_reaction_proxy",
     }
@@ -1147,14 +1169,6 @@ def test_full_model_gene_catalog_display_helpers_prefer_names_and_reaction_evide
     assert _full_model_gene_function_summary(annotated) == "Catalyzes disulfide bond formation."
     assert _full_model_gene_display_name(reaction_only) == "HMPK1/PMPK 相关酶（未注释）"
     assert "按模型 GPR 关联到反应：HMPK1, PMPK" in _full_model_gene_function_summary(reaction_only)
-    assert _gene_action_label(annotated) == "可敲除 / 可过表达代理"
-    assert _gene_action_label(reaction_only) == "可敲除"
-    assert _ko_status_label("ko_runnable_gpr_gene_deletion") == "可运行：基因级 KO"
-    assert _oe_status_label("oe_runnable_reaction_proxy") == "可运行：反应级 OE 代理"
-    assert _gpr_role_label("single_gene") == "单基因"
-    assert _process_label("metabolic_or_other") == "代谢 / 其他"
-    assert _external_id_summary(annotated) == "uniprot: P12345; kegg: ppa:G1"
-    assert _wet_lab_readiness_label("database_supported_experiment_candidate") == "可直接推进：数据库精确支持"
 
 
 def test_app_gene_catalog_option_row_preserves_capability_fields() -> None:
@@ -1325,9 +1339,7 @@ def test_response_summary_exposes_target_metadata_and_warnings() -> None:
         },
         target_warnings=["hLF 使用用户提供的 710aa 目标序列。"],
         protein_cost_analysis={
-            "result_status": "draft_explanatory",
-            "total_relative_score": 100.0,
-            "dominant_cost_categories": ["translation"],
+            "result_status": "draft_cost_slope_analysis",
             "lp_attribution": {
                 "result_status": "draft_lp_sensitivity",
                 "top_constraint_marginals": [{"block": "protein_mass", "marginal": 1.0}],
@@ -1361,8 +1373,7 @@ def test_response_summary_exposes_target_metadata_and_warnings() -> None:
     assert summary["alignment_summary"]["matlab_alignment_status"] == "aligned_except_known_matlab_compatibility_differences"
     assert summary["alignment_summary"]["is_fully_aligned"] is False
     assert summary["target_warnings"] == ["hLF 使用用户提供的 710aa 目标序列。"]
-    assert summary["protein_cost_analysis"]["result_status"] == "draft_explanatory"
-    assert summary["protein_cost_analysis"]["total_relative_score"] == 100.0
+    assert summary["protein_cost_analysis"]["result_status"] == "draft_cost_slope_analysis"
     assert summary["protein_cost_analysis"]["lp_attribution"]["result_status"] == "draft_lp_sensitivity"
     assert summary["target_growth_analysis"]["result_status"] == "draft_explanatory"
     assert summary["target_growth_analysis"]["growth_sensitivity_label"] == "increasing"

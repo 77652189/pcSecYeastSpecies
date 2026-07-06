@@ -82,12 +82,31 @@ def page_header() -> None:
     st.caption("面向生物学专家的跨物种蛋白质组约束模型结果浏览与小规模仿真工具")
 
 
+NAV_RADIO_KEY = "app_page_nav"
+# Streamlit forbids writing to st.session_state[key] once that key's widget has
+# rendered in the current script run (raises StreamlitAPIException) - and the nav
+# radio below always renders first, before any page-specific code runs. So a page
+# that wants to navigate elsewhere (e.g. the genome-wide screen's "verify in
+# simulation" button) can't set NAV_RADIO_KEY directly. It sets this key instead;
+# request_navigation() below applies it to NAV_RADIO_KEY before the radio is
+# instantiated on the *next* run, which is legal.
+PENDING_NAV_KEY = "app_page_nav_pending"
+
+
+def request_navigation(target_page: str) -> None:
+    """Queue a jump to target_page for the next rerun. Call this, then st.rerun()."""
+    st.session_state[PENDING_NAV_KEY] = target_page
+
+
 def sidebar_navigation() -> str:
+    if PENDING_NAV_KEY in st.session_state:
+        st.session_state[NAV_RADIO_KEY] = st.session_state.pop(PENDING_NAV_KEY)
     st.sidebar.title("演示导航")
     page = st.sidebar.radio(
         "选择功能",
-        ["项目总览", "结果浏览", "仿真验证", "运行日志"],
+        ["项目总览", "结果浏览", "仿真验证", "全基因组KO/OE筛查", "运行日志"],
         index=0,
+        key=NAV_RADIO_KEY,
     )
     st.sidebar.divider()
     st.sidebar.markdown(
@@ -96,8 +115,9 @@ def sidebar_navigation() -> str:
 
         1. 项目总览
         2. 结果浏览
-        3. 仿真验证
-        4. 运行日志
+        3. 全基因组KO/OE筛查（探索：找出哪些基因值得关注）
+        4. 仿真验证（核实：可从筛查结果候选行直接跳转过来并自动填好靶点/基因）
+        5. 运行日志
         """
     )
     if page == "结果浏览":

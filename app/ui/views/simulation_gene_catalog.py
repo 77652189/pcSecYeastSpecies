@@ -1,74 +1,65 @@
 from __future__ import annotations
 
-import hashlib
-import math
-
 import pandas as pd
 import streamlit as st
 
 from app.services.pichia_gene_catalog_service import (
     build_pichia_gene_evidence_cache,
-    get_pichia_ko_genes_for_selection,
-    get_pichia_ko_reactions_for_selection,
-    get_pichia_oe_reactions_for_selection,
     list_pichia_gene_rule_evidence,
     list_pichia_secretion_gene_evidence,
     list_verified_secretion_gene_library,
     load_pichia_full_model_gene_catalog,
-    pichia_full_model_gene_catalog_cache_path,
 )
 from app.ui.views.simulation_gene_text import merge_candidate_text
 
 KO_RUNNABLE_STATUS = "ko_runnable_gpr_gene_deletion"
 OE_RUNNABLE_STATUS = "oe_runnable_reaction_proxy"
+# Full-model catalog has ~1025 rows; cap how many query matches render at once so a broad
+# keyword doesn't dump a huge table (narrow the search instead of scrolling/paginating).
+FULL_MODEL_SEARCH_LIMIT = 30
 
 
 def render_gene_lookup_panel() -> None:
-    st.markdown("**已验证分泌工程候选库**")
+    st.markdown("**基因 / 反应 ID 查找**")
     st.caption(
-        "默认展示 37 条分泌工程候选，并合并本地数据库/模型证据。"
-        "这里的“已验证”指数据库证据支持与模型可解释，不等于湿实验已完成验证。"
+        "全基因组KO/OE筛查已经系统覆盖了全部1025个模型基因和策展库的反应级候选——"
+        "找值得测试的候选，优先去「全基因组KO/OE筛查」结果里看，点候选行的"
+        "「在仿真验证中核实」会自动填好下面的输入框。这里的搜索适合已经知道大致名字、"
+        "想直接查到精确ID的场景。"
     )
     query = st.text_input(
-        "搜索候选基因 / locus / 功能 / 反应",
+        "搜索基因常用名 / locus / 模型基因ID / 反应ID",
         value=st.session_state.get("pichia_gene_lookup_query", ""),
-        placeholder="例如：PDI、ERO1、Kar2、ERAD、PAS_chr",
+        placeholder="例如：PDI1、ERO1、Kar2、PAS_chr2-2_0107、sec_Kar2p_complex_formation",
         key="pichia_gene_lookup_query",
     )
-    _render_verified_secretion_gene_library(query)
+    if query.strip():
+        _render_search_results(query)
+    else:
+        st.caption("输入关键词后显示匹配结果。")
 
-    with st.expander("高级：全模型 GPR 基因库（1025 个模型基因）", expanded=False):
-        st.caption("这里是原始模型 GPR 视图，用于严格 gene-level KO 和 GPR-aware OE proxy 检索；默认不加载，避免首屏卡顿。")
-        show_full = st.checkbox("加载全模型 GPR 基因库", value=False, key="pichia_gene_show_full")
-        if show_full:
-            _render_full_model_gene_lookup(query)
-        else:
-            st.info("打开上方开关后加载全模型基因库。")
-
-    with st.expander("高级：反应级代理（sec_* 复合体 / 路径反应）", expanded=False):
-        st.caption("反应级代理可用于模型解释或 OE proxy，但不是湿实验基因名，也不是 gene-level GPR。")
-        show_reaction_proxies = st.checkbox(
-            "加载反应级代理",
-            value=False,
-            key="pichia_gene_show_reaction_proxies",
-        )
-        if show_reaction_proxies:
-            _render_reaction_proxy_lookup(query)
-        else:
-            st.info("打开上方开关后查看 sec_* 反应代理。")
-
-    with st.expander("高级：外部证据 GPR overlay / 证据维护", expanded=False):
+    with st.expander("高级：外部证据 GPR overlay / 候选库维护", expanded=False):
         st.caption("外部证据 overlay 是实验性证据层，默认不进入仿真；当前无可执行补充规则时只作人工复核参考。")
         maintenance_col, overlay_col = st.columns([1.0, 1.0])
         with maintenance_col:
-            refresh_lightweight_cache = st.button(
+            if st.button(
                 "刷新常用基因证据缓存",
                 key="pichia_gene_refresh_lightweight_cache",
-                help="刷新 37 条分泌工程候选及反应代理缓存；不会重建全模型湿实验注释。",
-            )
-            if refresh_lightweight_cache:
+                help="刷新策展候选及反应代理缓存；不会重建全模型湿实验注释。",
+            ):
                 refreshed = list_pichia_secretion_gene_evidence("", force_refresh=True)
                 st.success(f"常用基因证据缓存已刷新：{len(refreshed)} 条。")
+            if st.button(
+                "在线重建全模型湿实验注释缓存",
+                key="pichia_gene_refresh_evidence",
+                help="从 UniProt/KEGG 重新构建全部模型基因的湿实验注释；比较慢。",
+            ):
+                with st.spinner("正在从 UniProt/KEGG 构建湿实验注释缓存..."):
+                    summary = build_pichia_gene_evidence_cache()
+                st.success(
+                    "湿实验注释缓存已更新："
+                    f"{summary.get('database_supported_count', 0)} / {summary.get('total_genes', 0)} 个基因有数据库支持。"
+                )
         with overlay_col:
             show_overlay = st.checkbox("显示外部证据 GPR overlay", value=False, key="pichia_gene_show_overlay")
         if show_overlay:
@@ -77,22 +68,21 @@ def render_gene_lookup_panel() -> None:
             st.info("打开上方开关后查看 PDI1/ERO1/KAR2/OCH1/PEP4/PRB1 等 overlay 证据。")
 
 
-def _render_verified_secretion_gene_library(query: str) -> None:
-    rows = list_verified_secretion_gene_library(query)
+def _render_search_results(query: str) -> None:
+    rows, truncated_count = _collect_search_rows(query)
     if not rows:
-        st.info("已验证分泌工程候选库中未找到匹配。可在高级区加载全模型 GPR 基因库继续搜索。")
+        st.info("未找到匹配；可以尝试模型基因ID（如 PAS_chr...）或反应ID（如 sec_...）。")
         return
     st.dataframe(
         pd.DataFrame(
             [
                 {
-                    "标准名": row["display_name"],
-                    "locus tag / 模型基因 ID": row["locus_tag"] or row["model_gene_id"] or "需人工确认",
-                    "功能": row["function_annotation"],
-                    "可执行操作": row["operation_status"],
-                    "证据等级": row["evidence_tier"],
-                    "推荐用途": row["recommended_use"],
-                    "分类": row["category"],
+                    "来源": row["来源"],
+                    "名称": row["名称"],
+                    "类型": row["类型"],
+                    "ID": row["ID"],
+                    "可用于": row["可用于"],
+                    "说明": row["说明"],
                 }
                 for row in rows
             ]
@@ -100,198 +90,97 @@ def _render_verified_secretion_gene_library(query: str) -> None:
         use_container_width=True,
         hide_index=True,
     )
-    selected = st.multiselect(
-        "选择候选基因",
-        [str(row["display_name"]) for row in rows if row.get("display_name")],
-        key="pichia_verified_gene_sel",
-    )
-    action_col_ko, action_col_oe, detail_col = st.columns([1.0, 1.0, 1.0])
-    with action_col_ko:
-        if st.button("添加到敲除输入", key="pichia_verified_gene_add_ko") and selected:
-            _add_curated_knockout_selection(selected)
-    with action_col_oe:
-        if st.button("添加到过表达反应代理", key="pichia_verified_gene_add_oe") and selected:
-            _add_curated_oe_reaction_selection(selected)
-    with detail_col:
-        st.caption("PDI1/ERO1 等无可执行 GPR overlay 时不会被写入 gene-level KO。")
+    if truncated_count:
+        st.caption(f"全模型基因库还有 {truncated_count} 个匹配未显示，请输入更精确的关键词缩小范围。")
+
+    options = [f"{row['名称']} — {row['ID']}" for row in rows]
+    selected_labels = st.multiselect("选择候选（可多选，用于组合测试）", options, key="pichia_gene_search_sel")
+    selected_rows = [row for row, label in zip(rows, options) if label in selected_labels]
+    add_ko_col, add_oe_col = st.columns(2)
+    with add_ko_col:
+        if st.button("添加到敲除输入", key="pichia_gene_search_add_ko") and selected_rows:
+            _apply_search_selection(selected_rows, action="ko")
+    with add_oe_col:
+        if st.button("添加到过表达输入", key="pichia_gene_search_add_oe") and selected_rows:
+            _apply_search_selection(selected_rows, action="oe")
     message = st.session_state.pop("pichia_gene_catalog_message", "")
     if message:
         st.info(message)
-    with st.expander("查看候选证据详情", expanded=False):
-        st.dataframe(
-            pd.DataFrame(
-                [
-                    {
-                        "标准名": row["display_name"],
-                        "模型 gene": row["model_gene_id"] or "",
-                        "候选 locus": row["locus_tag"] or "",
-                        "映射状态": _curated_mapping_status_label(row.get("mapping_status")),
-                        "GPR overlay": _rule_overlay_status_label(row.get("rule_status")),
-                        "外部置信度": row.get("rule_confidence") or "",
-                        "KO 代理反应": row.get("ko_reaction_id") or "",
-                        "OE 代理反应": row.get("oe_reaction_id") or "",
-                        "证据摘要": row["source_summary"],
-                    }
-                    for row in rows
-                ]
-            ),
-            use_container_width=True,
-            hide_index=True,
+
+
+def _collect_search_rows(query: str) -> tuple[list[dict[str, object]], int]:
+    """Merge curated-library and full-model-gene matches into one result list.
+
+    Both sources ultimately search the same underlying catalog data (curated rows already
+    carry gene_id/ko_reaction_id/oe_reaction_id), so this is one search instead of the three
+    separate browsers the page used to have.
+    """
+    rows: list[dict[str, object]] = []
+    seen: set[tuple[str, str]] = set()
+
+    def _add(source: str, name: str, kind: str, item_id: object, ko_ok: bool, oe_ok: bool, detail: str) -> None:
+        item_id_str = str(item_id or "").strip()
+        if not item_id_str or (kind, item_id_str) in seen:
+            return
+        seen.add((kind, item_id_str))
+        usable = "/".join(label for label, ok in (("KO", ko_ok), ("OE", oe_ok)) if ok)
+        rows.append(
+            {
+                "来源": source,
+                "名称": name or item_id_str,
+                "类型": "基因" if kind == "gene" else "反应",
+                "ID": item_id_str,
+                "可用于": usable or "仅解释",
+                "说明": detail,
+                "kind": kind,
+            }
         )
 
+    for row in list_verified_secretion_gene_library(query):
+        name = str(row.get("display_name") or "")
+        detail = str(row.get("function_annotation") or "")
+        _add("策展库", name, "gene", row.get("model_gene_id"), True, True, detail)
+        _add("策展库", name, "reaction", row.get("ko_reaction_id"), True, False, detail)
+        _add("策展库", name, "reaction", row.get("oe_reaction_id"), False, True, detail)
 
-def _render_full_model_gene_lookup(query: str) -> None:
-    filter_col, oe_col, wet_lab_col, refresh_col, page_size_col = st.columns([1.1, 1.2, 1.4, 1.1, 1.0])
-    with filter_col:
-        only_ko = st.checkbox("只显示可敲除基因", value=False, key="pichia_gene_only_ko")
-    with oe_col:
-        only_oe = st.checkbox("只显示可过表达代理", value=False, key="pichia_gene_only_oe")
-    with wet_lab_col:
-        wet_lab_filter = st.selectbox(
-            "湿实验注释",
-            ["全部", "可直接推进湿实验", "需人工确认", "仅模型级候选"],
-            index=0,
-            key="pichia_gene_wet_lab_filter",
+    full_model_matches = _filter_full_model_gene_rows(load_pichia_full_model_gene_catalog(), query=query)
+    truncated_count = max(0, len(full_model_matches) - FULL_MODEL_SEARCH_LIMIT)
+    for gene in full_model_matches[:FULL_MODEL_SEARCH_LIMIT]:
+        _add(
+            "全模型",
+            _full_model_gene_display_name(gene),
+            "gene",
+            gene.get("gene_id"),
+            gene.get("ko_support_status") == KO_RUNNABLE_STATUS,
+            gene.get("oe_support_status") == OE_RUNNABLE_STATUS,
+            _full_model_gene_function_summary(gene),
         )
-    with refresh_col:
-        force_refresh = st.button("刷新基因目录缓存", key="pichia_gene_refresh_cache")
-    with page_size_col:
-        page_size = int(
-            st.number_input(
-                "每页最大行数",
-                min_value=25,
-                max_value=500,
-                value=100,
-                step=25,
-                key="pichia_gene_page_size",
-            )
-        )
+    return rows, truncated_count
 
-    if st.button("在线刷新湿实验注释缓存", key="pichia_gene_refresh_evidence"):
-        with st.spinner("正在从 UniProt/KEGG 构建湿实验注释缓存..."):
-            summary = build_pichia_gene_evidence_cache()
-        st.success(
-            "湿实验注释缓存已更新："
-            f"{summary.get('database_supported_count', 0)} / {summary.get('total_genes', 0)} 个基因有数据库支持。"
-        )
-        force_refresh = False
 
-    full_rows = load_pichia_full_model_gene_catalog(force_refresh=force_refresh)
-    filtered_rows = _filter_full_model_gene_rows(
-        full_rows,
-        query=query,
-        only_ko=only_ko,
-        only_oe=only_oe,
-        wet_lab_filter=wet_lab_filter,
+def _partition_selection_by_kind(rows: list[dict[str, object]]) -> tuple[list[str], list[str]]:
+    """Split selected search rows into (gene_ids, reaction_ids) for routing to the right input box."""
+    genes = [str(row["ID"]) for row in rows if row.get("kind") == "gene" and row.get("ID")]
+    reactions = [str(row["ID"]) for row in rows if row.get("kind") == "reaction" and row.get("ID")]
+    return genes, reactions
+
+
+def _apply_search_selection(rows: list[dict[str, object]], *, action: str) -> None:
+    genes, reactions = _partition_selection_by_kind(rows)
+    added: list[str] = []
+    if genes:
+        key = f"pichia_draft_{action}_genes"
+        st.session_state[key] = merge_candidate_text(str(st.session_state.get(key, "")), genes)
+        added.append(f"基因：{', '.join(genes)}")
+    if reactions:
+        key = f"pichia_draft_{action}_reactions"
+        st.session_state[key] = merge_candidate_text(str(st.session_state.get(key, "")), reactions)
+        added.append(f"反应：{', '.join(reactions)}")
+    action_label = "敲除" if action == "ko" else "过表达"
+    st.session_state["pichia_gene_catalog_message"] = (
+        f"已加入{action_label}输入：" + "；".join(added) if added else "所选候选没有可用的 ID。"
     )
-    if not filtered_rows:
-        st.info("模型 GPR 基因目录中未找到匹配。可以打开分泌工程基因名或反应级代理继续检索。")
-        return
-    page_signature = (query.strip(), only_ko, only_oe, wet_lab_filter, page_size, len(filtered_rows))
-    if st.session_state.get("pichia_gene_page_signature") != page_signature:
-        st.session_state["pichia_gene_page"] = 1
-        st.session_state["pichia_gene_page_signature"] = page_signature
-    page_number = int(st.session_state.get("pichia_gene_page", 1))
-    display_rows, page_number, total_pages = _paginate_full_model_gene_rows(
-        filtered_rows,
-        page_number=page_number,
-        page_size=page_size,
-    )
-    st.session_state["pichia_gene_page"] = page_number
-    cache_path = pichia_full_model_gene_catalog_cache_path()
-    st.caption(
-        f"模型 GPR 基因缓存：`{cache_path.parent}`。"
-        f"当前第 {page_number} / {total_pages} 页，显示 {len(display_rows)} 个；"
-        f"共 {len(filtered_rows)} 个匹配基因。"
-    )
-    previous_col, page_col, next_col = st.columns([1.0, 1.2, 1.0])
-    with previous_col:
-        if st.button("上一页", disabled=page_number <= 1, key="pichia_gene_previous_page"):
-            st.session_state["pichia_gene_page"] = max(1, page_number - 1)
-            st.rerun()
-    with page_col:
-        requested_page = int(
-            st.number_input(
-                "页码",
-                min_value=1,
-                max_value=total_pages,
-                value=page_number,
-                step=1,
-                key=_page_input_widget_key(page_signature, page_number, total_pages),
-            )
-        )
-        if requested_page != page_number:
-            st.session_state["pichia_gene_page"] = requested_page
-            st.rerun()
-    with next_col:
-        if st.button("下一页", disabled=page_number >= total_pages, key="pichia_gene_next_page"):
-            st.session_state["pichia_gene_page"] = min(total_pages, page_number + 1)
-            st.rerun()
-    st.dataframe(
-        pd.DataFrame(
-            [
-                {
-                    "显示名称": _full_model_gene_display_name(gene),
-                    "模型基因 ID": gene["gene_id"],
-                    "可用操作": _gene_action_label(gene),
-                    "湿实验状态": _wet_lab_readiness_label(gene.get("wet_lab_readiness")),
-                    "分类": gene["primary_category"],
-                    "功能 / 依据": _full_model_gene_function_summary(gene),
-                    "数据库 ID": _external_id_summary(gene),
-                    "通路": _process_label(gene.get("processes")),
-                    "反应数": gene["n_reactions"],
-                    "KO 状态": _ko_status_label(gene.get("ko_support_status")),
-                    "OE 状态": _oe_status_label(gene.get("oe_support_status")),
-                    "GPR 角色": _gpr_role_label(gene.get("gpr_role")),
-                    "置信度": gene.get("confidence", ""),
-                    "证据等级": gene.get("evidence_confidence", ""),
-                    "证据来源": ", ".join(str(item) for item in gene.get("evidence_sources") or []),
-                    "别名": ", ".join(str(item) for item in gene.get("aliases") or []),
-                    "缺失信息": ", ".join(str(item) for item in gene.get("missing_information") or []),
-                }
-                for gene in display_rows
-            ]
-        ),
-        use_container_width=True,
-        hide_index=True,
-    )
-    gene_name_by_id = {str(gene["gene_id"]): _full_model_gene_display_name(gene) for gene in display_rows}
-    selected = st.multiselect(
-        "选择模型基因",
-        [str(gene["gene_id"]) for gene in display_rows],
-        key="pichia_full_sel",
-        format_func=lambda gene_id: f"{gene_name_by_id.get(str(gene_id), str(gene_id))}（{gene_id}）",
-    )
-    add_ko_col, add_oe_col = st.columns(2)
-    with add_ko_col:
-        if st.button("添加到敲除基因") and selected:
-            current = str(st.session_state.get("pichia_draft_ko_genes", ""))
-            st.session_state["pichia_draft_ko_genes"] = merge_candidate_text(current, selected)
-            st.rerun()
-    with add_oe_col:
-        if st.button("添加到过表达基因代理") and selected:
-            current = str(st.session_state.get("pichia_draft_oe_genes", ""))
-            st.session_state["pichia_draft_oe_genes"] = merge_candidate_text(current, selected)
-            st.rerun()
-
-
-def _paginate_full_model_gene_rows(
-    rows: list[dict[str, object]],
-    *,
-    page_number: int,
-    page_size: int,
-) -> tuple[list[dict[str, object]], int, int]:
-    safe_page_size = max(1, int(page_size))
-    total_pages = max(1, math.ceil(len(rows) / safe_page_size))
-    current_page = min(max(1, int(page_number)), total_pages)
-    start = (current_page - 1) * safe_page_size
-    end = start + safe_page_size
-    return rows[start:end], current_page, total_pages
-
-
-def _page_input_widget_key(page_signature: tuple[object, ...], page_number: int, total_pages: int) -> str:
-    digest = hashlib.sha1(repr((page_signature, page_number, total_pages)).encode("utf-8")).hexdigest()[:12]
-    return f"pichia_gene_page_input_{digest}"
+    st.rerun()
 
 
 def _filter_full_model_gene_rows(
@@ -372,23 +261,6 @@ def _matches_wet_lab_filter(gene: dict[str, object], wet_lab_filter: str) -> boo
     return True
 
 
-def _wet_lab_readiness_label(readiness: object) -> str:
-    labels = {
-        "database_supported_experiment_candidate": "可直接推进：数据库精确支持",
-        "manual_review_required": "需人工确认：有部分数据库证据",
-        "model_only_not_experiment_ready": "仅模型级候选：不建议直接实验",
-    }
-    return labels.get(str(readiness or ""), str(readiness or ""))
-
-
-def _external_id_summary(gene: dict[str, object]) -> str:
-    external_ids = gene.get("external_ids") if isinstance(gene.get("external_ids"), dict) else {}
-    if not external_ids:
-        return ""
-    ordered_keys = ("uniprot", "ncbi_gene", "kegg", "refseq")
-    return "; ".join(f"{key}: {external_ids[key]}" for key in ordered_keys if external_ids.get(key))
-
-
 def _reaction_tokens(gene: dict[str, object]) -> list[str]:
     raw_reactions = gene.get("sample_reactions") or gene.get("affected_reactions") or []
     tokens: list[str] = []
@@ -403,176 +275,6 @@ def _reaction_tokens(gene: dict[str, object]) -> list[str]:
             seen.add(token)
             tokens.append(token)
     return tokens
-
-
-def _gene_action_label(gene: dict[str, object]) -> str:
-    actions: list[str] = []
-    if gene.get("ko_support_status") == KO_RUNNABLE_STATUS:
-        actions.append("可敲除")
-    if gene.get("oe_support_status") == OE_RUNNABLE_STATUS:
-        actions.append("可过表达代理")
-    if not actions:
-        return "仅解释 / 暂不可运行"
-    return " / ".join(actions)
-
-
-def _ko_status_label(status: object) -> str:
-    labels = {
-        "ko_runnable_gpr_gene_deletion": "可运行：基因级 KO",
-        "ko_no_gpr_effect": "不可运行：无 GPR 影响",
-        "ko_explain_only_complex_subunit": "仅解释：复合体亚基",
-    }
-    return labels.get(str(status or ""), str(status or ""))
-
-
-def _oe_status_label(status: object) -> str:
-    labels = {
-        "oe_runnable_reaction_proxy": "可运行：反应级 OE 代理",
-        "oe_no_gpr_effect": "不可运行：无 GPR 影响",
-        "oe_explain_only_complex_subunit": "仅解释：复合体亚基",
-    }
-    return labels.get(str(status or ""), str(status or ""))
-
-
-def _gpr_role_label(role: object) -> str:
-    labels = {
-        "single_gene": "单基因",
-        "complex_subunit": "复合体亚基",
-        "isozyme": "同工酶",
-        "no_gpr_effect": "无 GPR 影响",
-    }
-    return labels.get(str(role or ""), str(role or ""))
-
-
-def _process_label(process: object) -> str:
-    labels = {
-        "metabolic_or_other": "代谢 / 其他",
-        "translation": "翻译",
-        "er_translocation": "ER 转运",
-        "folding_dsb": "折叠 / DSB",
-        "glycosylation": "糖基化",
-        "misfolding_erad": "错误折叠 / ERAD",
-        "transport_secretion": "运输 / 分泌",
-    }
-    text = str(process or "")
-    return labels.get(text, text)
-
-
-def _render_matlab_gene_target_lookup(query: str, *, force_refresh: bool = False) -> None:
-    evidence_rows = list_pichia_secretion_gene_evidence(query, force_refresh=force_refresh)
-    if not evidence_rows:
-        st.info("分泌工程基因名中未找到匹配。")
-        return
-    st.markdown("**分泌工程基因名（带证据映射）**")
-    st.caption(
-        "这里显示分泌工程常用名、MATLAB 路径名称与模型证据的对应关系。"
-        "若没有模型 GPR gene ID，则不能作为严格 gene-level 输入。"
-    )
-    rule_evidence_by_name = {
-        str(row.get("common_name") or ""): row
-        for row in list_pichia_gene_rule_evidence(query)
-    }
-    rows, current_category = [], None
-    for row in evidence_rows:
-        if row["category"] != current_category:
-            current_category = str(row["category"])
-            rows.append(
-                {
-                    "常用基因名": f"▸ {current_category}",
-                    "说明": "",
-                    "模型 GPR gene ID": "",
-                    "证据状态": "",
-                    "推荐用途": "",
-                    "候选 locus tag": "",
-                    "外部证据": "",
-                    "GPR 补充状态": "",
-                    "补充建议": "",
-                    "可用代理反应": "",
-                    "代理反应证据": "",
-                }
-            )
-        rule_evidence = rule_evidence_by_name.get(str(row["common_name"]), {})
-        rows.append(
-            {
-                "常用基因名": row["common_name"],
-                "说明": row["description"],
-                "模型 GPR gene ID": row["mapped_model_gene_id"] or row["declared_model_gene_id"] or "无模型 GPR gene ID",
-                "证据状态": _curated_mapping_status_label(row.get("mapping_status")),
-                "推荐用途": _curated_recommended_use_label(row.get("recommended_use")),
-                "候选 locus tag": rule_evidence.get("candidate_locus_tag") or "",
-                "外部证据": _rule_evidence_source_label(rule_evidence),
-                "GPR 补充状态": _rule_overlay_status_label(rule_evidence.get("rule_status")),
-                "补充建议": _rule_overlay_action_label(rule_evidence.get("recommended_action")),
-                "可用代理反应": row.get("oe_reaction_id") or row.get("ko_reaction_id") or "",
-                "代理反应证据": _reaction_proxy_evidence_label(row),
-            }
-        )
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-    selected = st.multiselect(
-        "选择分泌工程基因名",
-        [str(row["common_name"]) for row in evidence_rows if row.get("common_name")],
-        key="pichia_matlab_gene_sel",
-    )
-    action_col_ko, action_col_oe = st.columns(2)
-    with action_col_ko:
-        if st.button("添加到敲除输入", key="pichia_matlab_gene_add_ko") and selected:
-            _add_curated_knockout_selection(selected)
-    with action_col_oe:
-        if st.button("添加到过表达反应代理", key="pichia_matlab_gene_add_oe") and selected:
-            _add_curated_oe_reaction_selection(selected)
-    message = st.session_state.pop("pichia_gene_catalog_message", "")
-    if message:
-        st.info(message)
-    st.caption(
-        "如果模型 GPR gene ID 为空，这个名称不能直接作为 gene-level KO/OE 输入；"
-        "请使用其对应反应级代理，或先人工确认 K. phaffii locus ID。"
-    )
-
-
-def _render_reaction_proxy_lookup(query: str, *, force_refresh: bool = False) -> None:
-    proxies = [
-        row
-        for row in list_pichia_secretion_gene_evidence(query, force_refresh=force_refresh)
-        if row.get("oe_reaction_id") or row.get("ko_reaction_id")
-    ]
-    if not proxies:
-        st.info("反应级代理中未找到匹配。")
-        return
-    st.markdown("**反应级代理**")
-    st.caption(
-        "这些条目直接写入 KO/OE 反应代理输入，代表模型中的复合体形成或分泌路径反应；"
-        "它们不是 gene-level 扰动，也不能直接等同于湿实验基因名。"
-    )
-    rows, current_category = [], None
-    for row in proxies:
-        if row["category"] != current_category:
-            current_category = str(row["category"])
-            rows.append({"代理名称": f"▸ {current_category}", "代理反应 ID": "", "来源基因名": "", "用途": "", "说明": ""})
-        rows.append(
-            {
-                "代理名称": row["common_name"],
-                "代理反应 ID": row.get("oe_reaction_id") or row.get("ko_reaction_id") or "",
-                "来源基因名": row["common_name"],
-                "用途": _curated_recommended_use_label(row.get("recommended_use")),
-                "说明": f"{row['description']}；{_reaction_proxy_evidence_label(row)}",
-            }
-        )
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-    selected = st.multiselect(
-        "选择反应级代理",
-        [str(row["common_name"]) for row in proxies if row.get("common_name")],
-        key="pichia_reaction_proxy_sel",
-    )
-    action_col_ko, action_col_oe = st.columns(2)
-    with action_col_ko:
-        if st.button("添加到敲除反应代理", key="pichia_reaction_proxy_add_ko") and selected:
-            _add_curated_knockout_selection(selected)
-    with action_col_oe:
-        if st.button("添加到过表达反应代理", key="pichia_reaction_proxy_add_oe") and selected:
-            _add_curated_oe_reaction_selection(selected)
-    message = st.session_state.pop("pichia_gene_catalog_message", "")
-    if message:
-        st.info(message)
 
 
 def _render_gene_rule_overlay_lookup(query: str) -> None:
@@ -608,25 +310,6 @@ def _render_gene_rule_overlay_lookup(query: str) -> None:
     )
 
 
-def _curated_mapping_status_label(status: object) -> str:
-    labels = {
-        "model_gpr_gene_available": "已映射到模型 GPR gene",
-        "reaction_proxy_only": "无 GPR gene；仅反应级代理",
-        "declared_proxy_missing_in_model": "声明了代理但模型未找到反应",
-        "literature_name_only": "仅文献/路径名称；需人工确认",
-    }
-    return labels.get(str(status or ""), str(status or ""))
-
-
-def _curated_recommended_use_label(use: object) -> str:
-    labels = {
-        "gene_level_gpr_perturbation": "可用于 gene-level GPR 扰动",
-        "reaction_level_proxy_requires_locus_review": "可用于反应级代理；湿实验需确认 locus ID",
-        "manual_review_required": "需人工确认后使用",
-    }
-    return labels.get(str(use or ""), str(use or ""))
-
-
 def _rule_evidence_source_label(row: dict[str, object]) -> str:
     if not row:
         return ""
@@ -660,48 +343,6 @@ def _rule_overlay_action_label(action: object) -> str:
         "manual_review_required": "需要人工复核",
     }
     return labels.get(str(action or ""), str(action or ""))
-
-
-def _reaction_proxy_evidence_label(row: dict[str, object]) -> str:
-    evidence_rows = [item for item in row.get("reaction_evidence") or [] if isinstance(item, dict)]
-    if not evidence_rows:
-        return "无代理反应"
-    existing = [str(item.get("reaction_id")) for item in evidence_rows if item.get("exists_in_model")]
-    missing = [str(item.get("reaction_id")) for item in evidence_rows if not item.get("exists_in_model")]
-    has_gpr = any(bool(item.get("has_gpr_rule")) for item in evidence_rows)
-    parts: list[str] = []
-    if existing:
-        parts.append(f"模型中存在：{', '.join(existing)}")
-    if missing:
-        parts.append(f"模型中未找到：{', '.join(missing)}")
-    parts.append("代理反应含 GPR 规则" if has_gpr else "代理反应无 GPR 规则")
-    return "；".join(parts)
-
-
-def _add_curated_knockout_selection(selected: list[str]) -> None:
-    genes = get_pichia_ko_genes_for_selection(selected)
-    if genes:
-        current = str(st.session_state.get("pichia_draft_ko_genes", ""))
-        st.session_state["pichia_draft_ko_genes"] = merge_candidate_text(current, genes)
-        st.session_state["pichia_gene_catalog_message"] = f"已加入敲除基因：{', '.join(genes)}"
-        st.rerun()
-    reactions = get_pichia_ko_reactions_for_selection(selected)
-    if reactions:
-        current = str(st.session_state.get("pichia_draft_ko_reactions", ""))
-        st.session_state["pichia_draft_ko_reactions"] = merge_candidate_text(current, reactions)
-        st.session_state["pichia_gene_catalog_message"] = f"已加入复合体级 KO 反应：{', '.join(reactions)}"
-        st.rerun()
-    st.session_state["pichia_gene_catalog_message"] = "所选策略热点没有可靠的敲除模型基因或 KO 反应 ID；可尝试添加到过表达反应代理。"
-
-
-def _add_curated_oe_reaction_selection(selected: list[str]) -> None:
-    reactions = get_pichia_oe_reactions_for_selection(selected)
-    if reactions:
-        current = str(st.session_state.get("pichia_draft_oe_reactions", ""))
-        st.session_state["pichia_draft_oe_reactions"] = merge_candidate_text(current, reactions)
-        st.session_state["pichia_gene_catalog_message"] = f"已加入过表达反应代理：{', '.join(reactions)}"
-        st.rerun()
-    st.session_state["pichia_gene_catalog_message"] = "所选条目没有可用的过表达反应代理 ID；请勾选显示全部模型基因后选择模型基因 ID。"
 
 
 __all__ = ["render_gene_lookup_panel"]
