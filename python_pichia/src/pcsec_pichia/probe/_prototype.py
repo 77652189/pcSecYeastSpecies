@@ -1383,6 +1383,7 @@ def run_pcsec_oe_screen(
     factor: float = 2.0,
     write_ribosome_translation_constraint: bool = False,
     write_misfolding_constraints: bool = False,
+    time_limit_seconds: float = DEFAULT_SOLVER_TIME_LIMIT_SECONDS,
 ) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
     reaction_index = model.reaction_index
@@ -1415,6 +1416,7 @@ def run_pcsec_oe_screen(
             key_reactions=("BIOMASS", "Ex_glc_D", objective),
             write_ribosome_translation_constraint=write_ribosome_translation_constraint,
             write_misfolding_constraints=write_misfolding_constraints,
+            time_limit_seconds=time_limit_seconds,
         )
         rows.append(
             {
@@ -1426,6 +1428,7 @@ def run_pcsec_oe_screen(
                 "status": solved.status,
                 "success": solved.success,
                 "objective_value": solved.objective_value,
+                "message": solved.message,
                 "delta_vs_baseline": (
                     solved.objective_value - baseline.objective_value
                     if solved.success and baseline.objective_value is not None and solved.objective_value is not None

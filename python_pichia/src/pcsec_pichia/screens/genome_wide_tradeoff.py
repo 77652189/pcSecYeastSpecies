@@ -19,6 +19,7 @@ from pcsec_pichia.screens._prototype_adapter import (
     AminoAcidStoichiometry,
     CobraModel,
     CombinedEnzymeData,
+    DEFAULT_SOLVER_TIME_LIMIT_SECONDS,
     MetabolicEnzymeData,
     SecretoryEnzymeData,
     TargetSpec,
@@ -40,6 +41,7 @@ FAST_MU_FRACTIONS: tuple[float, ...] = (1.0, 0.5, 0.1)
 PRECISE_MU_FRACTIONS: tuple[float, ...] = (1.0, 0.9, 0.75, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1, 0.05, 0.02)
 DEFAULT_REFERENCE_GROWTH_RATE = 0.10
 DEFAULT_OE_FACTOR = 2.0
+DEFAULT_TIMEOUT_RETRY_TIME_LIMIT_SECONDS = DEFAULT_SOLVER_TIME_LIMIT_SECONDS * 3.0
 SOLVE_OUTCOME_SUCCESS = "success"
 SOLVE_OUTCOME_TIMEOUT = "time_limit_reached"
 SOLVE_OUTCOME_PROVEN_INFEASIBLE = "proven_infeasible"
@@ -68,12 +70,14 @@ def wildtype_secretion_by_mu(
     mu_points: list[float],
     write_ribosome_translation_constraint: bool = False,
     write_misfolding_constraints: bool = False,
+    time_limit_seconds: float = DEFAULT_SOLVER_TIME_LIMIT_SECONDS,
+    timeout_retry_time_limit_seconds: float | None = DEFAULT_TIMEOUT_RETRY_TIME_LIMIT_SECONDS,
 ) -> dict[float, dict[str, Any]]:
     """Solve the unperturbed model once per mu point; shared baseline for every gene at that mu."""
     baseline_by_mu: dict[float, dict[str, Any]] = {}
     for mu in mu_points:
         fixed_model = model.with_bounds({"BIOMASS": (mu, mu)})
-        solved, _counts = solve_pcsec_maximize(
+        solved, _counts, retry_metadata = _solve_pcsec_maximize_with_timeout_retry(
             fixed_model,
             exchange_reaction_id,
             metabolic=metabolic,
@@ -83,8 +87,14 @@ def wildtype_secretion_by_mu(
             key_reactions=("BIOMASS", exchange_reaction_id),
             write_ribosome_translation_constraint=write_ribosome_translation_constraint,
             write_misfolding_constraints=write_misfolding_constraints,
+            time_limit_seconds=time_limit_seconds,
+            timeout_retry_time_limit_seconds=timeout_retry_time_limit_seconds,
         )
-        baseline_by_mu[mu] = {"success": solved.success, "objective_value": solved.objective_value}
+        baseline_by_mu[mu] = {
+            "success": solved.success,
+            "objective_value": solved.objective_value,
+            "solver_retry_count": retry_metadata.get("solver_retry_count", 0),
+        }
     return baseline_by_mu
 
 
@@ -108,12 +118,140 @@ def _classify_solve_outcome(success: bool, status: object = None, message: objec
     return SOLVE_OUTCOME_OTHER_FAILURE
 
 
+def _retry_enabled(time_limit_seconds: float, timeout_retry_time_limit_seconds: float | None) -> bool:
+    return timeout_retry_time_limit_seconds is not None and timeout_retry_time_limit_seconds > time_limit_seconds
+
+
+def _solve_pcsec_maximize_with_timeout_retry(
+    model: CobraModel,
+    objective_reaction: str,
+    metabolic: MetabolicEnzymeData,
+    secretory: SecretoryEnzymeData,
+    combined: CombinedEnzymeData,
+    mu: float,
+    key_reactions: tuple[str, ...] = (),
+    write_ribosome_translation_constraint: bool = False,
+    write_misfolding_constraints: bool = False,
+    time_limit_seconds: float = DEFAULT_SOLVER_TIME_LIMIT_SECONDS,
+    timeout_retry_time_limit_seconds: float | None = DEFAULT_TIMEOUT_RETRY_TIME_LIMIT_SECONDS,
+) -> tuple[Any, dict[str, int], dict[str, Any]]:
+    solved, counts = solve_pcsec_maximize(
+        model,
+        objective_reaction,
+        metabolic=metabolic,
+        secretory=secretory,
+        combined=combined,
+        mu=mu,
+        key_reactions=key_reactions,
+        write_ribosome_translation_constraint=write_ribosome_translation_constraint,
+        write_misfolding_constraints=write_misfolding_constraints,
+        time_limit_seconds=time_limit_seconds,
+    )
+    retry_metadata: dict[str, Any] = {"solver_retry_count": 0}
+    initial_outcome = _classify_solve_outcome(solved.success, solved.status, solved.message)
+    if initial_outcome != SOLVE_OUTCOME_TIMEOUT or not _retry_enabled(time_limit_seconds, timeout_retry_time_limit_seconds):
+        return solved, counts, retry_metadata
+
+    retry_solved, retry_counts = solve_pcsec_maximize(
+        model,
+        objective_reaction,
+        metabolic=metabolic,
+        secretory=secretory,
+        combined=combined,
+        mu=mu,
+        key_reactions=key_reactions,
+        write_ribosome_translation_constraint=write_ribosome_translation_constraint,
+        write_misfolding_constraints=write_misfolding_constraints,
+        time_limit_seconds=timeout_retry_time_limit_seconds,
+    )
+    retry_metadata.update(
+        {
+            "solver_retry_count": 1,
+            "initial_solve_outcome": initial_outcome,
+            "initial_status": solved.status,
+            "initial_message": solved.message,
+            "initial_time_limit_seconds": time_limit_seconds,
+            "retry_time_limit_seconds": timeout_retry_time_limit_seconds,
+        }
+    )
+    return retry_solved, retry_counts, retry_metadata
+
+
+def _oe_rows_have_timeout(rows: list[dict[str, Any]]) -> bool:
+    return any(
+        _classify_solve_outcome(bool(row.get("success")), row.get("status"), row.get("message")) == SOLVE_OUTCOME_TIMEOUT
+        for row in rows
+    )
+
+
+def _run_pcsec_oe_screen_with_timeout_retry(
+    model: CobraModel,
+    baseline: Any,
+    reactions: list[str],
+    objective: str,
+    metabolic: MetabolicEnzymeData,
+    secretory: SecretoryEnzymeData,
+    combined: CombinedEnzymeData,
+    mu: float,
+    factor: float = DEFAULT_OE_FACTOR,
+    write_ribosome_translation_constraint: bool = False,
+    write_misfolding_constraints: bool = False,
+    time_limit_seconds: float = DEFAULT_SOLVER_TIME_LIMIT_SECONDS,
+    timeout_retry_time_limit_seconds: float | None = DEFAULT_TIMEOUT_RETRY_TIME_LIMIT_SECONDS,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    rows = run_pcsec_oe_screen(
+        model,
+        baseline,
+        reactions,
+        objective,
+        metabolic=metabolic,
+        secretory=secretory,
+        combined=combined,
+        mu=mu,
+        factor=factor,
+        write_ribosome_translation_constraint=write_ribosome_translation_constraint,
+        write_misfolding_constraints=write_misfolding_constraints,
+        time_limit_seconds=time_limit_seconds,
+    )
+    retry_metadata: dict[str, Any] = {"solver_retry_count": 0}
+    if not _oe_rows_have_timeout(rows) or not _retry_enabled(time_limit_seconds, timeout_retry_time_limit_seconds):
+        return rows, retry_metadata
+
+    failure_row = _representative_failure_row(rows) or {}
+    retry_rows = run_pcsec_oe_screen(
+        model,
+        baseline,
+        reactions,
+        objective,
+        metabolic=metabolic,
+        secretory=secretory,
+        combined=combined,
+        mu=mu,
+        factor=factor,
+        write_ribosome_translation_constraint=write_ribosome_translation_constraint,
+        write_misfolding_constraints=write_misfolding_constraints,
+        time_limit_seconds=timeout_retry_time_limit_seconds,
+    )
+    retry_metadata.update(
+        {
+            "solver_retry_count": 1,
+            "initial_solve_outcome": SOLVE_OUTCOME_TIMEOUT,
+            "initial_status": failure_row.get("status"),
+            "initial_message": failure_row.get("message"),
+            "initial_time_limit_seconds": time_limit_seconds,
+            "retry_time_limit_seconds": timeout_retry_time_limit_seconds,
+        }
+    )
+    return retry_rows, retry_metadata
+
+
 def _tradeoff_point(
     mu: float,
     success: bool,
     status: object,
     secretion_flux: float | None,
     message: object = None,
+    retry_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     point = {
         "mu": mu,
@@ -124,6 +262,8 @@ def _tradeoff_point(
     }
     if message is not None:
         point["message"] = str(message)
+    if retry_metadata:
+        point.update(retry_metadata)
     return point
 
 
@@ -160,6 +300,9 @@ def _solve_outcome_summary(points: list[dict[str, Any]], best: dict[str, Any] | 
     other_failure_mu_points = tuple(
         point["mu"] for point, outcome in classified_points if outcome == SOLVE_OUTCOME_OTHER_FAILURE
     )
+    timeout_retry_mu_points = tuple(
+        point["mu"] for point in points if int(point.get("solver_retry_count") or 0) > 0
+    )
     best_mu = best["mu"] if best else None
     upper_bound_timeout = best_mu is None or any(mu > best_mu for mu in timeout_mu_points)
     upper_bound_other_failure = best_mu is None or any(mu > best_mu for mu in other_failure_mu_points)
@@ -178,6 +321,8 @@ def _solve_outcome_summary(points: list[dict[str, Any]], best: dict[str, Any] | 
         "timeout_mu_points": timeout_mu_points,
         "proven_infeasible_mu_points": proven_infeasible_mu_points,
         "other_solver_failure_mu_points": other_failure_mu_points,
+        "solver_retry_count": sum(int(point.get("solver_retry_count") or 0) for point in points),
+        "timeout_retry_mu_points": timeout_retry_mu_points,
         "feasibility_interpretation": interpretation,
     }
 
@@ -246,6 +391,8 @@ def gene_ko_tradeoff(
     complex_subunits: dict[str, list[dict[str, object]]] | None = None,
     write_ribosome_translation_constraint: bool = False,
     write_misfolding_constraints: bool = False,
+    time_limit_seconds: float = DEFAULT_SOLVER_TIME_LIMIT_SECONDS,
+    timeout_retry_time_limit_seconds: float | None = DEFAULT_TIMEOUT_RETRY_TIME_LIMIT_SECONDS,
 ) -> dict[str, Any]:
     """Growth-vs-secretion tradeoff curve for knocking out one gene."""
     if not plan.inactive_reactions:
@@ -255,7 +402,7 @@ def gene_ko_tradeoff(
     points: list[dict[str, Any]] = []
     for mu in mu_points:
         fixed_model = ko_model.with_bounds({"BIOMASS": (mu, mu)})
-        solved, _counts = solve_pcsec_maximize(
+        solved, _counts, retry_metadata = _solve_pcsec_maximize_with_timeout_retry(
             fixed_model,
             exchange_reaction_id,
             metabolic=metabolic,
@@ -265,9 +412,11 @@ def gene_ko_tradeoff(
             key_reactions=("BIOMASS", exchange_reaction_id),
             write_ribosome_translation_constraint=write_ribosome_translation_constraint,
             write_misfolding_constraints=write_misfolding_constraints,
+            time_limit_seconds=time_limit_seconds,
+            timeout_retry_time_limit_seconds=timeout_retry_time_limit_seconds,
         )
         points.append(
-            _tradeoff_point(mu, solved.success, solved.status, solved.objective_value, solved.message)
+            _tradeoff_point(mu, solved.success, solved.status, solved.objective_value, solved.message, retry_metadata)
         )
     return _summarize_row(gene_id, "KO", plan, points, complex_subunits)
 
@@ -286,6 +435,8 @@ def gene_oe_tradeoff(
     factor: float = DEFAULT_OE_FACTOR,
     write_ribosome_translation_constraint: bool = False,
     write_misfolding_constraints: bool = False,
+    time_limit_seconds: float = DEFAULT_SOLVER_TIME_LIMIT_SECONDS,
+    timeout_retry_time_limit_seconds: float | None = DEFAULT_TIMEOUT_RETRY_TIME_LIMIT_SECONDS,
 ) -> dict[str, Any]:
     """Growth-vs-secretion tradeoff curve for overexpressing one gene's reaction(s)."""
     if not plan.executable_reactions:
@@ -296,7 +447,7 @@ def gene_oe_tradeoff(
         fixed_model = model.with_bounds({"BIOMASS": (mu, mu)})
         baseline_entry = baseline_by_mu.get(mu, {"objective_value": None})
         baseline_ns = SimpleNamespace(objective_value=baseline_entry.get("objective_value"))
-        oe_rows = run_pcsec_oe_screen(
+        oe_rows, retry_metadata = _run_pcsec_oe_screen_with_timeout_retry(
             fixed_model,
             baseline_ns,
             list(plan.executable_reactions),
@@ -308,6 +459,8 @@ def gene_oe_tradeoff(
             factor=factor,
             write_ribosome_translation_constraint=write_ribosome_translation_constraint,
             write_misfolding_constraints=write_misfolding_constraints,
+            time_limit_seconds=time_limit_seconds,
+            timeout_retry_time_limit_seconds=timeout_retry_time_limit_seconds,
         )
         best_reaction_row = max(
             (row for row in oe_rows if row.get("success")),
@@ -324,6 +477,7 @@ def gene_oe_tradeoff(
                 else (failure_row["status"] if failure_row else "no_reactions"),
                 best_reaction_row["objective_value"] if best_reaction_row else None,
                 best_reaction_row.get("message") if best_reaction_row else (failure_row.get("message") if failure_row else None),
+                retry_metadata,
             )
         )
     return _summarize_row(gene_id, "OE", plan, points, complex_subunits)
@@ -418,6 +572,8 @@ def reaction_ko_tradeoff(
     write_misfolding_constraints: bool = False,
     candidate_kind: str = "catalog_reaction",
     hypothesis_note: str = "",
+    time_limit_seconds: float = DEFAULT_SOLVER_TIME_LIMIT_SECONDS,
+    timeout_retry_time_limit_seconds: float | None = DEFAULT_TIMEOUT_RETRY_TIME_LIMIT_SECONDS,
 ) -> dict[str, Any]:
     """Growth-vs-secretion tradeoff for directly knocking out one curated reaction.
 
@@ -429,7 +585,7 @@ def reaction_ko_tradeoff(
     points: list[dict[str, Any]] = []
     for mu in mu_points:
         fixed_model = ko_model.with_bounds({"BIOMASS": (mu, mu)})
-        solved, _counts = solve_pcsec_maximize(
+        solved, _counts, retry_metadata = _solve_pcsec_maximize_with_timeout_retry(
             fixed_model,
             exchange_reaction_id,
             metabolic=metabolic,
@@ -439,9 +595,11 @@ def reaction_ko_tradeoff(
             key_reactions=("BIOMASS", exchange_reaction_id),
             write_ribosome_translation_constraint=write_ribosome_translation_constraint,
             write_misfolding_constraints=write_misfolding_constraints,
+            time_limit_seconds=time_limit_seconds,
+            timeout_retry_time_limit_seconds=timeout_retry_time_limit_seconds,
         )
         points.append(
-            _tradeoff_point(mu, solved.success, solved.status, solved.objective_value, solved.message)
+            _tradeoff_point(mu, solved.success, solved.status, solved.objective_value, solved.message, retry_metadata)
         )
     return _summarize_catalog_row(
         reaction_id, common_name, category, "KO", points, complex_subunits, candidate_kind, hypothesis_note
@@ -465,6 +623,8 @@ def reaction_oe_tradeoff(
     write_misfolding_constraints: bool = False,
     candidate_kind: str = "catalog_reaction",
     hypothesis_note: str = "",
+    time_limit_seconds: float = DEFAULT_SOLVER_TIME_LIMIT_SECONDS,
+    timeout_retry_time_limit_seconds: float | None = DEFAULT_TIMEOUT_RETRY_TIME_LIMIT_SECONDS,
 ) -> dict[str, Any]:
     """Growth-vs-secretion tradeoff for directly overexpressing one curated reaction.
 
@@ -476,7 +636,7 @@ def reaction_oe_tradeoff(
         fixed_model = model.with_bounds({"BIOMASS": (mu, mu)})
         baseline_entry = baseline_by_mu.get(mu, {"objective_value": None})
         baseline_ns = SimpleNamespace(objective_value=baseline_entry.get("objective_value"))
-        oe_rows = run_pcsec_oe_screen(
+        oe_rows, retry_metadata = _run_pcsec_oe_screen_with_timeout_retry(
             fixed_model,
             baseline_ns,
             [reaction_id],
@@ -488,6 +648,8 @@ def reaction_oe_tradeoff(
             factor=factor,
             write_ribosome_translation_constraint=write_ribosome_translation_constraint,
             write_misfolding_constraints=write_misfolding_constraints,
+            time_limit_seconds=time_limit_seconds,
+            timeout_retry_time_limit_seconds=timeout_retry_time_limit_seconds,
         )
         best_row = oe_rows[0] if oe_rows and oe_rows[0].get("success") else None
         failure_row = _representative_failure_row(oe_rows)
@@ -498,6 +660,7 @@ def reaction_oe_tradeoff(
                 best_row["status"] if best_row else (failure_row["status"] if failure_row else "no_reaction"),
                 best_row["objective_value"] if best_row else None,
                 best_row.get("message") if best_row else (failure_row.get("message") if failure_row else None),
+                retry_metadata,
             )
         )
     return _summarize_catalog_row(
@@ -518,6 +681,8 @@ def run_catalog_reaction_tradeoff_screen(
     write_ribosome_translation_constraint: bool = False,
     write_misfolding_constraints: bool = False,
     progress_callback: Callable[[int, int, str], None] | None = None,
+    time_limit_seconds: float = DEFAULT_SOLVER_TIME_LIMIT_SECONDS,
+    timeout_retry_time_limit_seconds: float | None = DEFAULT_TIMEOUT_RETRY_TIME_LIMIT_SECONDS,
 ) -> dict[str, Any]:
     """Run KO+OE tradeoff screening over the curated catalog's unique reactions for one target.
 
@@ -546,6 +711,8 @@ def run_catalog_reaction_tradeoff_screen(
         mu_points,
         write_ribosome_translation_constraint,
         write_misfolding_constraints,
+        time_limit_seconds,
+        timeout_retry_time_limit_seconds,
     )
     wildtype_best = _max_feasible_point(
         [{"mu": mu, "success": entry["success"], "secretion_flux": entry["objective_value"]} for mu, entry in baseline_by_mu.items()]
@@ -569,6 +736,8 @@ def run_catalog_reaction_tradeoff_screen(
                 complex_subunits,
                 write_ribosome_translation_constraint,
                 write_misfolding_constraints,
+                time_limit_seconds=time_limit_seconds,
+                timeout_retry_time_limit_seconds=timeout_retry_time_limit_seconds,
             )
         else:
             row = reaction_oe_tradeoff(
@@ -586,6 +755,8 @@ def run_catalog_reaction_tradeoff_screen(
                 factor,
                 write_ribosome_translation_constraint,
                 write_misfolding_constraints,
+                time_limit_seconds=time_limit_seconds,
+                timeout_retry_time_limit_seconds=timeout_retry_time_limit_seconds,
             )
         row["target_id"] = target.target_id
         _attach_wildtype_comparison(row, wildtype_best)
@@ -660,6 +831,8 @@ def run_complex_subunit_oe_hypothesis_screen(
     write_ribosome_translation_constraint: bool = False,
     write_misfolding_constraints: bool = False,
     progress_callback: Callable[[int, int, str], None] | None = None,
+    time_limit_seconds: float = DEFAULT_SOLVER_TIME_LIMIT_SECONDS,
+    timeout_retry_time_limit_seconds: float | None = DEFAULT_TIMEOUT_RETRY_TIME_LIMIT_SECONDS,
 ) -> dict[str, Any]:
     """OE-only hypothesis screen for complex-subunit genes whose KO hurts secretion.
 
@@ -688,6 +861,8 @@ def run_complex_subunit_oe_hypothesis_screen(
         mu_points,
         write_ribosome_translation_constraint,
         write_misfolding_constraints,
+        time_limit_seconds,
+        timeout_retry_time_limit_seconds,
     )
     wildtype_best = _max_feasible_point(
         [{"mu": mu, "success": entry["success"], "secretion_flux": entry["objective_value"]} for mu, entry in baseline_by_mu.items()]
@@ -714,6 +889,8 @@ def run_complex_subunit_oe_hypothesis_screen(
             write_misfolding_constraints,
             candidate_kind="complex_oe_hypothesis",
             hypothesis_note=COMPLEX_OE_HYPOTHESIS_ASSUMPTION,
+            time_limit_seconds=time_limit_seconds,
+            timeout_retry_time_limit_seconds=timeout_retry_time_limit_seconds,
         )
         row["target_id"] = target.target_id
         _attach_wildtype_comparison(row, wildtype_best)
@@ -763,6 +940,8 @@ def run_genome_wide_tradeoff_screen(
     write_ribosome_translation_constraint: bool = False,
     write_misfolding_constraints: bool = False,
     progress_callback: Callable[[int, int, str], None] | None = None,
+    time_limit_seconds: float = DEFAULT_SOLVER_TIME_LIMIT_SECONDS,
+    timeout_retry_time_limit_seconds: float | None = DEFAULT_TIMEOUT_RETRY_TIME_LIMIT_SECONDS,
 ) -> dict[str, Any]:
     """Run KO+OE growth/secretion tradeoff screening for a list of genes against one target."""
     build = build_supported_target_model(model, target, amino_acids)
@@ -784,6 +963,8 @@ def run_genome_wide_tradeoff_screen(
         mu_points,
         write_ribosome_translation_constraint,
         write_misfolding_constraints,
+        time_limit_seconds,
+        timeout_retry_time_limit_seconds,
     )
     wildtype_best = _max_feasible_point(
         [{"mu": mu, "success": entry["success"], "secretion_flux": entry["objective_value"]} for mu, entry in baseline_by_mu.items()]
@@ -807,6 +988,8 @@ def run_genome_wide_tradeoff_screen(
             complex_subunits,
             write_ribosome_translation_constraint,
             write_misfolding_constraints,
+            time_limit_seconds,
+            timeout_retry_time_limit_seconds,
         )
         oe_row = gene_oe_tradeoff(
             build.model,
@@ -822,6 +1005,8 @@ def run_genome_wide_tradeoff_screen(
             factor,
             write_ribosome_translation_constraint,
             write_misfolding_constraints,
+            time_limit_seconds,
+            timeout_retry_time_limit_seconds,
         )
         for row in (ko_row, oe_row):
             row["target_id"] = target.target_id
@@ -848,6 +1033,7 @@ __all__ = [
     "PRECISE_MU_FRACTIONS",
     "DEFAULT_REFERENCE_GROWTH_RATE",
     "DEFAULT_OE_FACTOR",
+    "DEFAULT_TIMEOUT_RETRY_TIME_LIMIT_SECONDS",
     "COMPLEX_OE_HYPOTHESIS_ASSUMPTION",
     "mu_points_for_mode",
     "wildtype_secretion_by_mu",
