@@ -259,11 +259,12 @@ def compare_shadow_fba(
     objective_abs_diff = abs(float(current_objective) - float(shadow_result.objective_value))
     denominator = max(abs(float(current_objective)), abs(float(shadow_result.objective_value)), 1e-12)
     objective_rel_diff = objective_abs_diff / denominator
-    current_fluxes = getattr(current_result, "fluxes", {}) or {}
+    current_fluxes = _dense_flux_lookup(current_result)
+    shadow_fluxes = _dense_flux_lookup(shadow_result)
     key_flux_diffs = {
         reaction_id: (
-            abs(float(current_fluxes[reaction_id]) - float(shadow_result.fluxes[reaction_id]))
-            if reaction_id in current_fluxes and reaction_id in shadow_result.fluxes
+            abs(float(current_fluxes[reaction_id]) - float(shadow_fluxes[reaction_id]))
+            if reaction_id in current_fluxes and reaction_id in shadow_fluxes
             else None
         )
         for reaction_id in key_reactions
@@ -301,6 +302,16 @@ def _has_nonzero_rhs(model: Any) -> bool:
     if b is None:
         return False
     return bool(np.any(np.abs(np.asarray(b, dtype=float).reshape(-1)) > 1e-12))
+
+
+def _dense_flux_lookup(result: Any) -> dict[str, float]:
+    fluxes = {str(reaction_id): float(value) for reaction_id, value in (getattr(result, "fluxes", {}) or {}).items()}
+    for item in getattr(result, "key_fluxes", ()) or ():
+        reaction_id = getattr(item, "reaction_id", None)
+        flux = getattr(item, "flux", None)
+        if reaction_id is not None and flux is not None:
+            fluxes[str(reaction_id)] = float(flux)
+    return fluxes
 
 
 def _model_summary(model: Any) -> dict[str, object]:

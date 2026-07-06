@@ -3,12 +3,15 @@ from __future__ import annotations
 import ast
 import importlib.util
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
 from scipy import sparse
 
 from pcsec_pichia.adapters.cobrapy_shadow import (
+    CobraPyShadowFBAResult,
+    CobraPyShadowFlux,
     UNAVAILABLE_MESSAGE,
     cobrapy_available,
     compare_shadow_fba,
@@ -114,6 +117,30 @@ def test_shadow_result_comparison_reports_unavailable_without_failing(monkeypatc
     assert comparison.comparable is False
     assert comparison.status == "unavailable"
     assert "COBRApy is not installed" in comparison.message
+
+
+def test_shadow_comparison_uses_key_fluxes_for_zero_flux_reactions() -> None:
+    current_result = SimpleNamespace(
+        objective_value=10.0,
+        fluxes={"EX_B": 10.0},
+        key_fluxes=[SimpleNamespace(reaction_id="R_ZERO", flux=0.0)],
+    )
+    shadow_result = CobraPyShadowFBAResult(
+        available=True,
+        success=True,
+        status="optimal",
+        message="solved",
+        objective_reaction="EX_B",
+        sense="maximize",
+        objective_value=10.0,
+        fluxes={"EX_B": 10.0},
+        key_fluxes=(CobraPyShadowFlux(reaction_id="R_ZERO", flux=0.0),),
+    )
+
+    comparison = compare_shadow_fba(current_result, shadow_result, key_reactions=("R_ZERO",))
+
+    assert comparison.comparable is True
+    assert comparison.key_flux_diffs["R_ZERO"] == 0.0
 
 
 def test_cobrapy_shadow_tiny_model_parity_when_optional_dependency_is_installed() -> None:
