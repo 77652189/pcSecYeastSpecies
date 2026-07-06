@@ -35,6 +35,8 @@ class DimensionalResults:
     target_id: str
     essential_genes: pd.DataFrame
     solver_inconclusive_ko: pd.DataFrame
+    solver_inconclusive_rows: pd.DataFrame
+    solver_retry_evidence: pd.DataFrame
     ko_yield_up_growth_cost: pd.DataFrame
     ko_clean_wins: pd.DataFrame
     ko_yield_down: pd.DataFrame
@@ -53,6 +55,10 @@ class DimensionalResults:
             "essential_genes_sample": self.essential_genes.head(max_rows_per_dimension).to_dict("records"),
             "solver_inconclusive_ko_count": len(self.solver_inconclusive_ko),
             "solver_inconclusive_ko_sample": self.solver_inconclusive_ko.head(max_rows_per_dimension).to_dict("records"),
+            "solver_inconclusive_row_count": len(self.solver_inconclusive_rows),
+            "solver_inconclusive_rows_sample": self.solver_inconclusive_rows.head(max_rows_per_dimension).to_dict("records"),
+            "solver_retry_evidence_count": len(self.solver_retry_evidence),
+            "solver_retry_evidence_sample": self.solver_retry_evidence.head(max_rows_per_dimension).to_dict("records"),
             "ko_yield_up_growth_cost_count": len(self.ko_yield_up_growth_cost),
             "ko_yield_up_growth_cost": self.ko_yield_up_growth_cost.head(max_rows_per_dimension).to_dict("records"),
             "ko_clean_win_count": len(self.ko_clean_wins),
@@ -87,6 +93,8 @@ def _ensure_solver_outcome_columns(frame: pd.DataFrame) -> None:
         "timeout_mu_points": "",
         "proven_infeasible_mu_points": "",
         "other_solver_failure_mu_points": "",
+        "solver_retry_count": 0,
+        "timeout_retry_mu_points": "",
     }
     for column, default in defaults.items():
         if column not in frame.columns:
@@ -109,6 +117,8 @@ def analyze_single_target(frame: pd.DataFrame, target_id: str) -> DimensionalRes
         "timeout_mu_points",
         "proven_infeasible_mu_points",
         "other_solver_failure_mu_points",
+        "solver_retry_count",
+        "timeout_retry_mu_points",
     ]
     infeasible_ko_mask = (
         (target_rows.intervention_type == "KO")
@@ -122,7 +132,13 @@ def analyze_single_target(frame: pd.DataFrame, target_id: str) -> DimensionalRes
     essential = target_rows[infeasible_ko_mask & ~inconclusive_mask][
         display_cols + ["secretory_process", "affected_reactions"]
     ].reset_index(drop=True)
+    solver_inconclusive_rows = target_rows[target_rows.skipped_reason.isna() & inconclusive_mask][
+        display_cols + ["intervention_type", "max_feasible_mu", "secretion_ratio_vs_wildtype"] + solver_cols
+    ].reset_index(drop=True)
     solver_inconclusive = target_rows[infeasible_ko_mask & inconclusive_mask][display_cols + solver_cols].reset_index(drop=True)
+    retry_rows = target_rows[pd.to_numeric(target_rows.solver_retry_count, errors="coerce").fillna(0).astype(int) > 0][
+        display_cols + ["intervention_type", "max_feasible_mu", "secretion_ratio_vs_wildtype"] + solver_cols
+    ].reset_index(drop=True)
 
     yield_up_growth_cost = ko[
         (ko.secretion_ratio_vs_wildtype > SECRETION_UP_THRESHOLD) & (ko.growth_retention_ratio < GROWTH_COST_THRESHOLD)
@@ -165,6 +181,8 @@ def analyze_single_target(frame: pd.DataFrame, target_id: str) -> DimensionalRes
         target_id=target_id,
         essential_genes=essential,
         solver_inconclusive_ko=solver_inconclusive,
+        solver_inconclusive_rows=solver_inconclusive_rows,
+        solver_retry_evidence=retry_rows,
         ko_yield_up_growth_cost=yield_up_growth_cost,
         ko_clean_wins=clean_wins,
         ko_yield_down=yield_down,

@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import pandas as pd
 
-from app.services.genome_wide_screen_analysis import analyze_single_target, complex_subunit_oe_hypothesis_candidates
+from app.services.genome_wide_screen_analysis import (
+    analyze_single_target,
+    complex_subunit_oe_hypothesis_candidates,
+    load_gene_tradeoff_csv,
+)
 
 
 def _row(
@@ -22,6 +26,8 @@ def _row(
     timeout_mu_points: str = "",
     proven_infeasible_mu_points: str = "",
     other_solver_failure_mu_points: str = "",
+    solver_retry_count: int = 0,
+    timeout_retry_mu_points: str = "",
 ) -> dict[str, object]:
     return {
         "target_id": "hLF",
@@ -42,6 +48,8 @@ def _row(
         "timeout_mu_points": timeout_mu_points,
         "proven_infeasible_mu_points": proven_infeasible_mu_points,
         "other_solver_failure_mu_points": other_solver_failure_mu_points,
+        "solver_retry_count": solver_retry_count,
+        "timeout_retry_mu_points": timeout_retry_mu_points,
     }
 
 
@@ -96,6 +104,104 @@ def test_timeout_ko_is_solver_inconclusive_not_essential() -> None:
     assert list(result.solver_inconclusive_ko["gene_id"]) == ["G_TIMEOUT"]
     assert result.solver_inconclusive_ko.iloc[0]["feasibility_interpretation"] == "inconclusive_due_to_timeout"
     assert bool(result.solver_inconclusive_ko.iloc[0]["has_timeout"]) is True
+
+
+def test_retry_resolved_success_is_retry_evidence_not_solver_inconclusive() -> None:
+    frame = _frame(
+        [
+            _row(
+                "G_RETRY_SUCCESS",
+                "KO",
+                secretion_ratio=1.05,
+                growth_retention=1.0,
+                max_feasible_mu=0.1,
+                solver_retry_count=1,
+                timeout_retry_mu_points="[0.1]",
+                feasibility_interpretation="definitive",
+                has_timeout=False,
+            ),
+        ]
+    )
+
+    result = analyze_single_target(frame, "hLF")
+
+    assert result.solver_inconclusive_ko.empty
+    assert list(result.solver_retry_evidence["gene_id"]) == ["G_RETRY_SUCCESS"]
+    assert int(result.solver_retry_evidence.iloc[0]["solver_retry_count"]) == 1
+    assert result.solver_retry_evidence.iloc[0]["timeout_retry_mu_points"] == "[0.1]"
+
+
+def test_retry_still_timeout_remains_solver_inconclusive_with_retry_evidence() -> None:
+    frame = _frame(
+        [
+            _row(
+                "G_RETRY_TIMEOUT",
+                "KO",
+                secretion_ratio=None,
+                growth_retention=None,
+                max_feasible_mu=None,
+                solver_retry_count=1,
+                timeout_retry_mu_points="[0.1]",
+                feasibility_interpretation="inconclusive_due_to_timeout",
+                has_timeout=True,
+                timeout_mu_points="[0.1]",
+            ),
+        ]
+    )
+
+    result = analyze_single_target(frame, "hLF")
+
+    assert list(result.solver_inconclusive_ko["gene_id"]) == ["G_RETRY_TIMEOUT"]
+    assert list(result.solver_inconclusive_rows["gene_id"]) == ["G_RETRY_TIMEOUT"]
+    assert list(result.solver_retry_evidence["gene_id"]) == ["G_RETRY_TIMEOUT"]
+    assert result.solver_inconclusive_ko.iloc[0]["timeout_retry_mu_points"] == "[0.1]"
+
+
+def test_retry_still_timeout_oe_row_enters_solver_inconclusive_rows() -> None:
+    frame = _frame(
+        [
+            _row(
+                "G_RETRY_OE_TIMEOUT",
+                "OE",
+                secretion_ratio=None,
+                growth_retention=None,
+                max_feasible_mu=None,
+                solver_retry_count=1,
+                timeout_retry_mu_points="[0.1]",
+                feasibility_interpretation="inconclusive_due_to_timeout",
+                has_timeout=True,
+                timeout_mu_points="[0.1]",
+            ),
+        ]
+    )
+
+    result = analyze_single_target(frame, "hLF")
+
+    assert result.solver_inconclusive_ko.empty
+    assert list(result.solver_inconclusive_rows["gene_id"]) == ["G_RETRY_OE_TIMEOUT"]
+    assert result.solver_inconclusive_rows.iloc[0]["intervention_type"] == "OE"
+
+
+def test_load_gene_tradeoff_csv_preserves_retry_columns(tmp_path) -> None:
+    csv_path = tmp_path / "gene_tradeoff_rows.csv"
+    pd.DataFrame(
+        [
+            _row(
+                "G_RETRY_SUCCESS",
+                "KO",
+                secretion_ratio=1.05,
+                solver_retry_count=1,
+                timeout_retry_mu_points="[0.1]",
+            )
+        ]
+    ).to_csv(csv_path, index=False)
+
+    frame = load_gene_tradeoff_csv(str(csv_path))
+
+    assert "solver_retry_count" in frame.columns
+    assert "timeout_retry_mu_points" in frame.columns
+    assert int(frame.iloc[0]["solver_retry_count"]) == 1
+    assert frame.iloc[0]["timeout_retry_mu_points"] == "[0.1]"
 
 
 def test_ko_yield_down_catches_feasible_but_worse_than_wildtype_knockouts() -> None:
@@ -191,6 +297,28 @@ def test_to_summary_dict_includes_solver_inconclusive_ko() -> None:
 
     assert summary["solver_inconclusive_ko_count"] == 1
     assert summary["solver_inconclusive_ko_sample"][0]["gene_id"] == "G_TIMEOUT"
+    assert summary["solver_inconclusive_row_count"] == 1
+    assert summary["solver_inconclusive_rows_sample"][0]["gene_id"] == "G_TIMEOUT"
+
+
+def test_to_summary_dict_includes_solver_retry_evidence() -> None:
+    frame = _frame(
+        [
+            _row(
+                "G_RETRY_SUCCESS",
+                "OE",
+                secretion_ratio=1.05,
+                solver_retry_count=1,
+                timeout_retry_mu_points="[0.1]",
+            ),
+        ]
+    )
+
+    summary = analyze_single_target(frame, "hLF").to_summary_dict()
+
+    assert summary["solver_retry_evidence_count"] == 1
+    assert summary["solver_retry_evidence_sample"][0]["gene_id"] == "G_RETRY_SUCCESS"
+    assert summary["solver_retry_evidence_sample"][0]["timeout_retry_mu_points"] == "[0.1]"
 
 
 def test_complex_subunit_oe_hypothesis_candidates_requires_ko_decrease_and_complex_role() -> None:

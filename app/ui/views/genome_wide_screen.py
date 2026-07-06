@@ -251,13 +251,16 @@ def _render_dimension_tables(result: analysis.DimensionalResults) -> None:
     with st.expander(f"必需基因清单（{len(result.essential_genes)}）"):
         st.dataframe(result.essential_genes, width='stretch', hide_index=True)
 
-    if not result.solver_inconclusive_ko.empty:
+    if not result.solver_inconclusive_rows.empty:
         st.warning(
-            f"有 {len(result.solver_inconclusive_ko)} 个KO行因为求解超时或求解器失败而无法证明可行性；"
+            f"有 {len(result.solver_inconclusive_rows)} 个候选行因为求解超时或求解器失败而无法证明可行性；"
             "这些不是必需基因结论。"
         )
-    with st.expander(f"求解未定的KO行（{len(result.solver_inconclusive_ko)}）", expanded=False):
-        st.dataframe(result.solver_inconclusive_ko, width='stretch', hide_index=True)
+    with st.expander(f"求解未定的候选行（{len(result.solver_inconclusive_rows)}）", expanded=False):
+        st.dataframe(result.solver_inconclusive_rows, width='stretch', hide_index=True)
+
+    with st.expander(f"求解器重试证据（{len(result.solver_retry_evidence)}）", expanded=False):
+        st.dataframe(result.solver_retry_evidence, width='stretch', hide_index=True)
 
     st.markdown(f"**产量升高但生长受损的KO候选（{len(result.ko_yield_up_growth_cost)}）** — 需要额外生物学方法补救才具备实验可行性")
     _render_verifiable_table(
