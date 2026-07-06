@@ -52,9 +52,8 @@ REVIEW_PACKAGES = {
         "scripts/repair_pcSecYeastSpecies_desktop_shortcut.ps1",
     ],
     "active_docs": [
-        "docs/pichia_python_next_development_slices_2026-06-26.md",
-        "docs/pichia_python_architecture.md",
-        "docs/pichia_python_release_validation_2026-06-25.md",
+        "docs/pichia_current_architecture_and_requirements.md",
+        "docs/pichia_next_plan.md",
     ],
     "boundary_tests": [
         "tests/test_pichia_secretion_service_contract.py",

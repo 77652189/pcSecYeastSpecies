@@ -1,34 +1,39 @@
 # pcSecPichia Python Engine
 
-This directory is the independent Python migration area for the Pichia pastoris `pcSecPichia` workflow.
+This directory contains the Python engine for the current Pichia productivity
+workflow. The user-facing goal is to help biology R&D colleagues reason about
+hLF and OPN production improvement candidates, especially KO/OE interventions
+and relevant migrated MATLAB functionality.
 
-The original MATLAB project remains the source of truth for baseline alignment and paper reproduction. Do not move, delete, or rewrite these original directories:
+The original MATLAB project remains reference material. Do not move, delete, or
+rewrite these original directories:
 
 - `../Code/`
 - `../Model/`
 - `../Enzymedata/`
 - `../Results/`
 
-Python code in this package reads the original model/data as input, writes generated LP files and solver outputs to `../local_runs/`, and records alignment evidence against MATLAB baselines.
+Generated LP files, cache files, solver outputs, and local evidence artifacts
+belong under `../local_runs/`.
 
 ## Scope
 
-Current migration scope:
+Current scope:
 
-- read `Model/pcSecPichia.mat`;
-- read pcSecPichia enzymedata;
-- build target-protein plans through a generic target/leader schema;
-- generate LP files for migrated secretion routes;
-- solve LP files through a replaceable solver adapter;
-- compare Python outputs with MATLAB baseline LP and SoPlex outputs.
+- load pcSecPichia model inputs from the reference MATLAB data;
+- build OPN, hLF, and custom target protein plans;
+- apply corrected medium/carbon-source conditions;
+- run draft secretion simulations, growth tradeoff probes, and cost summaries;
+- run small KO/OE candidate screens and evidence-aware recommendations;
+- write structured summaries, candidate tables, and reports for app/service use.
 
-Not yet complete:
+Out of scope for this package right now:
 
-- full MATLAB workflow replacement;
-- hLF production-ready target simulation;
-- KO/OE screening;
-- bottleneck explanation;
-- expert-facing standalone UI.
+- full three-species MATLAB workflow replacement;
+- paper figure reproduction;
+- automatic new MATLAB baseline generation;
+- absolute mg/L production prediction;
+- full-model KO/OE batch screening unless separately scoped.
 
 ## Layout
 
@@ -39,28 +44,32 @@ python_pichia/
     adapters/
     engines/
   tests/
-  docs/
   pyproject.toml
 ```
 
 The package boundary is intentional:
 
-- `core`: domain data structures and model objects;
-- `adapters`: file formats, MATLAB `.mat` loading, LP parsing/writing, SoPlex process wrappers;
-- `engines`: pcSecPichia calculation orchestration;
-- `tests`: package-local regression and alignment tests;
-- `docs`: package-local migration notes.
+- `loading`, `media`: reference model inputs and medium/carbon-source setup;
+- `targets`, `secretion_plan`: target protein and secretory route planning;
+- `constraints`, `simulation`: model constraints and solver-facing simulation;
+- `screens`, `analysis`, `reports`: KO/OE screens, interpretation, and outputs;
+- `services`: gene evidence, gene catalog, and rule overlay support;
+- `tests`: package-local regression and focused validation tests.
 
 ## Validation
 
-Run from the repository root:
+Use focused tests from the repository root. A common gate is:
 
 ```powershell
-python -m compileall python_pichia app scripts tests
-python -m pytest -q
+python -m compileall -q app python_pichia\src\pcsec_pichia
+python -m pytest -q python_pichia\tests\test_screens_entrypoints.py python_pichia\tests\test_yield_improvement_recommendations.py
+python -m pytest -q tests\test_pichia_secretion_service_contract.py
 git diff --name-only -- Code Model Enzymedata Results
 ```
 
 The last command must output nothing.
 
-Only routes with MATLAB baseline alignment should be marked as restored. Routes without baseline alignment are draft or partial migration only.
+The active project-level docs are:
+
+- `../docs/pichia_current_architecture_and_requirements.md`
+- `../docs/pichia_next_plan.md`

@@ -74,8 +74,8 @@ def test_screen_solve_tests_are_env_gated() -> None:
     assert ungated == []
 
 
-def test_release_validation_docs_keep_slow_gates_explicit() -> None:
-    source = _source("docs/pichia_python_release_validation_2026-06-25.md")
+def test_next_plan_keeps_slow_gates_explicit() -> None:
+    source = _source("docs/pichia_next_plan.md")
 
     assert 'PCSEC_RUN_SLOW_PIPELINE_TESTS="1"' in source
     assert 'PCSEC_RUN_SLOW_SCREEN_TESTS="1"' in source
