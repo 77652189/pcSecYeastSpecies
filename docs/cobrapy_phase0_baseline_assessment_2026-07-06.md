@@ -346,3 +346,69 @@ python -m compileall -q python_pichia\src\pcsec_pichia app
 ```
 
 如果 Phase 1 添加 COBRApy shadow adapter，应新增独立测试文件，且在 COBRApy 未安装时不失败默认 CI。
+
+## Phase 1 状态：Opt-in COBRApy Shadow FBA
+
+日期：2026-07-06
+
+Phase 1 已按最小切片设计为完全可选的 shadow FBA adapter：
+
+- 新增 `pcsec_pichia.adapters.cobrapy_shadow`。
+- 不在默认 `requirements.txt` 或 `python_pichia/pyproject.toml` 中加入 COBRApy、optlang、swiglpk 或 libSBML。
+- 模块导入时不强制 import `cobra`；只有调用转换/求解函数时才检测可选依赖。
+- 当前环境未安装 COBRApy 时，shadow API 返回 `available=False`、`status="unavailable"`，message 明确包含 `COBRApy is not installed`。
+- 默认 pipeline、simulation、screen、report、UI、service contract 均不 import 或调用该 shadow adapter。
+
+Phase 1 adapter 的转换范围严格限定为基础 GEM FBA parity check：
+
+- metabolites
+- reactions
+- stoichiometry
+- lower / upper bounds
+- objective reaction
+- objective sense
+
+Phase 1 不转换或不承诺：
+
+- pcSec protein / secretion constraints
+- metabolic / secretory coupling rows
+- protein mass、proteasome、ribosome、misfolding、mitochondrial constraints
+- gene reaction rule 语义
+- KO/OE GPR planning
+- OE reaction proxy 语义
+- phenotype evidence / recommendation tier
+- Streamlit UI、报告结论、候选排序或实验建议
+- mg/L、绝对产量或实验成功率预测
+
+可用 API：
+
+```python
+from pcsec_pichia.adapters.cobrapy_shadow import (
+    cobrapy_available,
+    convert_to_cobrapy_model,
+    build_cobrapy_shadow_model,
+    solve_cobrapy_shadow_fba,
+    compare_shadow_fba,
+)
+```
+
+当前推荐使用方式：
+
+1. 主路径仍先运行当前 SciPy HiGHS 基础 FBA 或 pcSec 求解。
+2. 只有在开发者显式调用 `solve_cobrapy_shadow_fba(...)` 时，才运行 COBRApy shadow FBA。
+3. 若 COBRApy 未安装，记录 `unavailable`，不让默认测试或用户工作流失败。
+4. 若 COBRApy 已安装，仅将结果用于基础 GEM solver parity 对照，不进入 UI 推荐或报告排序。
+
+Phase 1 focused tests：
+
+```powershell
+python -m pytest -q python_pichia\tests\test_cobrapy_shadow_adapter.py
+```
+
+该测试覆盖：
+
+- COBRApy 未安装时不抛 `ImportError`。
+- 缺失 objective reaction 的稳定状态返回。
+- 默认 pipeline/simulation/screen/report/UI/service 不 import 或调用 shadow adapter。
+- shadow comparison 在 unavailable 时稳定返回不可比较状态。
+- 若 COBRApy 已安装，才运行 tiny model parity；否则 skip。
