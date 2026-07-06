@@ -54,6 +54,13 @@ Streamlit UI / FastAPI facade
 - `Code/`、`Model/`、`Enzymedata/`、`Results/` 是原始 MATLAB/reference 目录，不作为 Python 修改对象。
 - `local_runs/` 只放本地运行产物、缓存和验证证据，不提交为源码。
 
+## 数据与结果目录边界
+
+- `Data/`、`Model/`、`Enzymedata/` 是稳定科学输入资产目录，只读使用，新增内容必须明确说明科学来源和提交理由。
+- `Results/` 保留为 legacy MATLAB results，只读参考历史模拟/分析结果，不作为当前 Python 或 Streamlit 输出目录。
+- `local_runs/` 是当前 Python corrected pipeline、Streamlit 工作台、MATLAB harness、LP diff、缓存和本地验证证据的默认输出位置。
+- 新生成的 LP、solver output、CSV/JSON/Markdown 报告和缓存不得进入 `Data/`、`Model/`、`Enzymedata/` 或 `Results/`，除非另行声明为科学资产。
+
 ## 当前能力
 
 - 支持 OPN、hLF 和 custom target 的 Python corrected 分泌仿真。

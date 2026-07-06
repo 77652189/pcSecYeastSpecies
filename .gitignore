@@ -1,5 +1,12 @@
 # Local runtime outputs
 local_runs/
+python_pichia/local_runs/
+
+# Generated solver artifacts outside local_runs
+*.lp
+*.lp.out
+*.soplex.out
+*.float.out
 
 # Agent/IDE workspace config
 .reasonix/

@@ -37,6 +37,7 @@ $env:PCSEC_RUN_SLOW_PROBE_TESTS="1"
 - KO/OE 候选预览和 screen 结果解释。
 - KO/OE 外部表型证据层和 recommendation tier。
 - Streamlit 展示、后台任务恢复、API/service facade 和 gene evidence cache 工具。
+- 数据与结果治理 checkpoint：`Results/` 明确为 legacy MATLAB reference，当前运行产物统一进入 ignored `local_runs/`。
 
 ## 近期优先级
 
@@ -113,11 +114,22 @@ python -m pytest -q python_pichia\tests\test_screens_entrypoints.py tests\test_p
 git diff --name-only -- Code Model Enzymedata Results
 ```
 
+### 5. 数据资产后续治理
+
+目标：在不误伤历史 MATLAB 数据的前提下，逐步决定哪些大文件需要 Git LFS、GitHub Release 或外部存储。
+
+范围：
+
+- 第一轮只保留盘点和边界测试，不迁移历史结果。
+- 如需移动 `Results/` 或大文件瘦身，单独建立 checkpoint。
+- 新生成运行产物继续写入 `local_runs/`，不得漂移到科学资产目录。
+
 ## 暂不做
 
 - 全模型 KO/OE 自动筛选。
 - 新 MATLAB baseline 自动生成。
 - 三物种完整迁移。
+- 历史 `Results/` 迁移、Git LFS 改造或仓库历史瘦身。
 - 温度敏感性和人源化糖基化完整 pathway engineering。
 - 面向论文复现的 figure pipeline 重建。
 
