@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import ast
+import importlib
+import importlib.machinery
 import importlib.util
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,6 +15,9 @@ from pcsec_pichia.adapters.cobrapy_shadow import (
     CobraPyShadowFBAResult,
     CobraPyShadowFlux,
     UNAVAILABLE_MESSAGE,
+    _cobra_id_map,
+    _cobra_safe_id,
+    _s_matrix_csc,
     cobrapy_available,
     compare_shadow_fba,
     convert_to_cobrapy_model,
@@ -64,6 +69,36 @@ def test_cobrapy_shadow_unavailable_is_stable_without_importerror(monkeypatch: p
     assert solved.status == "unavailable"
     assert "COBRApy is not installed" in solved.message
     assert solved.to_dict()["key_fluxes"] == []
+
+
+def test_cobrapy_shadow_unavailable_when_cobra_import_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    original_find_spec = importlib.util.find_spec
+    original_import_module = importlib.import_module
+
+    def fake_find_spec(name: str, *args: object, **kwargs: object) -> importlib.machinery.ModuleSpec | None:
+        if name == "cobra":
+            return importlib.machinery.ModuleSpec(name="cobra", loader=None)
+        return original_find_spec(name, *args, **kwargs)
+
+    def fake_import_module(name: str, package: str | None = None) -> object:
+        if name == "cobra":
+            raise ImportError("broken cobra dependency")
+        return original_import_module(name, package)
+
+    monkeypatch.setattr(importlib.util, "find_spec", fake_find_spec)
+    monkeypatch.setattr(importlib, "import_module", fake_import_module)
+    model = _tiny_base_gem_model()
+
+    build = convert_to_cobrapy_model(model, objective_reaction="EX_B")
+    solved = solve_cobrapy_shadow_fba(model, "EX_B", key_reactions=("EX_A", "EX_B"))
+
+    assert build.available is False
+    assert build.status == "unavailable"
+    assert "COBRApy is not installed" in build.message
+    assert solved.available is False
+    assert solved.success is False
+    assert solved.status == "unavailable"
+    assert "COBRApy is not installed" in solved.message
 
 
 def test_missing_objective_is_reported_without_requiring_cobrapy(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -141,6 +176,49 @@ def test_shadow_comparison_uses_key_fluxes_for_zero_flux_reactions() -> None:
 
     assert comparison.comparable is True
     assert comparison.key_flux_diffs["R_ZERO"] == 0.0
+
+
+def test_shadow_adapter_normalizes_sparse_array_to_csc_matrix() -> None:
+    if not hasattr(sparse, "csc_array"):
+        pytest.skip("SciPy sparse arrays are not available in this environment.")
+
+    model = _tiny_base_gem_model()
+    model = PichiaModel(
+        model_id=model.model_id,
+        source_file=model.source_file,
+        rxns=model.rxns,
+        mets=model.mets,
+        genes=model.genes,
+        lb=model.lb,
+        ub=model.ub,
+        c=model.c,
+        b=model.b,
+        s_matrix=sparse.csc_array(model.s_matrix),
+        rules=model.rules,
+        gr_rules=model.gr_rules,
+    )
+
+    matrix = _s_matrix_csc(model)
+
+    assert isinstance(matrix, sparse.csc_matrix)
+    assert matrix.getcol(0).nnz == 1
+
+
+def test_cobrapy_safe_id_replaces_whitespace_and_deduplicates() -> None:
+    used_ids: set[str] = set()
+
+    first = _cobra_safe_id("metabolite A [c]", used_ids)
+    second = _cobra_safe_id("metabolite A [c]", used_ids)
+
+    assert first == "metabolite__A__[c]"
+    assert second == "metabolite__A__[c]__2"
+
+
+def test_cobrapy_id_map_preserves_original_keys_for_spaced_reactions() -> None:
+    id_map = _cobra_id_map(("GPI-anchor assembly, step 2", "GPI-anchor__assembly,__step__2"))
+
+    assert id_map["GPI-anchor assembly, step 2"] == "GPI-anchor__assembly,__step__2"
+    assert id_map["GPI-anchor__assembly,__step__2"] == "GPI-anchor__assembly,__step__2__2"
 
 
 def test_cobrapy_shadow_tiny_model_parity_when_optional_dependency_is_installed() -> None:

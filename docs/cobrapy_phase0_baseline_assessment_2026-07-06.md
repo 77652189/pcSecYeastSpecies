@@ -412,3 +412,56 @@ python -m pytest -q python_pichia\tests\test_cobrapy_shadow_adapter.py
 - 默认 pipeline/simulation/screen/report/UI/service 不 import 或调用 shadow adapter。
 - shadow comparison 在 unavailable 时稳定返回不可比较状态。
 - 若 COBRApy 已安装，才运行 tiny model parity；否则 skip。
+
+## Phase 2 状态：真实 pcSecPichia 模型 Shadow FBA Parity Harness
+
+日期：2026-07-06
+
+Phase 2 新增一个仅供开发者显式调用的真实模型 parity harness：
+
+- 新增 `pcsec_pichia.analysis.cobrapy_shadow_baseline`。
+- 可通过 `run_cobrapy_shadow_baseline(...)` 或 `python -m pcsec_pichia.analysis.cobrapy_shadow_baseline` 显式运行。
+- 加载当前 `Model/pcSecPichia.mat` 到既有 `PichiaModel`。
+- 只对基础 GEM FBA 做 SciPy/HiGHS 与 COBRApy shadow FBA 对照。
+- objective cases 只在模型中存在时纳入，默认候选为 `BIOMASS`、`Ex_glc_D`、`Ex_glyc`、`Ex_meoh`、`Ex_o2`。
+- 输出 JSON 与 Markdown 到 ignored `local_runs/cobrapy_shadow_baseline/`。
+
+Phase 2 harness 记录每个 case 的：
+
+- `case_id`
+- `objective_reaction`
+- `sense`
+- `shadow_available`
+- `current_success`
+- `shadow_success`
+- `current_objective_value`
+- `shadow_objective_value`
+- `objective_abs_diff`
+- `objective_rel_diff`
+- `within_tolerance`
+- `key_flux_diffs`
+- `model_summary`
+- `warnings`
+
+Phase 2 仍保持以下边界：
+
+- COBRApy 仍是 optional dependency。
+- 不在默认 `requirements.txt` 或 `python_pichia/pyproject.toml` 中加入 COBRApy、optlang、swiglpk 或 libSBML。
+- COBRApy 未安装或安装残缺时，结果为 `shadow_available=false`、`status="unavailable"`，harness 不失败。
+- 默认 pipeline、simulation、screen、report、UI、FastAPI/service 均不 import 或调用 Phase 2 harness。
+- harness 不转换 pcSec protein/secretion constraints。
+- harness 不作为 KO/OE recommendation、phenotype tier、报告排序、mg/L、绝对产量或实验成功率的依据。
+- harness 输出是本地验证 artifact，默认不提交。
+
+Phase 2 focused tests：
+
+```powershell
+python -m pytest -q python_pichia\tests\test_cobrapy_shadow_baseline.py
+```
+
+该测试覆盖：
+
+- COBRApy spec 存在但 import 失败时，真实模型 harness 返回 unavailable，不抛异常。
+- artifact 输出路径必须位于 `local_runs/` 下。
+- harness 拒绝写入 `Results/` 等受保护科学资产目录。
+- 默认 pipeline/simulation/screen/report/UI 不 import Phase 2 harness。

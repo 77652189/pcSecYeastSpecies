@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import re
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
@@ -121,12 +122,19 @@ def convert_to_cobrapy_model(
         )
 
     cobra_model = cobra.Model(str(getattr(model, "model_id", None) or getattr(model, "source_file", "pcsec_shadow")))
-    metabolites = {met_id: cobra.Metabolite(met_id) for met_id in model.mets}
+    metabolites = {}
+    metabolite_id_map = _cobra_id_map(model.mets)
+    for met_id in model.mets:
+        metabolite = cobra.Metabolite(metabolite_id_map[met_id])
+        metabolite.name = str(met_id)
+        metabolites[met_id] = metabolite
     matrix = _s_matrix_csc(model)
+    reaction_id_map = _cobra_id_map(model.rxns)
 
     reactions = []
     for reaction_offset, reaction_id in enumerate(model.rxns):
-        reaction = cobra.Reaction(reaction_id)
+        reaction = cobra.Reaction(reaction_id_map[reaction_id])
+        reaction.name = str(reaction_id)
         reaction.lower_bound = float(model.lb[reaction_offset])
         reaction.upper_bound = float(model.ub[reaction_offset])
         stoichiometry = {}
@@ -140,7 +148,7 @@ def convert_to_cobrapy_model(
     cobra_model.add_reactions(reactions)
 
     if objective_reaction is not None:
-        cobra_model.objective = cobra_model.reactions.get_by_id(objective_reaction)
+        cobra_model.objective = cobra_model.reactions.get_by_id(reaction_id_map[objective_reaction])
         cobra_model.objective_direction = "max" if sense == "maximize" else "min"
 
     return CobraPyShadowModelBuildResult(
@@ -199,17 +207,20 @@ def solve_cobrapy_shadow_fba(
     fluxes: dict[str, float] = {}
     key_fluxes: list[CobraPyShadowFlux] = []
     if success:
+        reaction_id_map = _cobra_id_map(model.rxns)
+        safe_to_original_reaction_id = {safe_id: reaction_id for reaction_id, safe_id in reaction_id_map.items()}
         for reaction_id, value in getattr(solution, "fluxes", {}).items():
             value_float = float(value)
             if abs(value_float) > 1e-12:
-                fluxes[str(reaction_id)] = value_float
-        cobra_reaction_index = {reaction.id: reaction for reaction in build.model.reactions}
+                fluxes[safe_to_original_reaction_id.get(str(reaction_id), str(reaction_id))] = value_float
+        cobra_reaction_index = {reaction.name: reaction for reaction in build.model.reactions}
         for reaction_id in key_reactions:
             reaction = cobra_reaction_index.get(reaction_id)
+            solution_flux_id = reaction.id if reaction is not None else reaction_id
             key_fluxes.append(
                 CobraPyShadowFlux(
                     reaction_id=reaction_id,
-                    flux=float(solution.fluxes[reaction_id]) if reaction_id in solution.fluxes.index else None,
+                    flux=float(solution.fluxes[solution_flux_id]) if solution_flux_id in solution.fluxes.index else None,
                     lower_bound=float(reaction.lower_bound) if reaction is not None else None,
                     upper_bound=float(reaction.upper_bound) if reaction is not None else None,
                 )
@@ -284,7 +295,10 @@ def compare_shadow_fba(
 def _import_cobra() -> Any | None:
     if not cobrapy_available():
         return None
-    return importlib.import_module("cobra")
+    try:
+        return importlib.import_module("cobra")
+    except (ImportError, ModuleNotFoundError):
+        return None
 
 
 def _reaction_index(model: Any) -> dict[str, int]:
@@ -294,7 +308,24 @@ def _reaction_index(model: Any) -> dict[str, int]:
 
 def _s_matrix_csc(model: Any) -> sparse.csc_matrix:
     matrix = getattr(model, "s_matrix")
-    return matrix.tocsc() if sparse.issparse(matrix) else sparse.csc_matrix(matrix)
+    return sparse.csc_matrix(matrix)
+
+
+def _cobra_safe_id(raw_id: Any, used_ids: set[str]) -> str:
+    base_id = re.sub(r"\s+", "__", str(raw_id).strip())
+    base_id = base_id or "unnamed"
+    candidate = base_id
+    suffix = 2
+    while candidate in used_ids:
+        candidate = f"{base_id}__{suffix}"
+        suffix += 1
+    used_ids.add(candidate)
+    return candidate
+
+
+def _cobra_id_map(raw_ids: list[Any] | tuple[Any, ...]) -> dict[Any, str]:
+    used_ids: set[str] = set()
+    return {raw_id: _cobra_safe_id(raw_id, used_ids) for raw_id in raw_ids}
 
 
 def _has_nonzero_rhs(model: Any) -> bool:
