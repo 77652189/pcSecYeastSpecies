@@ -255,3 +255,44 @@ def test_matlab_lp_alignment(
         f"MATLAB alignment objective drifted: got {result.objective_value!r}, "
         f"expected {MATLAB_ALIGNMENT_OBJECTIVE!r} (tolerance {MATLAB_ALIGNMENT_TOLERANCE:.0%})"
     )
+
+
+def test_solve_pcsec_maximize_honors_time_limit_instead_of_hanging_forever(
+    prepared_model, targets, amino_acids, metabolic, secretory, combined
+):
+    """Regression test for a real incident: a handful of KO/OE bound configurations
+    produce an LP that HiGHS cannot solve or prove infeasible in any reasonable time
+    (observed: 30+ minutes and still climbing, for reactions sharing enzyme-budget
+    coupling with other already-bounded reactions in a catalog KO/OE screen). Because
+    solve_pcsec_maximize called linprog(method="highs") with no time limit, one such
+    reaction hung a screen worker forever with no way to recover.
+
+    This does not reproduce the exact pathological LP (that depends on specific catalog
+    data, not something worth baking into a fast-running regression test) - it proves the
+    protective mechanism itself: passing a short time_limit_seconds must make the solve
+    return quickly with a clear failure instead of running to completion or hanging.
+    """
+    import time
+
+    opn_target = next(t for t in targets if "OPN" in t.protein_id)
+    build = build_supported_target_model(prepared_model, opn_target, amino_acids)
+    target_enzyme = build_target_enzymedata(opn_target, build.model, secretory)
+    target_secretory = secretory.with_reaction_coefficients(target_enzyme.reaction_coefficients)
+    target_combined = combined.with_target(target_enzyme)
+    fixed_model = build.model.with_bounds({"BIOMASS": (0.10, 0.10)})
+
+    t0 = time.time()
+    result, _counts = solve_pcsec_maximize(
+        fixed_model,
+        build.exchange_reaction_id,
+        metabolic=metabolic,
+        secretory=target_secretory,
+        combined=target_combined,
+        mu=0.10,
+        time_limit_seconds=0.01,
+    )
+    elapsed = time.time() - t0
+
+    assert elapsed < 30.0, f"solve took {elapsed:.1f}s with time_limit_seconds=0.01 - the limit is not being honored"
+    assert result.success is False
+    assert "time limit" in result.message.lower(), f"expected a time-limit failure message, got: {result.message!r}"

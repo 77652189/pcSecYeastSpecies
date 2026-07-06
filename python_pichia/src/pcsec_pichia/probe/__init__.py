@@ -20,6 +20,7 @@ from pcsec_pichia.probe._prototype import (  # noqa: F401  re-export public API
     AminoAcidStoichiometry,
     CombinedEnzymeData,
     CobraModel,
+    DEFAULT_SOLVER_TIME_LIMIT_SECONDS,
     DEFAULT_TRADEOFF_MUS,
     IMPROVEMENT_REL_TOLERANCE,
     MetabolicEnzymeData,

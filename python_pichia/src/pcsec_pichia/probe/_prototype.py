@@ -20,6 +20,19 @@ AA_PATTERN = re.compile(r"^[ACDEFGHIKLMNPQRSTVWY]+$")
 RULE_TOKEN_PATTERN = re.compile(r"x\((\d+)\)")
 DEFAULT_TRADEOFF_MUS = (0.05, 0.10, 0.20)
 IMPROVEMENT_REL_TOLERANCE = 1e-6
+# A small minority of KO/OE bound configurations produce a numerically pathological LP that
+# HiGHS cannot solve or prove infeasible in any reasonable time (observed: 30+ minutes, still
+# climbing, for a handful of complex-formation reactions sharing enzyme-budget coupling with
+# other already-bounded reactions). scipy's linprog(method="highs") does not time itself out by
+# default, so one such reaction can hang a screen worker forever with no recovery. This bounds
+# every solve so the worst case is a clean "time limit reached" failure, not an infinite hang.
+#
+# The value matters, not just its presence: passing time_limit=120 (vs. no limit, or a very
+# large one) measurably changed HiGHS's returned objective on an otherwise-fast (13s), already-
+# optimal, degenerate LP - 120 apparently crosses an internal HiGHS strategy-selection threshold
+# for this problem's size. Empirically, 300s+ reproduces the no-limit result exactly on that same
+# problem; 600 is used for headroom since other problem sizes may have their own threshold.
+DEFAULT_SOLVER_TIME_LIMIT_SECONDS = 600.0
 
 AA_MW = {
     "A": 71.08,
@@ -816,6 +829,7 @@ def solve_pcsec_maximize(
     mitochondrial_protein_fraction: float = 0.05,
     write_ribosome_translation_constraint: bool = False,
     write_misfolding_constraints: bool = False,
+    time_limit_seconds: float = DEFAULT_SOLVER_TIME_LIMIT_SECONDS,
 ) -> tuple[SolveResult, dict[str, int]]:
     reaction_index = model.reaction_index
     if objective_reaction not in reaction_index:
@@ -845,7 +859,7 @@ def solve_pcsec_maximize(
         b_ub=b_ub,
         bounds=list(zip(model.lb.tolist(), model.ub.tolist())),
         method="highs",
-        options={"presolve": True, "disp": False},
+        options={"presolve": True, "disp": False, "time_limit": time_limit_seconds},
     )
     fluxes: dict[str, float] = {}
     if result.success and result.x is not None:
