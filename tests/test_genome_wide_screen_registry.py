@@ -1,0 +1,116 @@
+from __future__ import annotations
+
+from app.services.genome_wide_screen_registry import (
+    RunInfo,
+    latest_runs_by_group,
+    older_runs_by_group,
+    run_group_key,
+)
+from app.ui.views.genome_wide_screen import _split_result_runs
+
+
+def _run(
+    run_name: str,
+    *,
+    scope: str = "gene",
+    targets: tuple[str, ...] = ("hLF",),
+    status: str = "done",
+) -> RunInfo:
+    return RunInfo(
+        run_name=run_name,
+        status=status,
+        done=10,
+        total=10,
+        targets=targets,
+        mode="fast",
+        pid=None,
+        updated_at="2026-07-06T00:00:00",
+        is_stale=False,
+        scope=scope,
+    )
+
+
+def test_run_group_key_ignores_target_order() -> None:
+    a = _run("a", targets=("hLF", "OPN"))
+    b = _run("b", targets=("OPN", "hLF"))
+    assert run_group_key(a) == run_group_key(b)
+
+
+def test_run_group_key_distinguishes_different_target_sets_same_scope() -> None:
+    hlf = _run("gene_hlf", scope="gene", targets=("hLF",))
+    opn = _run("gene_opn", scope="gene", targets=("OPN",))
+    assert run_group_key(hlf) != run_group_key(opn)
+
+
+def test_latest_runs_by_group_keeps_newest_per_group_only() -> None:
+    # newest-first, matching list_runs()'s ordering
+    runs = [
+        _run("catalog_v3", scope="catalog", targets=("hLF", "OPN")),
+        _run("catalog_v2", scope="catalog", targets=("hLF", "OPN")),
+        _run("catalog_v1", scope="catalog", targets=("hLF", "OPN")),
+    ]
+
+    latest = latest_runs_by_group(runs)
+
+    assert [run.run_name for run in latest] == ["catalog_v3"]
+
+
+def test_latest_runs_by_group_does_not_collapse_different_targets() -> None:
+    """Gene-scope hLF and gene-scope OPN are different analyses, not repeats of each
+    other - both must survive even though they share a scope."""
+    runs = [
+        _run("overnight_hLF_full", scope="gene", targets=("hLF",)),
+        _run("overnight_OPN_full", scope="gene", targets=("OPN",)),
+    ]
+
+    latest = latest_runs_by_group(runs)
+
+    assert {run.run_name for run in latest} == {"overnight_hLF_full", "overnight_OPN_full"}
+
+
+def test_latest_runs_by_group_surfaces_in_progress_rerun_over_stale_done_one() -> None:
+    """An in-progress re-run is newer (by construction, list_runs() sorts newest-first via
+    mtime) than an older completed run in the same group, so it should be what shows -
+    a fresh attempt superseding a stale success, not the other way around."""
+    runs = [
+        _run("catalog_rerun", scope="catalog", targets=("hLF", "OPN"), status="running"),
+        _run("catalog_old", scope="catalog", targets=("hLF", "OPN"), status="done"),
+    ]
+
+    latest = latest_runs_by_group(runs)
+
+    assert [run.run_name for run in latest] == ["catalog_rerun"]
+
+
+def test_older_runs_by_group_is_the_complement_of_latest() -> None:
+    runs = [
+        _run("catalog_v3", scope="catalog", targets=("hLF", "OPN")),
+        _run("catalog_v2", scope="catalog", targets=("hLF", "OPN")),
+        _run("gene_hlf", scope="gene", targets=("hLF",)),
+    ]
+
+    older = older_runs_by_group(runs)
+
+    assert [run.run_name for run in older] == ["catalog_v2"]
+
+
+def test_older_runs_by_group_empty_when_every_group_has_one_run() -> None:
+    runs = [
+        _run("overnight_hLF_full", scope="gene", targets=("hLF",)),
+        _run("overnight_OPN_full", scope="gene", targets=("OPN",)),
+    ]
+
+    assert older_runs_by_group(runs) == []
+
+
+def test_result_run_split_does_not_show_superseded_done_run_as_latest() -> None:
+    runs = [
+        _run("catalog_rerun", scope="catalog", targets=("hLF", "OPN"), status="running"),
+        _run("catalog_old", scope="catalog", targets=("hLF", "OPN"), status="done"),
+        _run("gene_hlf", scope="gene", targets=("hLF",), status="done"),
+    ]
+
+    latest_done, older_done = _split_result_runs(runs)
+
+    assert [run.run_name for run in latest_done] == ["gene_hlf"]
+    assert [run.run_name for run in older_done] == ["catalog_old"]

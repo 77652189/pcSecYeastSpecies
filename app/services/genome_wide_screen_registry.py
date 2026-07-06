@@ -110,6 +110,42 @@ def list_active_runs(paths: ProjectPaths) -> list[RunInfo]:
     return [run for run in list_runs(paths) if run.status in {"starting", "running"} and not run.is_stale]
 
 
+def run_group_key(run: RunInfo) -> tuple[str, frozenset[str]]:
+    """Two runs are "the same analysis, re-run" if they share scope and target set.
+
+    e.g. a catalog-scope run over {hLF, OPN} superseding an older catalog-scope run over
+    the same two targets is one group; gene-scope hLF and gene-scope OPN are NOT the same
+    group even though they share a scope, since they cover different targets, not repeats
+    of the same analysis.
+    """
+    return (run.scope, frozenset(run.targets))
+
+
+def latest_runs_by_group(runs: list[RunInfo]) -> list[RunInfo]:
+    """One entry per (scope, targets) group: the newest run in that group, whatever its
+    status - so a fresh in-progress or failed re-run is what shows for a group, not a
+    stale older success that's already been superseded.
+
+    `runs` must be newest-first, matching list_runs()'s own ordering.
+    """
+    seen: set[tuple[str, frozenset[str]]] = set()
+    latest: list[RunInfo] = []
+    for run in runs:
+        key = run_group_key(run)
+        if key in seen:
+            continue
+        seen.add(key)
+        latest.append(run)
+    return latest
+
+
+def older_runs_by_group(runs: list[RunInfo]) -> list[RunInfo]:
+    """Everything latest_runs_by_group() did not select - superseded history that is
+    still on disk and still viewable, just not cluttering the default view."""
+    latest_names = {run.run_name for run in latest_runs_by_group(runs)}
+    return [run for run in runs if run.run_name not in latest_names]
+
+
 def _read_run_info(status_path: Path) -> RunInfo | None:
     try:
         payload = json.loads(status_path.read_text(encoding="utf-8"))
@@ -145,7 +181,10 @@ def _is_stale(updated_at: str | None) -> bool:
 __all__ = [
     "HEARTBEAT_STALE_SECONDS",
     "RunInfo",
+    "latest_runs_by_group",
     "list_active_runs",
     "list_runs",
+    "older_runs_by_group",
     "registry_dir",
+    "run_group_key",
 ]

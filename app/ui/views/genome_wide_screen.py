@@ -14,7 +14,12 @@ import streamlit as st
 
 from app.services import genome_wide_screen_analysis as analysis
 from app.services import genome_wide_screen_service as service
-from app.services.genome_wide_screen_registry import RunInfo, list_runs
+from app.services.genome_wide_screen_registry import (
+    RunInfo,
+    latest_runs_by_group,
+    list_runs,
+    older_runs_by_group,
+)
 from app.services.llm_report_service import get_default_generator
 from app.services.pichia_secretion_service import discover_project_paths
 from app.ui.common import request_navigation
@@ -130,16 +135,11 @@ def _maybe_launch_queued_request(paths) -> None:
     st.toast(f"排队的任务已自动启动：{result.run_name}")
 
 
-def _render_run_list(runs: list[RunInfo]) -> None:
-    st.subheader("运行记录")
-    if not runs:
-        st.caption("还没有跑过。")
-        return
-    frame = pd.DataFrame(
+def _run_table_frame(runs: list[RunInfo]) -> pd.DataFrame:
+    return pd.DataFrame(
         [
             {
                 "run_name": run.run_name,
-                "范围": SCOPE_LABELS.get(run.scope, run.scope),
                 "状态": run.status,
                 "进度": run.progress_label,
                 "靶点": ", ".join(run.targets),
@@ -147,10 +147,47 @@ def _render_run_list(runs: list[RunInfo]) -> None:
                 "更新时间": run.updated_at,
                 "心跳超时未更新": run.is_stale,
             }
-            for run in runs[:20]
+            for run in runs
         ]
     )
-    st.dataframe(frame, width='stretch', hide_index=True)
+
+
+def _render_run_list(runs: list[RunInfo]) -> None:
+    st.subheader("运行记录")
+    if not runs:
+        st.caption("还没有跑过。")
+        return
+
+    latest = latest_runs_by_group(runs)
+    older = older_runs_by_group(runs)
+
+    # Grouped by analysis type (matching SCOPE_LABELS), then by target within each type -
+    # researchers looking for "the" result of one analysis type shouldn't have to pick it
+    # out of a flat list that also contains superseded re-runs of the same thing.
+    for scope, label in SCOPE_LABELS.items():
+        scope_runs = [run for run in latest if run.scope == scope]
+        if not scope_runs:
+            continue
+        st.markdown(f"**{label}**")
+        scope_runs = sorted(scope_runs, key=lambda run: run.targets)
+        st.dataframe(_run_table_frame(scope_runs), width='stretch', hide_index=True)
+
+    unlabeled = [run for run in latest if run.scope not in SCOPE_LABELS]
+    if unlabeled:
+        st.markdown("**其他**")
+        st.dataframe(_run_table_frame(unlabeled), width='stretch', hide_index=True)
+
+    if older:
+        with st.expander(f"查看历史版本（{len(older)}个已被更新的运行取代，仍保留在磁盘上）"):
+            st.dataframe(_run_table_frame(older), width='stretch', hide_index=True)
+
+
+def _split_result_runs(runs: list[RunInfo]) -> tuple[list[RunInfo], list[RunInfo]]:
+    latest_runs = latest_runs_by_group(runs)
+    latest_run_names = {run.run_name for run in latest_runs}
+    latest_done = [run for run in latest_runs if run.status == "done"]
+    older_done = [run for run in runs if run.status == "done" and run.run_name not in latest_run_names]
+    return latest_done, older_done
 
 
 def _render_results_section(paths, runs: list[RunInfo]) -> None:
@@ -160,10 +197,29 @@ def _render_results_section(paths, runs: list[RunInfo]) -> None:
         st.caption("还没有已完成的运行。")
         return
 
-    selected_run = st.selectbox(
-        "选择要查看的运行", options=done_runs,
-        format_func=lambda run: f"{run.run_name}（{SCOPE_LABELS.get(run.scope, run.scope)}）",
-    )
+    latest_done, older_done = _split_result_runs(runs)
+
+    viewing_older: RunInfo | None = None
+    if older_done:
+        with st.expander(f"查看历史版本（{len(older_done)}个已被更新的运行取代，仍保留在磁盘上）"):
+            viewing_older = st.selectbox(
+                "选择一个历史版本查看（选中后会替换下面的结果）",
+                options=[None, *older_done],
+                format_func=lambda run: "（不查看，显示下方最新结果）" if run is None else f"{run.run_name}（{SCOPE_LABELS.get(run.scope, run.scope)}）",
+                key="genome_wide_screen_older_run_select",
+            )
+
+    if viewing_older is not None:
+        selected_run = viewing_older
+        st.info(f"当前显示历史版本结果：{selected_run.run_name}（不是最新结果，上面的下拉框可以切回不查看）")
+    else:
+        if not latest_done:
+            st.caption("当前没有最新的已完成运行；可在上方历史版本中查看已被新运行取代的完成结果。")
+            return
+        selected_run = st.selectbox(
+            "选择要查看的运行", options=latest_done,
+            format_func=lambda run: f"{run.run_name}（{SCOPE_LABELS.get(run.scope, run.scope)}）",
+        )
     run_name = selected_run.run_name
     # Older runs recorded before catalog scope existed always used gene_tradeoff_rows.csv;
     # csv_path in status.json is authoritative when present (it's scope-specific).
