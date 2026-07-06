@@ -411,20 +411,7 @@ def test_candidate_report_consistency_audit_flags_mismatched_counts() -> None:
 def test_markdown_report_renders_protein_cost_analysis_section() -> None:
     summary = build_summary_payload(_simulation_result("OPN_ALPHA_FULL_PROJECT"), None, ())
     summary["protein_cost_analysis"] = {
-        "result_status": "draft_explanatory",
-        "total_relative_score": 100.0,
-        "dominant_cost_categories": ["translation", "o_glycosylation"],
-        "cost_items": [
-            {
-                "category": "translation",
-                "label": "翻译负担",
-                "basis": "full sequence length",
-                "raw_value": 383.0,
-                "relative_score": 55.0,
-                "interpretation": "sequence length burden",
-            }
-        ],
-        "warnings": ["explanatory score only"],
+        "result_status": "draft_cost_slope_analysis",
         "lp_attribution": {
             "result_status": "draft_lp_sensitivity",
             "objective_evidence": {
@@ -467,15 +454,13 @@ def test_markdown_report_renders_protein_cost_analysis_section() -> None:
     markdown = build_markdown_report(summary)
 
     assert "## 目标蛋白成本分析" in markdown
-    assert "draft_explanatory" in markdown
+    assert "draft_cost_slope_analysis" in markdown
     assert "draft_lp_sensitivity" in markdown
     assert "draft_matlab_compatible_cost_slope" in markdown
     assert "MATLAB-compatible" in markdown
     assert "capacity_fraction_ratios" in markdown
     assert "current corrected secretion capacity" in markdown
     assert "LP 级归因证据" in markdown
-    assert "translation" in markdown
-    assert "不代表真实发酵产量" in markdown
 
 
 def test_markdown_report_renders_target_growth_analysis_section() -> None:

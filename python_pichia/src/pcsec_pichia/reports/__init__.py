@@ -265,28 +265,10 @@ def build_markdown_report(summary: dict[str, Any]) -> str:
 
 
 def _protein_cost_markdown_lines(protein_cost: dict[str, Any]) -> list[str]:
-    items = protein_cost.get("cost_items") or []
-    dominant = protein_cost.get("dominant_cost_categories") or []
-    lines = [
-        "## 目标蛋白成本分析",
-        "",
-        "- 当前结果是 Python draft explanatory score，不代表真实发酵产量或湿实验成本。",
-        f"- 成本分析状态: `{protein_cost.get('result_status')}`.",
-        f"- 总相对成本分: `{protein_cost.get('total_relative_score')}`.",
-        f"- 主要成本类别: `{', '.join(str(item) for item in dominant)}`.",
-        "",
-        "| 类别 | 成本项 | 相对分 | 依据 |",
-        "| --- | --- | ---: | --- |",
-    ]
-    for item in items:
-        lines.append(
-            f"| `{item.get('category')}` | {item.get('label')} | "
-            f"{item.get('relative_score')} | {item.get('basis')} |"
-        )
-    warnings = protein_cost.get("warnings") or []
-    if warnings:
-        lines.extend(["", "提示:"])
-        lines.extend(f"- {warning}" for warning in warnings)
+    # Only reached when enable_cost_slope_compatibility was on (see pipeline.py) - what
+    # follows is LP-solve-derived (lp_attribution shadow prices + cost-slope regression),
+    # not a heuristic placeholder score.
+    lines = ["## 目标蛋白成本分析", "", f"- 成本分析状态: `{protein_cost.get('result_status')}`."]
     lp_attribution = protein_cost.get("lp_attribution") or {}
     if lp_attribution:
         lines.extend(_lp_attribution_markdown_lines(lp_attribution))

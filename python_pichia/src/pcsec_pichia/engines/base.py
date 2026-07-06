@@ -31,7 +31,7 @@ class PichiaSimulationRequest:
     glycosylation_mode: GlycosylationMode = "native"
     enable_ribosome_translation_constraint: bool = False
     enable_misfolding_constraint: bool = False
-    growth_points: tuple[float, ...] = (0.10,)
+    growth_points: tuple[float, ...] = ()  # empty = auto grid around mu; see pipeline._growth_points
     ko_gene_ids: tuple[str, ...] = ()
     ko_reaction_ids: tuple[str, ...] = ()
     oe_gene_ids: tuple[str, ...] = ()

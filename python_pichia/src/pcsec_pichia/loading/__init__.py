@@ -9,6 +9,7 @@ here rather than importing ``pcsec_pichia.probe`` directly.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 
 from pcsec_pichia.core.modes import DEFAULT_COMPATIBILITY_MODE, CompatibilityMode, validate_compatibility_mode
@@ -177,6 +178,29 @@ def _legacy_carbon_source_bounds(carbon_source: str) -> dict[str, tuple[float | 
     return changes
 
 
+@lru_cache(maxsize=4)
+def _cached_base_pcsec_pichia_artifacts(
+    resolved_root_str: str,
+) -> tuple["CobraModel", "AminoAcidStoichiometry", "MetabolicEnzymeData", "SecretoryEnzymeData", "CombinedEnzymeData"]:
+    """Cache the load steps that depend only on repo root, not on media/carbon-source/compatibility.
+
+    load_pcsec_pichia_model re-parses a nested MATLAB .mat struct from disk with no
+    caching of its own, so without this, every simulation run re-paid that cost even
+    though media_type/compatibility_mode/carbon_source_id only affect the cheap bound
+    overrides in prepare_carbon_source_model below. All returned objects use immutable
+    with_*() builder methods (copy-then-return-new, never mutate in place), so sharing
+    one cached instance across requests/threads is safe.
+    """
+    resolved_root = Path(resolved_root_str)
+    return (
+        load_pcsec_pichia_model(resolved_root),
+        load_aa_stoichiometry(resolved_root),
+        load_metabolic_enzymedata(resolved_root),
+        load_secretory_enzymedata(resolved_root),
+        load_combined_enzymedata(resolved_root),
+    )
+
+
 def load_pcsec_pichia_inputs(
     root: Path | None = None,
     media_type: int = 4,
@@ -188,7 +212,7 @@ def load_pcsec_pichia_inputs(
     mode = validate_compatibility_mode(compatibility_mode)
     carbon_source = validate_carbon_source_id(carbon_source_id)
     resolved_root = root or repo_root()
-    model = load_pcsec_pichia_model(resolved_root)
+    model, amino_acids, metabolic, secretory, combined = _cached_base_pcsec_pichia_artifacts(str(resolved_root))
     medium_condition_id = medium_condition_id_for(media_type, mode, carbon_source)
     carbon_source_formulation = load_carbon_source_formulation(carbon_source)
     return PcSecPichiaInputs(
@@ -200,10 +224,10 @@ def load_pcsec_pichia_inputs(
             compatibility_mode=mode,
             carbon_source_id=carbon_source,
         ),
-        amino_acids=load_aa_stoichiometry(resolved_root),
-        metabolic=load_metabolic_enzymedata(resolved_root),
-        secretory=load_secretory_enzymedata(resolved_root),
-        combined=load_combined_enzymedata(resolved_root),
+        amino_acids=amino_acids,
+        metabolic=metabolic,
+        secretory=secretory,
+        combined=combined,
         compatibility_mode=mode,
         media_type=media_type,
         carbon_source_id=carbon_source,

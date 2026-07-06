@@ -16,6 +16,7 @@ from pcsec_pichia.pipeline import (
     _annotate_gene_input_ids,
     _build_pipeline_report,
     _cost_slope_secretion_ratio_policy,
+    _growth_points,
     _target_metadata,
     run_pichia_secretion_simulation,
 )
@@ -120,6 +121,20 @@ def test_cost_slope_ratio_policy_respects_explicit_absolute_ratios() -> None:
     assert policy["capacity_reference"] is None
 
 
+def test_growth_points_falls_back_to_a_grid_around_mu_not_a_single_point() -> None:
+    # A single point leaves _growth_sensitivity with nothing to compare against
+    # (always "insufficient_points"); the fallback must give it >= 2 real points.
+    points = _growth_points((), fallback_mu=0.20)
+
+    assert points == (0.02, 0.10, 0.20)
+
+
+def test_growth_points_respects_explicit_values_over_the_mu_grid() -> None:
+    points = _growth_points((0.05, 0.15), fallback_mu=0.20)
+
+    assert points == (0.05, 0.15)
+
+
 def _assert_common_pipeline_outputs(result: PichiaSimulationRunResult, output_dir: Path) -> dict[str, object]:
     assert isinstance(result, PichiaSimulationRunResult)
     assert result.success is True
@@ -141,18 +156,10 @@ def _assert_common_pipeline_outputs(result: PichiaSimulationRunResult, output_di
     assert summary["matlab_alignment_status"] == "pending"
     assert summary["alignment_summary"] == result.alignment_summary
     assert summary["compatibility_mode"] == "corrected"
-    assert summary["protein_cost_analysis"]["result_status"] == "draft_explanatory"
-    assert summary["protein_cost_analysis"]["total_relative_score"] == pytest.approx(100.0, abs=0.01)
-    lp_attribution = summary["protein_cost_analysis"]["lp_attribution"]
-    assert lp_attribution["result_status"] in {
-        "draft_lp_sensitivity",
-        "draft_lp_sensitivity_unavailable",
-    }
-    assert "eq_marginals" not in lp_attribution
-    assert "lower_marginals" not in lp_attribution
-    cost_slope = summary["protein_cost_analysis"]["cost_slope_compatibility"]
-    assert cost_slope["enabled"] is False
-    assert cost_slope["result_status"] == "disabled"
+    # protein_cost_analysis is only computed/shown when enable_cost_slope_compatibility is
+    # on (see run_pichia_secretion_simulation) - none of these callers set it, so it stays
+    # absent rather than falling back to a non-LP heuristic placeholder.
+    assert summary["protein_cost_analysis"] is None
     assert summary["target_growth_analysis"]["result_status"] == "draft_explanatory"
     assert summary["target_growth_analysis"]["growth_sensitivity_label"] in {
         "increasing",
@@ -201,7 +208,9 @@ def _assert_common_pipeline_outputs(result: PichiaSimulationRunResult, output_di
 
     with result.tradeoff_path.open(newline="", encoding="utf-8") as handle:
         tradeoff_rows = list(csv.DictReader(handle))
-    assert len(tradeoff_rows) == 1
+    # DEFAULT_GROWTH_TRADEOFF_MU_FRACTIONS gives 3 points (100%/50%/10% of mu) when no
+    # explicit growth_points are set, which none of these callers do.
+    assert len(tradeoff_rows) == 3
     return summary
 
 
@@ -417,6 +426,33 @@ def test_pipeline_runs_builtin_opn_with_optional_constraints(tmp_path: Path) -> 
     report = result.report_path.read_text(encoding="utf-8")
     assert "Known MATLAB compatibility exceptions" in report or "已知 MATLAB 兼容差异" in report
     assert "corrected_condition" in report
+
+
+@slow_pipeline
+def test_pipeline_populates_protein_cost_analysis_only_when_cost_slope_enabled(tmp_path: Path) -> None:
+    output_dir = tmp_path / "opn_cost_slope"
+    result = run_pichia_secretion_simulation(
+        PichiaSimulationRequest(
+            target_id="OPN_ALPHA_FULL_PROJECT",
+            candidate_id="OPN_ALPHA_FULL_PROJECT",
+            enable_cost_slope_compatibility=True,
+            cost_slope_growth_rates=(0.10,),
+            cost_slope_secretion_ratios=(5e-7, 1e-6),
+        ),
+        output_dir=output_dir,
+    )
+
+    summary = json.loads(result.summary_path.read_text(encoding="utf-8"))
+    protein_cost = summary["protein_cost_analysis"]
+    assert protein_cost is not None
+    assert protein_cost["result_status"] == "draft_cost_slope_analysis"
+    assert protein_cost["lp_attribution"]["result_status"] in {
+        "draft_lp_sensitivity",
+        "draft_lp_sensitivity_unavailable",
+    }
+    cost_slope = protein_cost["cost_slope_compatibility"]
+    assert cost_slope["enabled"] is True
+    assert cost_slope["result_status"] == "draft_matlab_compatible_cost_slope"
 
 
 @slow_pipeline
@@ -677,20 +713,7 @@ def test_pipeline_report_includes_protein_cost_analysis_section() -> None:
             "candidate_count": 0,
             "tradeoff": {"tradeoff_rows": []},
             "protein_cost_analysis": {
-                "result_status": "draft_explanatory",
-                "total_relative_score": 100.0,
-                "dominant_cost_categories": ["translation", "o_glycosylation"],
-                "cost_items": [
-                    {
-                        "category": "o_glycosylation",
-                        "label": "O-糖基化 OG",
-                        "basis": "declared OG count",
-                        "raw_value": 91.0,
-                        "relative_score": 20.0,
-                        "interpretation": "OPN OG burden",
-                    }
-                ],
-                "warnings": ["draft explanatory score"],
+                "result_status": "draft_cost_slope_analysis",
                 "lp_attribution": {
                     "result_status": "draft_lp_sensitivity",
                     "objective_evidence": {
@@ -733,15 +756,13 @@ def test_pipeline_report_includes_protein_cost_analysis_section() -> None:
     )
 
     assert "## 目标蛋白成本分析" in report
-    assert "draft_explanatory" in report
+    assert "draft_cost_slope_analysis" in report
     assert "draft_lp_sensitivity" in report
     assert "draft_matlab_compatible_cost_slope" in report
     assert "MATLAB-compatible" in report
     assert "capacity_fraction_ratios" in report
     assert "current corrected secretion capacity" in report
     assert "LP 级归因证据" in report
-    assert "o_glycosylation" in report
-    assert "不代表真实发酵产量" in report
 
 
 def test_pipeline_report_includes_target_growth_analysis_section() -> None:

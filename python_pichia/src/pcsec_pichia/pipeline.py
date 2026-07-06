@@ -6,10 +6,8 @@ from typing import Any
 
 from pcsec_pichia.analysis import (
     analyze_target_growth_impact,
-    analyze_target_protein_cost,
     analyze_target_protein_lp_attribution,
     analyze_yield_improvement_candidates,
-    summarize_protein_cost_analysis,
     summarize_protein_cost_slope_compatibility,
     summarize_protein_lp_attribution,
     summarize_target_growth_analysis,
@@ -85,7 +83,6 @@ def run_pichia_secretion_simulation(
     target = _resolve_target(request, root)
 
     plan = build_secretion_plan(target)
-    protein_cost = analyze_target_protein_cost(target, plan)
     constraint_result = build_pcsec_constraints(
         inputs.prepared_model,
         target,
@@ -297,10 +294,18 @@ def run_pichia_secretion_simulation(
     alignment_payload = summarize_alignment(alignment)
     alignment_payload["python_target_id"] = target.target_id
     alignment_payload["alignment_artifact_target_id"] = alignment_request["target_id"]
-    protein_cost_payload = summarize_protein_cost_analysis(protein_cost)
-    protein_cost_payload["lp_attribution"] = summarize_protein_lp_attribution(lp_attribution)
-    protein_cost_payload["cost_slope_compatibility"] = summarize_protein_cost_slope_compatibility(
-        cost_slope_compatibility
+    # 蛋白成本分析只有在勾选"启用蛋白成本斜率对比"时才计算和展示：那才是基于LP实际求解结果
+    # 的真实分析（固定生长率+分泌比例网格，测算真实葡萄糖/核糖体成本斜率）；未勾选时不再展示
+    # 任何替代内容，而不是回退到不使用LP结果的启发式打分。
+    protein_cost_payload = (
+        {
+            "target_id": target.target_id,
+            "result_status": "draft_cost_slope_analysis",
+            "lp_attribution": summarize_protein_lp_attribution(lp_attribution),
+            "cost_slope_compatibility": summarize_protein_cost_slope_compatibility(cost_slope_compatibility),
+        }
+        if cost_slope_compatibility is not None
+        else None
     )
     medium_condition = medium_condition_summary_for_inputs(inputs)
     summary_payload = _attach_pipeline_metadata(
@@ -558,9 +563,21 @@ def _unresolved_row(
     }
 
 
+# A single growth point leaves analyze_target_growth_impact with nothing to compare, so
+# _growth_sensitivity always reports "insufficient_points" - not wrong, just uninformative.
+# Fall back to a small grid around the user's chosen mu (same 100%/50%/10% spread the
+# genome-wide screen's FAST_MU_FRACTIONS uses) instead of a single point, so growth
+# analysis has enough data to say something real by default.
+DEFAULT_GROWTH_TRADEOFF_MU_FRACTIONS: tuple[float, ...] = (1.0, 0.5, 0.1)
+
+
 def _growth_points(values: tuple[float, ...], fallback_mu: float) -> tuple[float, ...]:
     points = tuple(float(value) for value in values if float(value) > 0)
-    return points or (fallback_mu,)
+    if points:
+        return points
+    return tuple(
+        sorted({round(fallback_mu * fraction, 6) for fraction in DEFAULT_GROWTH_TRADEOFF_MU_FRACTIONS if fallback_mu * fraction > 0})
+    )
 
 
 def _cost_slope_secretion_ratio_policy(
@@ -927,29 +944,11 @@ def _medium_condition_report_lines(medium_condition: dict[str, Any]) -> list[str
 
 
 def _protein_cost_report_lines(protein_cost: dict[str, Any]) -> list[str]:
-    items = protein_cost.get("cost_items") or []
-    dominant = protein_cost.get("dominant_cost_categories") or []
-    lines = [
-        "",
-        "## 目标蛋白成本分析",
-        "",
-        "- 当前结果是 Python draft explanatory score，不代表真实发酵产量或湿实验成本。",
-        f"- 成本分析状态: `{protein_cost.get('result_status')}`.",
-        f"- 总相对成本分: `{protein_cost.get('total_relative_score')}`.",
-        f"- 主要成本类别: `{', '.join(str(item) for item in dominant)}`.",
-        "",
-        "| 类别 | 成本项 | 相对分 | 依据 |",
-        "| --- | --- | ---: | --- |",
-    ]
-    for item in items:
-        lines.append(
-            f"| `{item.get('category')}` | {item.get('label')} | "
-            f"{item.get('relative_score')} | {item.get('basis')} |"
-        )
-    warnings = protein_cost.get("warnings") or []
-    if warnings:
-        lines.extend(["", "提示:"])
-        lines.extend(f"- {warning}" for warning in warnings)
+    # Only reached when enable_cost_slope_compatibility was on - protein_cost_analysis is
+    # None otherwise (see pipeline's run_pichia_secretion_simulation), so everything below
+    # is LP-solve-derived (lp_attribution shadow prices + cost-slope regression), not a
+    # heuristic placeholder score.
+    lines = ["", "## 目标蛋白成本分析", "", f"- 成本分析状态: `{protein_cost.get('result_status')}`."]
     lp_attribution = protein_cost.get("lp_attribution") or {}
     if lp_attribution:
         lines.extend(_lp_attribution_report_lines(lp_attribution))
