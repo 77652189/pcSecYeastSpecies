@@ -228,6 +228,7 @@ baseline, counts = solve_pcsec_maximize(fixed_model, exchange_reaction_id, ..., 
 - **回归测试**：`test_probe_migration.py`新增`test_solve_pcsec_maximize_honors_time_limit_instead_of_hanging_forever`——不复现具体的退化LP（那依赖这次新加的策展数据，不适合固化进快速回归用例），而是验证保护机制本身：给一次正常求解传极短的`time_limit_seconds=0.01`，断言它快速返回`success=False`且message含"time limit"，而不是跑到正常完成或挂起。原有5个该文件的测试（含MATLAB对齐的精确数值断言）全部照常通过，确认新参数的默认值不改变任何现有数值结果。
 - **修复验证**：用修复后的代码，通过真实的`reaction_ko_tradeoff`/`reaction_oe_tradeoff`（生产代码路径，不是简化复现脚本）把5个原本卡死的任务全部重新单独跑了一遍，全部在合理时间内（207~284秒）返回，不再无限挂起。观察到一个一致的模式：4个真正退化的任务里，卡住的都是`mu=0.1`（本轮测试的最高生长速率）这个点，`mu=0.01`/`0.05`大多能正常求解——推测是在最高生长速率下模型有更多资源约束同时逼近上限，强制其中一个网格蛋白相关反应归零后产生了更极端的退化顶点结构，这和产能受限代谢模型（ecGEM/pcFBA）文献里报道的"通量退化"现象一致，但没有进一步深挖具体的数值机制（性价比不高，修复本身已经解决了实际问题）。
 - 这类"筛查了几百个此前没测过的扰动，其中几个撞上求解器退化"的情况，只要继续做全模型/全策展规模的扫描式筛查，以后大概率还会再遇到（不限于这5个反应）——现在有了通用超时保护，未来任何类似情况都会在600秒内清晰地失败返回，不会再无限占用worker。
+- **Phase 4 语义修复**：筛查输出现在在每个`tradeoff_points`点上新增`solve_outcome`，并在summary row中新增`solve_outcome_counts`、`has_timeout`、`timeout_mu_points`、`proven_infeasible_mu_points`、`other_solver_failure_mu_points`和`feasibility_interpretation`。`status=1`、message含`time limit`/`HiGHS Status 13`被标记为`time_limit_reached`；`status=2`或明确infeasible message才标记为`proven_infeasible`。`max_feasible_mu`仍只由success点决定，但如果更高mu点是timeout，`feasibility_interpretation`会是`inconclusive_due_to_timeout`，避免把求解器超时误读成已证明不可行。历史CSV不会自动补齐这些字段，需要重跑screen才会得到timeout-aware结果。
 
 ## 扩容后244任务完整结果分析（2026-07-06）
 

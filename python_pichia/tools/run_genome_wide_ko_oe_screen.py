@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import sys
 import time
 from pathlib import Path
@@ -42,9 +43,47 @@ CSV_FIELDS = [
     "wildtype_secretion_at_max_feasible_mu",
     "growth_retention_ratio",
     "secretion_ratio_vs_wildtype",
+    "solve_outcome_counts",
+    "has_timeout",
+    "timeout_mu_points",
+    "proven_infeasible_mu_points",
+    "other_solver_failure_mu_points",
+    "feasibility_interpretation",
     "affected_reactions",
     "skipped_reason",
 ]
+
+
+def _csv_value(value: object) -> object:
+    if isinstance(value, (dict, list, tuple)):
+        return json.dumps(value, ensure_ascii=False)
+    return value
+
+
+def _row_to_csv_record(row: dict[str, object]) -> dict[str, object]:
+    return {
+        "target_id": row["target_id"],
+        "gene_id": row["gene_id"],
+        "intervention_type": row["intervention_type"],
+        "support_status": row["support_status"],
+        "secretory_process": row["secretory_process"],
+        "gpr_role": row["gpr_role"],
+        "mapping_confidence": row["mapping_confidence"],
+        "max_feasible_mu": row["max_feasible_mu"],
+        "secretion_at_max_feasible_mu": row["secretion_at_max_feasible_mu"],
+        "wildtype_max_feasible_mu": row["wildtype_max_feasible_mu"],
+        "wildtype_secretion_at_max_feasible_mu": row["wildtype_secretion_at_max_feasible_mu"],
+        "growth_retention_ratio": row["growth_retention_ratio"],
+        "secretion_ratio_vs_wildtype": row["secretion_ratio_vs_wildtype"],
+        "solve_outcome_counts": _csv_value(row.get("solve_outcome_counts", {})),
+        "has_timeout": row.get("has_timeout", False),
+        "timeout_mu_points": _csv_value(row.get("timeout_mu_points", ())),
+        "proven_infeasible_mu_points": _csv_value(row.get("proven_infeasible_mu_points", ())),
+        "other_solver_failure_mu_points": _csv_value(row.get("other_solver_failure_mu_points", ())),
+        "feasibility_interpretation": row.get("feasibility_interpretation", ""),
+        "affected_reactions": ";".join(row.get("affected_reactions", ())),
+        "skipped_reason": row["skipped_reason"],
+    }
 
 
 def parse_args() -> argparse.Namespace:
@@ -135,25 +174,7 @@ def main() -> None:
             )
 
             for row in result["rows"]:
-                writer.writerow(
-                    {
-                        "target_id": row["target_id"],
-                        "gene_id": row["gene_id"],
-                        "intervention_type": row["intervention_type"],
-                        "support_status": row["support_status"],
-                        "secretory_process": row["secretory_process"],
-                        "gpr_role": row["gpr_role"],
-                        "mapping_confidence": row["mapping_confidence"],
-                        "max_feasible_mu": row["max_feasible_mu"],
-                        "secretion_at_max_feasible_mu": row["secretion_at_max_feasible_mu"],
-                        "wildtype_max_feasible_mu": row["wildtype_max_feasible_mu"],
-                        "wildtype_secretion_at_max_feasible_mu": row["wildtype_secretion_at_max_feasible_mu"],
-                        "growth_retention_ratio": row["growth_retention_ratio"],
-                        "secretion_ratio_vs_wildtype": row["secretion_ratio_vs_wildtype"],
-                        "affected_reactions": ";".join(row["affected_reactions"]),
-                        "skipped_reason": row["skipped_reason"],
-                    }
-                )
+                writer.writerow(_row_to_csv_record(row))
             csv_file.flush()
 
             skipped = sum(1 for row in result["rows"] if row["skipped_reason"])

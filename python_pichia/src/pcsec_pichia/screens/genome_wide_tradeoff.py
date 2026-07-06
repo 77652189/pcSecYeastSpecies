@@ -40,6 +40,16 @@ FAST_MU_FRACTIONS: tuple[float, ...] = (1.0, 0.5, 0.1)
 PRECISE_MU_FRACTIONS: tuple[float, ...] = (1.0, 0.9, 0.75, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1, 0.05, 0.02)
 DEFAULT_REFERENCE_GROWTH_RATE = 0.10
 DEFAULT_OE_FACTOR = 2.0
+SOLVE_OUTCOME_SUCCESS = "success"
+SOLVE_OUTCOME_TIMEOUT = "time_limit_reached"
+SOLVE_OUTCOME_PROVEN_INFEASIBLE = "proven_infeasible"
+SOLVE_OUTCOME_OTHER_FAILURE = "other_solver_failure"
+SOLVE_OUTCOMES: tuple[str, ...] = (
+    SOLVE_OUTCOME_SUCCESS,
+    SOLVE_OUTCOME_TIMEOUT,
+    SOLVE_OUTCOME_PROVEN_INFEASIBLE,
+    SOLVE_OUTCOME_OTHER_FAILURE,
+)
 
 
 def mu_points_for_mode(reference_growth_rate: float, mode: str) -> list[float]:
@@ -85,6 +95,93 @@ def _max_feasible_point(points: list[dict[str, Any]]) -> dict[str, Any] | None:
     return max(feasible, key=lambda point: point["mu"])
 
 
+def _classify_solve_outcome(success: bool, status: object = None, message: object = None) -> str:
+    if success:
+        return SOLVE_OUTCOME_SUCCESS
+    status_text = "" if status is None else str(status).strip().lower()
+    message_text = "" if message is None else str(message).strip().lower()
+    combined = f"{status_text} {message_text}"
+    if status_text == "1" or "time limit" in combined or "time_limit" in combined or "highs status 13" in combined:
+        return SOLVE_OUTCOME_TIMEOUT
+    if status_text == "2" or "infeasible" in combined:
+        return SOLVE_OUTCOME_PROVEN_INFEASIBLE
+    return SOLVE_OUTCOME_OTHER_FAILURE
+
+
+def _tradeoff_point(
+    mu: float,
+    success: bool,
+    status: object,
+    secretion_flux: float | None,
+    message: object = None,
+) -> dict[str, Any]:
+    point = {
+        "mu": mu,
+        "success": success,
+        "status": status,
+        "secretion_flux": secretion_flux if success else None,
+        "solve_outcome": _classify_solve_outcome(success, status, message),
+    }
+    if message is not None:
+        point["message"] = str(message)
+    return point
+
+
+def _representative_failure_row(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
+    priority = {
+        SOLVE_OUTCOME_TIMEOUT: 0,
+        SOLVE_OUTCOME_OTHER_FAILURE: 1,
+        SOLVE_OUTCOME_PROVEN_INFEASIBLE: 2,
+    }
+    failed_rows = [row for row in rows if not row.get("success")]
+    if not failed_rows:
+        return None
+    return min(
+        failed_rows,
+        key=lambda row: priority.get(
+            _classify_solve_outcome(False, row.get("status"), row.get("message")),
+            priority[SOLVE_OUTCOME_OTHER_FAILURE],
+        ),
+    )
+
+
+def _solve_outcome_summary(points: list[dict[str, Any]], best: dict[str, Any] | None) -> dict[str, Any]:
+    counts = {outcome: 0 for outcome in SOLVE_OUTCOMES}
+    classified_points: list[tuple[dict[str, Any], str]] = []
+    for point in points:
+        outcome = str(point.get("solve_outcome") or _classify_solve_outcome(point.get("success"), point.get("status"), point.get("message")))
+        counts[outcome if outcome in counts else SOLVE_OUTCOME_OTHER_FAILURE] += 1
+        classified_points.append((point, outcome if outcome in counts else SOLVE_OUTCOME_OTHER_FAILURE))
+
+    timeout_mu_points = tuple(point["mu"] for point, outcome in classified_points if outcome == SOLVE_OUTCOME_TIMEOUT)
+    proven_infeasible_mu_points = tuple(
+        point["mu"] for point, outcome in classified_points if outcome == SOLVE_OUTCOME_PROVEN_INFEASIBLE
+    )
+    other_failure_mu_points = tuple(
+        point["mu"] for point, outcome in classified_points if outcome == SOLVE_OUTCOME_OTHER_FAILURE
+    )
+    best_mu = best["mu"] if best else None
+    upper_bound_timeout = best_mu is None or any(mu > best_mu for mu in timeout_mu_points)
+    upper_bound_other_failure = best_mu is None or any(mu > best_mu for mu in other_failure_mu_points)
+    if not points:
+        interpretation = "not_evaluated"
+    elif timeout_mu_points and upper_bound_timeout:
+        interpretation = "inconclusive_due_to_timeout"
+    elif other_failure_mu_points and upper_bound_other_failure:
+        interpretation = "inconclusive_due_to_solver_failure"
+    else:
+        interpretation = "definitive"
+
+    return {
+        "solve_outcome_counts": counts,
+        "has_timeout": bool(timeout_mu_points),
+        "timeout_mu_points": timeout_mu_points,
+        "proven_infeasible_mu_points": proven_infeasible_mu_points,
+        "other_solver_failure_mu_points": other_failure_mu_points,
+        "feasibility_interpretation": interpretation,
+    }
+
+
 def _skipped_row(gene_id: str, intervention_type: str, plan: GeneInterventionPlan) -> dict[str, Any]:
     support_status = plan.ko_support_status if intervention_type == "KO" else plan.oe_support_status
     # Even though no LP was solved, the plan already knows which reaction(s) this gene
@@ -104,6 +201,7 @@ def _skipped_row(gene_id: str, intervention_type: str, plan: GeneInterventionPla
         "max_feasible_mu": None,
         "secretion_at_max_feasible_mu": None,
         "tradeoff_points": (),
+        **_solve_outcome_summary([], None),
         "skipped_reason": "no_structural_effect",
     }
 
@@ -119,6 +217,7 @@ def _summarize_row(
     mapping = build_reaction_perturbation_mapping(reactions[0] if reactions else None, complex_subunits)
     best = _max_feasible_point(points)
     support_status = plan.ko_support_status if intervention_type == "KO" else plan.oe_support_status
+    outcome_summary = _solve_outcome_summary(points, best)
     return {
         "gene_id": gene_id,
         "intervention_type": intervention_type,
@@ -130,6 +229,7 @@ def _summarize_row(
         "max_feasible_mu": best["mu"] if best else None,
         "secretion_at_max_feasible_mu": best["secretion_flux"] if best else None,
         "tradeoff_points": tuple(points),
+        **outcome_summary,
         "skipped_reason": None,
     }
 
@@ -167,12 +267,7 @@ def gene_ko_tradeoff(
             write_misfolding_constraints=write_misfolding_constraints,
         )
         points.append(
-            {
-                "mu": mu,
-                "success": solved.success,
-                "status": solved.status,
-                "secretion_flux": solved.objective_value if solved.success else None,
-            }
+            _tradeoff_point(mu, solved.success, solved.status, solved.objective_value, solved.message)
         )
     return _summarize_row(gene_id, "KO", plan, points, complex_subunits)
 
@@ -219,13 +314,17 @@ def gene_oe_tradeoff(
             key=lambda row: row["objective_value"],
             default=None,
         )
+        failure_row = _representative_failure_row(oe_rows)
         points.append(
-            {
-                "mu": mu,
-                "success": best_reaction_row is not None,
-                "status": best_reaction_row["status"] if best_reaction_row else (oe_rows[0]["status"] if oe_rows else "no_reactions"),
-                "secretion_flux": best_reaction_row["objective_value"] if best_reaction_row else None,
-            }
+            _tradeoff_point(
+                mu,
+                best_reaction_row is not None,
+                best_reaction_row["status"]
+                if best_reaction_row
+                else (failure_row["status"] if failure_row else "no_reactions"),
+                best_reaction_row["objective_value"] if best_reaction_row else None,
+                best_reaction_row.get("message") if best_reaction_row else (failure_row.get("message") if failure_row else None),
+            )
         )
     return _summarize_row(gene_id, "OE", plan, points, complex_subunits)
 
@@ -283,6 +382,7 @@ def _summarize_catalog_row(
 ) -> dict[str, Any]:
     mapping = build_reaction_perturbation_mapping(reaction_id, complex_subunits)
     best = _max_feasible_point(points)
+    outcome_summary = _solve_outcome_summary(points, best)
     return {
         "gene_id": reaction_id,
         "common_name": common_name,
@@ -297,6 +397,7 @@ def _summarize_catalog_row(
         "max_feasible_mu": best["mu"] if best else None,
         "secretion_at_max_feasible_mu": best["secretion_flux"] if best else None,
         "tradeoff_points": tuple(points),
+        **outcome_summary,
         "skipped_reason": None,
         "hypothesis_note": hypothesis_note,
     }
@@ -340,12 +441,7 @@ def reaction_ko_tradeoff(
             write_misfolding_constraints=write_misfolding_constraints,
         )
         points.append(
-            {
-                "mu": mu,
-                "success": solved.success,
-                "status": solved.status,
-                "secretion_flux": solved.objective_value if solved.success else None,
-            }
+            _tradeoff_point(mu, solved.success, solved.status, solved.objective_value, solved.message)
         )
     return _summarize_catalog_row(
         reaction_id, common_name, category, "KO", points, complex_subunits, candidate_kind, hypothesis_note
@@ -394,13 +490,15 @@ def reaction_oe_tradeoff(
             write_misfolding_constraints=write_misfolding_constraints,
         )
         best_row = oe_rows[0] if oe_rows and oe_rows[0].get("success") else None
+        failure_row = _representative_failure_row(oe_rows)
         points.append(
-            {
-                "mu": mu,
-                "success": best_row is not None,
-                "status": best_row["status"] if best_row else (oe_rows[0]["status"] if oe_rows else "no_reaction"),
-                "secretion_flux": best_row["objective_value"] if best_row else None,
-            }
+            _tradeoff_point(
+                mu,
+                best_row is not None,
+                best_row["status"] if best_row else (failure_row["status"] if failure_row else "no_reaction"),
+                best_row["objective_value"] if best_row else None,
+                best_row.get("message") if best_row else (failure_row.get("message") if failure_row else None),
+            )
         )
     return _summarize_catalog_row(
         reaction_id, common_name, category, "OE", points, complex_subunits, candidate_kind, hypothesis_note

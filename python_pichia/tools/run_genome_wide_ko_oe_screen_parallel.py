@@ -63,6 +63,12 @@ CSV_FIELDS = [
     "wildtype_secretion_at_max_feasible_mu",
     "growth_retention_ratio",
     "secretion_ratio_vs_wildtype",
+    "solve_outcome_counts",
+    "has_timeout",
+    "timeout_mu_points",
+    "proven_infeasible_mu_points",
+    "other_solver_failure_mu_points",
+    "feasibility_interpretation",
     "affected_reactions",
     "skipped_reason",
     "hypothesis_note",
@@ -136,6 +142,41 @@ def _attach_wildtype(row: dict[str, Any], wildtype_best: dict[str, Any] | None) 
         else None
     )
     return row
+
+
+def _csv_value(value: object) -> object:
+    if isinstance(value, (dict, list, tuple)):
+        return json.dumps(value, ensure_ascii=False)
+    return value
+
+
+def _row_to_csv_record(row: dict[str, Any]) -> dict[str, object]:
+    return {
+        "target_id": row["target_id"],
+        "gene_id": row["gene_id"],
+        "common_name": row.get("common_name", ""),
+        "candidate_kind": row.get("candidate_kind", "gene"),
+        "intervention_type": row["intervention_type"],
+        "support_status": row["support_status"],
+        "secretory_process": row["secretory_process"],
+        "gpr_role": row["gpr_role"],
+        "mapping_confidence": row["mapping_confidence"],
+        "max_feasible_mu": row["max_feasible_mu"],
+        "secretion_at_max_feasible_mu": row["secretion_at_max_feasible_mu"],
+        "wildtype_max_feasible_mu": row["wildtype_max_feasible_mu"],
+        "wildtype_secretion_at_max_feasible_mu": row["wildtype_secretion_at_max_feasible_mu"],
+        "growth_retention_ratio": row["growth_retention_ratio"],
+        "secretion_ratio_vs_wildtype": row["secretion_ratio_vs_wildtype"],
+        "solve_outcome_counts": _csv_value(row.get("solve_outcome_counts", {})),
+        "has_timeout": row.get("has_timeout", False),
+        "timeout_mu_points": _csv_value(row.get("timeout_mu_points", ())),
+        "proven_infeasible_mu_points": _csv_value(row.get("proven_infeasible_mu_points", ())),
+        "other_solver_failure_mu_points": _csv_value(row.get("other_solver_failure_mu_points", ())),
+        "feasibility_interpretation": row.get("feasibility_interpretation", ""),
+        "affected_reactions": ";".join(row.get("affected_reactions", ())),
+        "skipped_reason": row["skipped_reason"],
+        "hypothesis_note": row.get("hypothesis_note", ""),
+    }
 
 
 def _run_one_gene(target_id: str, gene_id: str, mode: str, reference_growth_rate: float) -> list[dict[str, Any]]:
@@ -366,28 +407,7 @@ def main(args: argparse.Namespace | None = None) -> None:
                 done += 1
                 continue
             for row in rows:
-                writer.writerow(
-                    {
-                        "target_id": row["target_id"],
-                        "gene_id": row["gene_id"],
-                        "common_name": row.get("common_name", ""),
-                        "candidate_kind": row.get("candidate_kind", "gene"),
-                        "intervention_type": row["intervention_type"],
-                        "support_status": row["support_status"],
-                        "secretory_process": row["secretory_process"],
-                        "gpr_role": row["gpr_role"],
-                        "mapping_confidence": row["mapping_confidence"],
-                        "max_feasible_mu": row["max_feasible_mu"],
-                        "secretion_at_max_feasible_mu": row["secretion_at_max_feasible_mu"],
-                        "wildtype_max_feasible_mu": row["wildtype_max_feasible_mu"],
-                        "wildtype_secretion_at_max_feasible_mu": row["wildtype_secretion_at_max_feasible_mu"],
-                        "growth_retention_ratio": row["growth_retention_ratio"],
-                        "secretion_ratio_vs_wildtype": row["secretion_ratio_vs_wildtype"],
-                        "affected_reactions": ";".join(row["affected_reactions"]),
-                        "skipped_reason": row["skipped_reason"],
-                        "hypothesis_note": row.get("hypothesis_note", ""),
-                    }
-                )
+                writer.writerow(_row_to_csv_record(row))
             done += 1
             now = time.time()
             if now - last_report >= 60 or done == total:
