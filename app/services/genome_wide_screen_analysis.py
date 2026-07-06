@@ -2,15 +2,16 @@
 to review a genome-wide KO/OE screen:
 
 1. Essential genes (KO infeasible even at the lowest growth rate tested)
-2. KO candidates that raise secretion but cost growth (need a rescue strategy)
-3. KO candidates that raise secretion with growth fully retained (clean wins)
-4. KO candidates that lower secretion (still viable, just worse - not "essential" and not
+2. Solver-inconclusive KO rows (timeout/solver failure; not proven essential)
+3. KO candidates that raise secretion but cost growth (need a rescue strategy)
+4. KO candidates that raise secretion with growth fully retained (clean wins)
+5. KO candidates that lower secretion (still viable, just worse - not "essential" and not
    "no effect"; without this dimension these rows are invisible in every other bucket)
-5. OE candidates that raise secretion
-6. Hypothetical whole-complex OE test results (see candidate_kind == "complex_oe_hypothesis";
+6. OE candidates that raise secretion
+7. Hypothetical whole-complex OE test results (see candidate_kind == "complex_oe_hypothesis";
    these are ~always near ratio 1.0 by nature of what they're testing, so without this
    dimension they too would fall through every ratio-threshold bucket above)
-7. Target-specific divergence (same gene, different effect per target)
+8. Target-specific divergence (same gene, different effect per target)
 
 Each function returns a plain pandas DataFrame so the UI can render it
 directly and the report generator can serialize it to text/JSON.
@@ -33,6 +34,7 @@ DIVERGENCE_TOP_N = 20
 class DimensionalResults:
     target_id: str
     essential_genes: pd.DataFrame
+    solver_inconclusive_ko: pd.DataFrame
     ko_yield_up_growth_cost: pd.DataFrame
     ko_clean_wins: pd.DataFrame
     ko_yield_down: pd.DataFrame
@@ -49,6 +51,8 @@ class DimensionalResults:
             "skipped_count": self.skipped_count,
             "essential_gene_count": len(self.essential_genes),
             "essential_genes_sample": self.essential_genes.head(max_rows_per_dimension).to_dict("records"),
+            "solver_inconclusive_ko_count": len(self.solver_inconclusive_ko),
+            "solver_inconclusive_ko_sample": self.solver_inconclusive_ko.head(max_rows_per_dimension).to_dict("records"),
             "ko_yield_up_growth_cost_count": len(self.ko_yield_up_growth_cost),
             "ko_yield_up_growth_cost": self.ko_yield_up_growth_cost.head(max_rows_per_dimension).to_dict("records"),
             "ko_clean_win_count": len(self.ko_clean_wins),
@@ -72,22 +76,53 @@ def load_gene_tradeoff_csv(csv_path: str) -> pd.DataFrame:
         frame["common_name"] = ""
     if "hypothesis_note" not in frame.columns:
         frame["hypothesis_note"] = ""
+    _ensure_solver_outcome_columns(frame)
     return frame
 
 
+def _ensure_solver_outcome_columns(frame: pd.DataFrame) -> None:
+    defaults = {
+        "feasibility_interpretation": "definitive",
+        "has_timeout": False,
+        "timeout_mu_points": "",
+        "proven_infeasible_mu_points": "",
+        "other_solver_failure_mu_points": "",
+    }
+    for column, default in defaults.items():
+        if column not in frame.columns:
+            frame[column] = default
+
+
 def analyze_single_target(frame: pd.DataFrame, target_id: str) -> DimensionalResults:
-    """Compute the four single-target dimensions for one target's rows."""
-    target_rows = frame[frame.target_id == target_id]
+    """Compute the single-target review dimensions for one target's rows."""
+    target_rows = frame[frame.target_id == target_id].copy()
+    _ensure_solver_outcome_columns(target_rows)
     ko = target_rows[target_rows.intervention_type == "KO"].dropna(subset=["secretion_ratio_vs_wildtype"])
     oe = target_rows[target_rows.intervention_type == "OE"].dropna(subset=["secretion_ratio_vs_wildtype"])
 
     display_cols = ["gene_id", "common_name", "candidate_kind"]
-
-    essential = target_rows[
+    solver_cols = [
+        "secretory_process",
+        "affected_reactions",
+        "feasibility_interpretation",
+        "has_timeout",
+        "timeout_mu_points",
+        "proven_infeasible_mu_points",
+        "other_solver_failure_mu_points",
+    ]
+    infeasible_ko_mask = (
         (target_rows.intervention_type == "KO")
         & target_rows.max_feasible_mu.isna()
         & target_rows.skipped_reason.isna()
-    ][display_cols + ["secretory_process", "affected_reactions"]].reset_index(drop=True)
+    )
+    inconclusive_mask = target_rows.feasibility_interpretation.isin(
+        {"inconclusive_due_to_timeout", "inconclusive_due_to_solver_failure"}
+    )
+
+    essential = target_rows[infeasible_ko_mask & ~inconclusive_mask][
+        display_cols + ["secretory_process", "affected_reactions"]
+    ].reset_index(drop=True)
+    solver_inconclusive = target_rows[infeasible_ko_mask & inconclusive_mask][display_cols + solver_cols].reset_index(drop=True)
 
     yield_up_growth_cost = ko[
         (ko.secretion_ratio_vs_wildtype > SECRETION_UP_THRESHOLD) & (ko.growth_retention_ratio < GROWTH_COST_THRESHOLD)
@@ -129,6 +164,7 @@ def analyze_single_target(frame: pd.DataFrame, target_id: str) -> DimensionalRes
     return DimensionalResults(
         target_id=target_id,
         essential_genes=essential,
+        solver_inconclusive_ko=solver_inconclusive,
         ko_yield_up_growth_cost=yield_up_growth_cost,
         ko_clean_wins=clean_wins,
         ko_yield_down=yield_down,

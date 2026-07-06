@@ -17,6 +17,11 @@ def _row(
     secretory_process: str = "代谢或其它反应",
     candidate_kind: str = "gene",
     hypothesis_note: str = "",
+    feasibility_interpretation: str = "definitive",
+    has_timeout: bool = False,
+    timeout_mu_points: str = "",
+    proven_infeasible_mu_points: str = "",
+    other_solver_failure_mu_points: str = "",
 ) -> dict[str, object]:
     return {
         "target_id": "hLF",
@@ -32,6 +37,11 @@ def _row(
         "secretory_process": secretory_process,
         "affected_reactions": "R1",
         "hypothesis_note": hypothesis_note,
+        "feasibility_interpretation": feasibility_interpretation,
+        "has_timeout": has_timeout,
+        "timeout_mu_points": timeout_mu_points,
+        "proven_infeasible_mu_points": proven_infeasible_mu_points,
+        "other_solver_failure_mu_points": other_solver_failure_mu_points,
     }
 
 
@@ -53,6 +63,39 @@ def test_essential_gene_is_ko_infeasible_and_excluded_from_yield_down() -> None:
     assert result.ko_yield_down.empty
     assert result.ko_yield_up_growth_cost.empty
     assert result.ko_clean_wins.empty
+
+
+def test_timeout_ko_is_solver_inconclusive_not_essential() -> None:
+    frame = _frame(
+        [
+            _row(
+                "G_TIMEOUT",
+                "KO",
+                secretion_ratio=None,
+                growth_retention=None,
+                max_feasible_mu=None,
+                feasibility_interpretation="inconclusive_due_to_timeout",
+                has_timeout=True,
+                timeout_mu_points="[0.1]",
+            ),
+            _row(
+                "G_PROVEN_ESSENTIAL",
+                "KO",
+                secretion_ratio=None,
+                growth_retention=None,
+                max_feasible_mu=None,
+                feasibility_interpretation="definitive",
+                proven_infeasible_mu_points="[0.1]",
+            ),
+        ]
+    )
+
+    result = analyze_single_target(frame, "hLF")
+
+    assert list(result.essential_genes["gene_id"]) == ["G_PROVEN_ESSENTIAL"]
+    assert list(result.solver_inconclusive_ko["gene_id"]) == ["G_TIMEOUT"]
+    assert result.solver_inconclusive_ko.iloc[0]["feasibility_interpretation"] == "inconclusive_due_to_timeout"
+    assert bool(result.solver_inconclusive_ko.iloc[0]["has_timeout"]) is True
 
 
 def test_ko_yield_down_catches_feasible_but_worse_than_wildtype_knockouts() -> None:
@@ -127,6 +170,27 @@ def test_to_summary_dict_includes_yield_down() -> None:
 
     assert summary["ko_yield_down_count"] == 1
     assert summary["ko_yield_down_sample"][0]["gene_id"] == "G_HURTS"
+
+
+def test_to_summary_dict_includes_solver_inconclusive_ko() -> None:
+    frame = _frame(
+        [
+            _row(
+                "G_TIMEOUT",
+                "KO",
+                secretion_ratio=None,
+                growth_retention=None,
+                max_feasible_mu=None,
+                feasibility_interpretation="inconclusive_due_to_timeout",
+                has_timeout=True,
+            ),
+        ]
+    )
+
+    summary = analyze_single_target(frame, "hLF").to_summary_dict()
+
+    assert summary["solver_inconclusive_ko_count"] == 1
+    assert summary["solver_inconclusive_ko_sample"][0]["gene_id"] == "G_TIMEOUT"
 
 
 def test_complex_subunit_oe_hypothesis_candidates_requires_ko_decrease_and_complex_role() -> None:
