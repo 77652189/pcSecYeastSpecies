@@ -128,6 +128,35 @@ class NameAuditRow:
 
 
 @dataclass(frozen=True)
+class RuleTransferAuditRow:
+    internal_common_name: str
+    query_symbol: str
+    sce_orf: str
+    pichia_gene_id: str
+    pichia_model_gene_id: str
+    is_rbh: bool
+    in_model_gene_index: bool
+    identity_pct: float | None
+    query_coverage: float | None
+    subject_coverage: float | None
+    evalue: float | None
+    homology_review_status: str
+    rule_transfer_status: str
+    warnings: tuple[str, ...] = field(default_factory=tuple)
+
+
+@dataclass(frozen=True)
+class HomologyAuditSummary:
+    blast_status: str
+    homology_row_count: int
+    name_audit_row_count: int
+    rule_transfer_row_count: int
+    homology_review_status_counts: dict[str, int]
+    name_consistency_status_counts: dict[str, int]
+    rule_transfer_status_counts: dict[str, int]
+
+
+@dataclass(frozen=True)
 class CacheWriteResult:
     jsonl_path: Path
     tsv_path: Path

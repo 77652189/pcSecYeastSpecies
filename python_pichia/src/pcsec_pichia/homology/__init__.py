@@ -6,9 +6,11 @@ from pcsec_pichia.homology.cache_schema import (
     CacheWriteResult,
     CatalogHomologyQuery,
     HomologyCrosswalkRow,
+    HomologyAuditSummary,
     NameAuditRow,
     ProteinRecord,
     ReciprocalBestHit,
+    RuleTransferAuditRow,
 )
 
 __all__ = [
@@ -17,7 +19,9 @@ __all__ = [
     "CacheWriteResult",
     "CatalogHomologyQuery",
     "HomologyCrosswalkRow",
+    "HomologyAuditSummary",
     "NameAuditRow",
     "ProteinRecord",
     "ReciprocalBestHit",
+    "RuleTransferAuditRow",
 ]

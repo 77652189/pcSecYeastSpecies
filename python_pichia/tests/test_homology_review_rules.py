@@ -7,9 +7,15 @@ from pcsec_pichia.homology.review_rules import (
     NO_RECIPROCAL_HIT,
     PARALOG_RISK_REVIEW_REQUIRED,
     RBH_NOT_IN_MODEL,
+    RULE_TRANSFER_LOW_CONFIDENCE,
+    RULE_TRANSFER_NOT_SUPPORTED,
+    RULE_TRANSFER_READY,
+    RULE_TRANSFER_SUPPORTED_NOT_MODEL_OPERABLE,
+    RULE_TRANSFER_UNRESOLVED,
     SEQUENCE_NAME_CONFLICT,
     classify_homology_review_status,
     classify_name_consistency,
+    classify_rule_transfer_status,
 )
 
 
@@ -92,3 +98,38 @@ def test_name_consistency_flags_aliases_and_conflicts() -> None:
         )
         == SEQUENCE_NAME_CONFLICT
     )
+
+
+def test_rule_transfer_statuses_preserve_model_and_confidence_boundaries() -> None:
+    ready, ready_warnings = classify_rule_transfer_status(
+        homology_review_status=MODEL_READY_RBH_HIGH_CONFIDENCE,
+        is_rbh=True,
+        in_model_gene_index=True,
+    )
+    not_model, _ = classify_rule_transfer_status(
+        homology_review_status=RBH_NOT_IN_MODEL,
+        is_rbh=True,
+        in_model_gene_index=False,
+    )
+    low_confidence, _ = classify_rule_transfer_status(
+        homology_review_status=LOW_IDENTITY_REVIEW_REQUIRED,
+        is_rbh=True,
+        in_model_gene_index=True,
+    )
+    unresolved, _ = classify_rule_transfer_status(
+        homology_review_status="unresolved_query_symbol",
+        is_rbh=False,
+        in_model_gene_index=False,
+    )
+    not_supported, _ = classify_rule_transfer_status(
+        homology_review_status=NO_RECIPROCAL_HIT,
+        is_rbh=False,
+        in_model_gene_index=True,
+    )
+
+    assert ready == RULE_TRANSFER_READY
+    assert ready_warnings == ()
+    assert not_model == RULE_TRANSFER_SUPPORTED_NOT_MODEL_OPERABLE
+    assert low_confidence == RULE_TRANSFER_LOW_CONFIDENCE
+    assert unresolved == RULE_TRANSFER_UNRESOLVED
+    assert not_supported == RULE_TRANSFER_NOT_SUPPORTED

@@ -12,10 +12,26 @@ from pcsec_pichia.homology.cache_schema import (
 from pcsec_pichia.homology.crosswalk import (
     build_homology_crosswalk,
     build_name_audit_rows,
+    build_rule_transfer_audit_rows,
     load_homology_cache,
+    load_name_audit_cache,
+    load_rule_transfer_audit_cache,
+    summarize_homology_audits,
     write_homology_cache,
+    write_name_audit_cache,
+    write_rule_transfer_audit_cache,
 )
-from pcsec_pichia.homology.review_rules import MODEL_READY_RBH_HIGH_CONFIDENCE, RBH_NOT_IN_MODEL
+from pcsec_pichia.homology.review_rules import (
+    LOW_IDENTITY_REVIEW_REQUIRED,
+    MODEL_READY_RBH_HIGH_CONFIDENCE,
+    NO_RECIPROCAL_HIT,
+    RBH_NOT_IN_MODEL,
+    RULE_TRANSFER_LOW_CONFIDENCE,
+    RULE_TRANSFER_NOT_SUPPORTED,
+    RULE_TRANSFER_READY,
+    RULE_TRANSFER_SUPPORTED_NOT_MODEL_OPERABLE,
+    RULE_TRANSFER_UNRESOLVED,
+)
 
 
 def _hit(query: str, subject: str) -> BlastHit:
@@ -30,6 +46,22 @@ def _hit(query: str, subject: str) -> BlastHit:
         bitscore=250,
         query_coverage=100,
         subject_coverage=100,
+    )
+
+
+def _low_identity_hit(query: str, subject: str) -> BlastHit:
+    hit = _hit(query, subject)
+    return BlastHit(
+        query_id=hit.query_id,
+        subject_id=hit.subject_id,
+        identity_pct=20,
+        alignment_length=hit.alignment_length,
+        query_length=hit.query_length,
+        subject_length=hit.subject_length,
+        evalue=hit.evalue,
+        bitscore=hit.bitscore,
+        query_coverage=hit.query_coverage,
+        subject_coverage=hit.subject_coverage,
     )
 
 
@@ -118,3 +150,97 @@ def test_build_name_audit_rows_flags_name_conflict() -> None:
     audit = build_name_audit_rows(rows)
 
     assert audit[0].name_consistency_status == "sequence_name_conflict"
+
+
+def test_rule_transfer_audit_rows_cover_ready_not_model_low_confidence_and_no_rbh() -> None:
+    queries = (
+        CatalogHomologyQuery(internal_common_name="KAR2", query_symbol="KAR2"),
+        CatalogHomologyQuery(internal_common_name="PDI1", query_symbol="PDI1"),
+        CatalogHomologyQuery(internal_common_name="HRD1", query_symbol="HRD1"),
+        CatalogHomologyQuery(internal_common_name="SEC12", query_symbol="SEC12"),
+        CatalogHomologyQuery(internal_common_name="MISSING", query_symbol="MISSING"),
+    )
+    sce_records = (
+        ProteinRecord(organism="sce", gene_id="YJL034W", symbol="KAR2", sequence="M"),
+        ProteinRecord(organism="sce", gene_id="YCL043C", symbol="PDI1", sequence="M"),
+        ProteinRecord(organism="sce", gene_id="YOL013C", symbol="HRD1", sequence="M"),
+        ProteinRecord(organism="sce", gene_id="YNR026C", symbol="SEC12", sequence="M"),
+    )
+    pichia_records = (
+        ProteinRecord(organism="pichia", gene_id="PAS_chr2-1_0140", symbol="KAR2", sequence="M"),
+        ProteinRecord(organism="pichia", gene_id="PAS_chr4_0844", symbol="PDI1", sequence="M"),
+        ProteinRecord(organism="pichia", gene_id="PAS_chr4_0156", symbol="HRD1", sequence="M"),
+        ProteinRecord(organism="pichia", gene_id="PAS_chr4_0606", symbol="SEC12", sequence="M"),
+    )
+    rbh_calls = (
+        ReciprocalBestHit("YJL034W", "PAS_chr2-1_0140", True, _hit("YJL034W", "PAS_chr2-1_0140"), _hit("PAS_chr2-1_0140", "YJL034W")),
+        ReciprocalBestHit("YCL043C", "PAS_chr4_0844", True, _hit("YCL043C", "PAS_chr4_0844"), _hit("PAS_chr4_0844", "YCL043C")),
+        ReciprocalBestHit("YOL013C", "PAS_chr4_0156", True, _low_identity_hit("YOL013C", "PAS_chr4_0156"), _low_identity_hit("PAS_chr4_0156", "YOL013C")),
+        ReciprocalBestHit("YNR026C", "PAS_chr4_0606", False, _hit("YNR026C", "PAS_chr4_0606"), _hit("PAS_chr4_0606", "YCR067C"), "reverse_best_is_YCR067C"),
+    )
+
+    crosswalk = build_homology_crosswalk(
+        queries,
+        sce_records,
+        pichia_records,
+        {"PAS_chr2-1_0140"},
+        rbh_calls,
+        BlastConfig(),
+    )
+    rule_rows = build_rule_transfer_audit_rows(crosswalk)
+
+    by_symbol = {row.query_symbol: row for row in rule_rows}
+    assert by_symbol["KAR2"].rule_transfer_status == RULE_TRANSFER_READY
+    assert by_symbol["PDI1"].rule_transfer_status == RULE_TRANSFER_SUPPORTED_NOT_MODEL_OPERABLE
+    assert by_symbol["HRD1"].homology_review_status == LOW_IDENTITY_REVIEW_REQUIRED
+    assert by_symbol["HRD1"].rule_transfer_status == RULE_TRANSFER_LOW_CONFIDENCE
+    assert by_symbol["SEC12"].homology_review_status == NO_RECIPROCAL_HIT
+    assert by_symbol["SEC12"].rule_transfer_status == RULE_TRANSFER_NOT_SUPPORTED
+    assert by_symbol["MISSING"].rule_transfer_status == RULE_TRANSFER_UNRESOLVED
+
+
+def test_name_and_rule_transfer_cache_outputs_are_stable(tmp_path: Path) -> None:
+    crosswalk = build_homology_crosswalk(
+        (CatalogHomologyQuery(internal_common_name="KAR2", query_symbol="KAR2"),),
+        (ProteinRecord(organism="sce", gene_id="YJL034W", symbol="KAR2", sequence="M"),),
+        (ProteinRecord(organism="pichia", gene_id="PAS_chr2-1_0140", symbol="KAR2", accession="C4Q", sequence="M"),),
+        {"PAS_chr2-1_0140"},
+        (ReciprocalBestHit("YJL034W", "PAS_chr2-1_0140", True, _hit("YJL034W", "PAS_chr2-1_0140"), _hit("PAS_chr2-1_0140", "YJL034W")),),
+        BlastConfig(),
+    )
+    name_rows = build_name_audit_rows(crosswalk)
+    rule_rows = build_rule_transfer_audit_rows(crosswalk)
+
+    write_name_audit_cache(name_rows, tmp_path / "name.jsonl", tmp_path / "name.tsv")
+    write_rule_transfer_audit_cache(rule_rows, tmp_path / "rule.jsonl", tmp_path / "rule.tsv")
+
+    name_header = (tmp_path / "name.tsv").read_text(encoding="utf-8").splitlines()[0].split("\t")
+    rule_header = (tmp_path / "rule.tsv").read_text(encoding="utf-8").splitlines()[0].split("\t")
+    assert "name_consistency_status" in name_header
+    assert "rule_transfer_status" in rule_header
+    assert load_name_audit_cache(tmp_path / "name.jsonl")[0].name_consistency_status == "name_confirmed_by_rbh"
+    assert load_rule_transfer_audit_cache(tmp_path / "rule.jsonl")[0].rule_transfer_status == RULE_TRANSFER_READY
+
+
+def test_homology_audit_summary_counts_all_three_outputs() -> None:
+    crosswalk = build_homology_crosswalk(
+        (CatalogHomologyQuery(internal_common_name="KAR2", query_symbol="KAR2"),),
+        (ProteinRecord(organism="sce", gene_id="YJL034W", symbol="KAR2", sequence="M"),),
+        (ProteinRecord(organism="pichia", gene_id="PAS_chr2-1_0140", symbol="KAR2", sequence="M"),),
+        {"PAS_chr2-1_0140"},
+        (ReciprocalBestHit("YJL034W", "PAS_chr2-1_0140", True, _hit("YJL034W", "PAS_chr2-1_0140"), _hit("PAS_chr2-1_0140", "YJL034W")),),
+        BlastConfig(),
+    )
+    name_rows = build_name_audit_rows(crosswalk)
+    rule_rows = build_rule_transfer_audit_rows(crosswalk)
+
+    summary = summarize_homology_audits(
+        blast_status="completed",
+        homology_rows=crosswalk,
+        name_audit_rows=name_rows,
+        rule_transfer_rows=rule_rows,
+    )
+
+    assert summary.homology_row_count == 1
+    assert summary.name_audit_row_count == 1
+    assert summary.rule_transfer_status_counts == {RULE_TRANSFER_READY: 1}

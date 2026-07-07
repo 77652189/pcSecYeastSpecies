@@ -16,6 +16,13 @@ SEQUENCE_NAME_CONFLICT = "sequence_name_conflict"
 EXTERNAL_NAME_MISSING = "external_name_missing"
 INTERNAL_NAME_MISSING = "internal_name_missing"
 
+RULE_TRANSFER_READY = "rule_transfer_ready"
+RULE_TRANSFER_SUPPORTED_NOT_MODEL_OPERABLE = "rule_transfer_supported_not_model_operable"
+RULE_TRANSFER_LOW_CONFIDENCE = "rule_transfer_low_confidence"
+RULE_TRANSFER_PARALOG_RISK = "rule_transfer_paralog_risk"
+RULE_TRANSFER_UNRESOLVED = "rule_transfer_unresolved"
+RULE_TRANSFER_NOT_SUPPORTED = "rule_transfer_not_supported"
+
 
 def classify_homology_review_status(
     *,
@@ -80,6 +87,31 @@ def classify_name_consistency(
     if internal in aliases:
         return ALIAS_CONFIRMED_BY_RBH
     return SEQUENCE_NAME_CONFLICT
+
+
+def classify_rule_transfer_status(
+    *,
+    homology_review_status: str,
+    is_rbh: bool,
+    in_model_gene_index: bool,
+) -> tuple[str, tuple[str, ...]]:
+    """Classify whether an SCE rule can be transferred as review evidence."""
+
+    if homology_review_status == UNRESOLVED_QUERY_SYMBOL:
+        return RULE_TRANSFER_UNRESOLVED, ("query symbol is unresolved",)
+    if homology_review_status == PARALOG_RISK_REVIEW_REQUIRED:
+        return RULE_TRANSFER_PARALOG_RISK, ("paralog risk requires manual review",)
+    if homology_review_status in {LOW_IDENTITY_REVIEW_REQUIRED, COVERAGE_REVIEW_REQUIRED, MANUAL_REVIEW_REQUIRED}:
+        return RULE_TRANSFER_LOW_CONFIDENCE, (f"{homology_review_status} prevents high-confidence transfer",)
+    if not is_rbh or homology_review_status == NO_RECIPROCAL_HIT:
+        return RULE_TRANSFER_NOT_SUPPORTED, ("no reciprocal best hit support",)
+    if is_rbh and not in_model_gene_index:
+        return RULE_TRANSFER_SUPPORTED_NOT_MODEL_OPERABLE, (
+            "RBH supports homology, but candidate is not present in current Pichia GEM gene_index",
+        )
+    if homology_review_status == MODEL_READY_RBH_HIGH_CONFIDENCE and in_model_gene_index:
+        return RULE_TRANSFER_READY, ()
+    return RULE_TRANSFER_NOT_SUPPORTED, (f"unsupported homology status: {homology_review_status}",)
 
 
 def _normalize_name(value: str) -> str:

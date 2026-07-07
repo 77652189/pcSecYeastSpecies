@@ -4,17 +4,24 @@ import csv
 import json
 from dataclasses import asdict
 from pathlib import Path
+from typing import Any
 
 from pcsec_pichia.homology.cache_schema import (
     BlastConfig,
     CatalogHomologyQuery,
     CacheWriteResult,
+    HomologyAuditSummary,
     HomologyCrosswalkRow,
     NameAuditRow,
     ProteinRecord,
     ReciprocalBestHit,
+    RuleTransferAuditRow,
 )
-from pcsec_pichia.homology.review_rules import classify_homology_review_status, classify_name_consistency
+from pcsec_pichia.homology.review_rules import (
+    classify_homology_review_status,
+    classify_name_consistency,
+    classify_rule_transfer_status,
+)
 
 
 def build_homology_crosswalk(
@@ -136,6 +143,55 @@ def build_name_audit_rows(crosswalk: tuple[HomologyCrosswalkRow, ...]) -> tuple[
     return tuple(rows)
 
 
+def build_rule_transfer_audit_rows(crosswalk: tuple[HomologyCrosswalkRow, ...]) -> tuple[RuleTransferAuditRow, ...]:
+    """Build rule-transfer audit rows without changing phenotype evidence."""
+
+    rows: list[RuleTransferAuditRow] = []
+    for row in crosswalk:
+        status, warnings = classify_rule_transfer_status(
+            homology_review_status=row.review_status,
+            is_rbh=row.is_rbh,
+            in_model_gene_index=row.in_model_gene_index,
+        )
+        rows.append(
+            RuleTransferAuditRow(
+                internal_common_name=row.internal_common_name,
+                query_symbol=row.query_symbol,
+                sce_orf=row.sce_orf or "",
+                pichia_gene_id=row.pichia_gene_id or "",
+                pichia_model_gene_id=row.pichia_model_gene_id or "",
+                is_rbh=row.is_rbh,
+                in_model_gene_index=row.in_model_gene_index,
+                identity_pct=row.identity_pct,
+                query_coverage=row.query_coverage,
+                subject_coverage=row.subject_coverage,
+                evalue=row.evalue,
+                homology_review_status=row.review_status,
+                rule_transfer_status=status,
+                warnings=(*row.warnings, *warnings),
+            )
+        )
+    return tuple(rows)
+
+
+def summarize_homology_audits(
+    *,
+    blast_status: str,
+    homology_rows: tuple[HomologyCrosswalkRow, ...],
+    name_audit_rows: tuple[NameAuditRow, ...],
+    rule_transfer_rows: tuple[RuleTransferAuditRow, ...],
+) -> HomologyAuditSummary:
+    return HomologyAuditSummary(
+        blast_status=blast_status,
+        homology_row_count=len(homology_rows),
+        name_audit_row_count=len(name_audit_rows),
+        rule_transfer_row_count=len(rule_transfer_rows),
+        homology_review_status_counts=_count_by(homology_rows, "review_status"),
+        name_consistency_status_counts=_count_by(name_audit_rows, "name_consistency_status"),
+        rule_transfer_status_counts=_count_by(rule_transfer_rows, "rule_transfer_status"),
+    )
+
+
 def write_homology_cache(
     crosswalk: tuple[HomologyCrosswalkRow, ...],
     jsonl_path: Path,
@@ -158,6 +214,24 @@ def write_homology_cache(
     return CacheWriteResult(jsonl_path=jsonl_path, tsv_path=tsv_path, row_count=len(ordered))
 
 
+def write_name_audit_cache(
+    rows: tuple[NameAuditRow, ...],
+    jsonl_path: Path,
+    tsv_path: Path,
+) -> CacheWriteResult:
+    ordered = tuple(sorted(rows, key=lambda row: (row.internal_common_name, row.internal_sequence_id)))
+    return _write_dataclass_cache(ordered, jsonl_path, tsv_path)
+
+
+def write_rule_transfer_audit_cache(
+    rows: tuple[RuleTransferAuditRow, ...],
+    jsonl_path: Path,
+    tsv_path: Path,
+) -> CacheWriteResult:
+    ordered = tuple(sorted(rows, key=lambda row: (row.internal_common_name, row.query_symbol, row.sce_orf)))
+    return _write_dataclass_cache(ordered, jsonl_path, tsv_path)
+
+
 def load_homology_cache(path: Path) -> tuple[HomologyCrosswalkRow, ...]:
     """Load a previously generated JSONL cache without rerunning BLAST."""
 
@@ -176,6 +250,35 @@ def load_homology_cache(path: Path) -> tuple[HomologyCrosswalkRow, ...]:
                     }
                 )
             )
+    return tuple(rows)
+
+
+def load_name_audit_cache(path: Path) -> tuple[NameAuditRow, ...]:
+    rows: list[NameAuditRow] = []
+    for payload in _read_jsonl(path):
+        rows.append(
+            NameAuditRow(
+                **{
+                    **payload,
+                    "external_aliases": tuple(payload.get("external_aliases", ())),
+                    "warnings": tuple(payload.get("warnings", ())),
+                }
+            )
+        )
+    return tuple(rows)
+
+
+def load_rule_transfer_audit_cache(path: Path) -> tuple[RuleTransferAuditRow, ...]:
+    rows: list[RuleTransferAuditRow] = []
+    for payload in _read_jsonl(path):
+        rows.append(
+            RuleTransferAuditRow(
+                **{
+                    **payload,
+                    "warnings": tuple(payload.get("warnings", ())),
+                }
+            )
+        )
     return tuple(rows)
 
 
@@ -234,3 +337,51 @@ def _tsv_row(row: HomologyCrosswalkRow | None) -> dict[str, object]:
     payload["warnings"] = ";".join(row.warnings)
     payload["external_aliases"] = ";".join(row.external_aliases)
     return payload
+
+
+def _write_dataclass_cache(rows: tuple[Any, ...], jsonl_path: Path, tsv_path: Path) -> CacheWriteResult:
+    jsonl_path.parent.mkdir(parents=True, exist_ok=True)
+    tsv_path.parent.mkdir(parents=True, exist_ok=True)
+    with jsonl_path.open("w", encoding="utf-8", newline="\n") as handle:
+        for row in rows:
+            handle.write(json.dumps(_generic_json_row(row), ensure_ascii=False, sort_keys=True) + "\n")
+    fieldnames = list(_generic_tsv_row(rows[0]).keys()) if rows else []
+    with tsv_path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames, delimiter="\t", lineterminator="\n")
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(_generic_tsv_row(row))
+    return CacheWriteResult(jsonl_path=jsonl_path, tsv_path=tsv_path, row_count=len(rows))
+
+
+def _generic_json_row(row: Any) -> dict[str, object]:
+    payload = asdict(row)
+    for key, value in list(payload.items()):
+        if isinstance(value, tuple):
+            payload[key] = list(value)
+    return payload
+
+
+def _generic_tsv_row(row: Any) -> dict[str, object]:
+    payload = asdict(row)
+    for key, value in list(payload.items()):
+        if isinstance(value, tuple):
+            payload[key] = ";".join(str(item) for item in value)
+    return payload
+
+
+def _read_jsonl(path: Path) -> list[dict[str, object]]:
+    payloads: list[dict[str, object]] = []
+    with path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            if line.strip():
+                payloads.append(json.loads(line))
+    return payloads
+
+
+def _count_by(rows: tuple[Any, ...], attribute: str) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for row in rows:
+        value = str(getattr(row, attribute))
+        counts[value] = counts.get(value, 0) + 1
+    return dict(sorted(counts.items()))

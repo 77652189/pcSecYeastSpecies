@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 
@@ -13,7 +14,15 @@ if str(REPO_ROOT / "python_pichia" / "src") not in sys.path:
 from pcsec_pichia.homology.blast_runner import find_blastp_executable, make_blast_db, parse_blast_tsv, run_blastp
 from pcsec_pichia.homology.cache_schema import BlastConfig, CatalogHomologyQuery, ProteinRecord
 from pcsec_pichia.homology.catalog_inputs import secretion_catalog_sce_queries
-from pcsec_pichia.homology.crosswalk import build_homology_crosswalk, write_homology_cache
+from pcsec_pichia.homology.crosswalk import (
+    build_homology_crosswalk,
+    build_name_audit_rows,
+    build_rule_transfer_audit_rows,
+    summarize_homology_audits,
+    write_homology_cache,
+    write_name_audit_cache,
+    write_rule_transfer_audit_cache,
+)
 from pcsec_pichia.homology.rbh import compute_reciprocal_best_hits
 from pcsec_pichia.homology.sequence_sources import (
     load_pichia_model_gene_index,
@@ -91,11 +100,26 @@ def main(argv: list[str] | None = None) -> int:
     reverse_hits = parse_blast_tsv(reverse_tsv) if reverse_tsv.exists() else ()
     rbh_calls = compute_reciprocal_best_hits(forward_hits, reverse_hits)
     crosswalk = build_homology_crosswalk(queries, sce_records, pichia_records, model_gene_index, rbh_calls, config)
+    name_audit = build_name_audit_rows(crosswalk)
+    rule_transfer_audit = build_rule_transfer_audit_rows(crosswalk)
     jsonl_path = output_dir / "sce_to_pichia_homology_cache.jsonl"
     tsv_path = output_dir / "sce_to_pichia_homology_cache.tsv"
     write_result = write_homology_cache(crosswalk, jsonl_path, tsv_path)
-    summary_path = output_dir / "homology_cache_summary.md"
-    _write_summary(summary_path, crosswalk, blast_status, write_result.row_count)
+    name_jsonl_path = output_dir / "sce_to_pichia_name_audit.jsonl"
+    name_tsv_path = output_dir / "sce_to_pichia_name_audit.tsv"
+    name_write_result = write_name_audit_cache(name_audit, name_jsonl_path, name_tsv_path)
+    rule_jsonl_path = output_dir / "sce_to_pichia_rule_transfer_audit.jsonl"
+    rule_tsv_path = output_dir / "sce_to_pichia_rule_transfer_audit.tsv"
+    rule_write_result = write_rule_transfer_audit_cache(rule_transfer_audit, rule_jsonl_path, rule_tsv_path)
+    summary = summarize_homology_audits(
+        blast_status=blast_status,
+        homology_rows=crosswalk,
+        name_audit_rows=name_audit,
+        rule_transfer_rows=rule_transfer_audit,
+    )
+    summary_json_path = output_dir / "homology_audit_summary.json"
+    summary_md_path = output_dir / "homology_audit_summary.md"
+    _write_summary(summary_json_path, summary_md_path, summary)
     print(
         json.dumps(
             {
@@ -103,7 +127,14 @@ def main(argv: list[str] | None = None) -> int:
                 "row_count": write_result.row_count,
                 "jsonl_path": str(jsonl_path),
                 "tsv_path": str(tsv_path),
-                "summary_path": str(summary_path),
+                "name_audit_row_count": name_write_result.row_count,
+                "name_audit_jsonl_path": str(name_jsonl_path),
+                "name_audit_tsv_path": str(name_tsv_path),
+                "rule_transfer_row_count": rule_write_result.row_count,
+                "rule_transfer_jsonl_path": str(rule_jsonl_path),
+                "rule_transfer_tsv_path": str(rule_tsv_path),
+                "summary_json_path": str(summary_json_path),
+                "summary_md_path": str(summary_md_path),
             },
             ensure_ascii=False,
             indent=2,
@@ -230,26 +261,27 @@ def _all_sce_queries(records: tuple[ProteinRecord, ...]) -> tuple[CatalogHomolog
     )
 
 
-def _write_summary(
-    path: Path,
-    crosswalk: tuple[object, ...],
-    blast_status: str,
-    row_count: int,
-) -> None:
-    status_counts: dict[str, int] = {}
-    for row in crosswalk:
-        status = getattr(row, "review_status")
-        status_counts[status] = status_counts.get(status, 0) + 1
+def _write_summary(json_path: Path, md_path: Path, summary: object) -> None:
+    payload = asdict(summary)
+    json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     lines = [
-        "# Pichia Homology Cache Summary",
+        "# Pichia Homology Audit Summary",
         "",
-        f"- blast_status: {blast_status}",
-        f"- row_count: {row_count}",
+        f"- blast_status: {payload['blast_status']}",
+        f"- homology_row_count: {payload['homology_row_count']}",
+        f"- name_audit_row_count: {payload['name_audit_row_count']}",
+        f"- rule_transfer_row_count: {payload['rule_transfer_row_count']}",
         "",
-        "## Review Status Counts",
+        "## Homology Review Status Counts",
         "",
     ]
-    for status, count in sorted(status_counts.items()):
+    for status, count in payload["homology_review_status_counts"].items():
+        lines.append(f"- {status}: {count}")
+    lines.extend(["", "## Name Consistency Status Counts", ""])
+    for status, count in payload["name_consistency_status_counts"].items():
+        lines.append(f"- {status}: {count}")
+    lines.extend(["", "## Rule Transfer Status Counts", ""])
+    for status, count in payload["rule_transfer_status_counts"].items():
         lines.append(f"- {status}: {count}")
     lines.extend(
         [
@@ -262,7 +294,7 @@ def _write_summary(
             "- Model operability is reported separately via in_model_gene_index.",
         ]
     )
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    md_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 if __name__ == "__main__":
