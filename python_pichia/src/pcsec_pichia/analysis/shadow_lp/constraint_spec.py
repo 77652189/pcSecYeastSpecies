@@ -5,6 +5,7 @@ from typing import Any, Literal, Mapping
 
 
 ConstraintSense = Literal["eq", "le", "ge"]
+OptimizationSense = Literal["maximize", "minimize"]
 
 
 @dataclass(frozen=True)
@@ -57,4 +58,6 @@ class LPProblem:
     stoichiometric_matrix: Any
     rhs: Any
     constraint_blocks: tuple[ConstraintBlock, ...]
+    objective_sense: OptimizationSense = "maximize"
+    key_reaction_ids: tuple[str, ...] = ()
     metadata: Mapping[str, Any] = field(default_factory=dict)
