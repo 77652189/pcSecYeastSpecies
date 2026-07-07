@@ -5,13 +5,13 @@
 
 ## 目标
 
-当前 Python 工作流服务于一个具体研发问题：帮助研发同事围绕 Pichia 中 hLF / OPN 目标蛋白产量提升，提出、解释和复核 KO/OE 改造候选。
+当前 Python 工作流服务于一个具体研发问题：帮助研发同事围绕 Pichia 中目标蛋白产量提升，提出、解释和复核 KO/OE 改造候选。
 
 系统输出用于模型内相对比较、候选排序和研发讨论，不承诺真实发酵产量、mg/L 绝对值或实验成功率。
 
 ## 当前主线
 
-- 目标蛋白：hLF、OPN，以及用户输入的 custom target。
+- 目标蛋白：项目内置参考目标，以及用户输入的 custom target。
 - 上游输入：密码子优化、信号肽筛选、目标蛋白序列和构建设计。
 - 核心问题：在现有 pcSecPichia 模型中比较分泌负担、生长权衡、KO/OE 改造方向和证据等级。
 - 当前重点：把模型可执行性、外部同源证据、表型证据和实验复核边界分开表达。
@@ -39,7 +39,7 @@ Streamlit UI / API facade
 ## 已有能力
 
 - 加载 pcSecPichia 参考模型输入。
-- 构建 hLF、OPN、custom target 的分泌路径。
+- 构建内置参考目标、custom target 的分泌路径。
 - 支持培养基和碳源条件设置，包括 mixed-carbon probe。
 - 支持固定生长率分泌能力求解、growth tradeoff、protein cost summary。
 - 支持 KO/OE 候选预览、screen rows、yield recommendation 和 report 输出。
@@ -54,7 +54,7 @@ Streamlit UI / API facade
 - `solve_shadow_secretion_capacity(...)` 已经作为并行入口实现。
 - Shadow LP 使用结构化 constraint builders 和 `ScipyHighsBackend` 作为大模型默认求解后端。
 - `CobraOptlangBackend` 保留为 tiny LP / 语义验证用途，不作为 full pcSec 默认后端。
-- hLF / OPN 默认 fixed-growth capacity 已和 reference path 高精度对齐。
+- 内置参考目标的默认 fixed-growth capacity 已和 reference path 高精度对齐。
 - 旧入口 `solve_secretion_capacity(...)` 仍然默认走 reference / 原 pcSec 路径。
 - reference solver 目前仍可用于 validation / comparison boundary。
 

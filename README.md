@@ -2,7 +2,7 @@
 
 # pcSecYeastSpecies
 
-**Cross-species yeast secretion models and a Python pcSecPichia workbench for hLF / OPN secretion-engineering decisions**
+**Cross-species yeast secretion models and a Python pcSecPichia workbench for target-protein secretion-engineering decisions**
 
 [![MATLAB](https://img.shields.io/badge/MATLAB-reference%20models-E16737)](https://www.mathworks.com/products/matlab.html)
 [![Python](https://img.shields.io/badge/Python-pcSecPichia%20engine-3776AB?logo=python&logoColor=white)](https://www.python.org/)
@@ -22,11 +22,11 @@ This repository contains two related layers:
 | Layer | Purpose |
 |---|---|
 | Original research model | MATLAB code and data for cross-species proteome-constrained modeling of yeast protein secretion in *Saccharomyces cerevisiae*, *Komagataella phaffii*, and *Kluyveromyces marxianus* |
-| Current product workbench | A Python `pcSecPichia` engine plus Streamlit/FastAPI facades focused on *K. phaffii* hLF and OPN secretion-design support |
+| Current product workbench | A Python `pcSecPichia` engine plus Streamlit/FastAPI facades focused on *K. phaffii* target-protein secretion-design support |
 
-The current applied workflow supports R&D discussions around human lactoferrin (**hLF**) and osteopontin (**OPN**) expression in *Pichia/Komagataella*. It helps compare secretion burden, growth trade-offs, and candidate KO/OE interventions before wet-lab validation.
+The current applied workflow supports R&D discussions around specific target-protein expression in *Pichia/Komagataella*. It helps compare secretion burden, growth trade-offs, and candidate KO/OE interventions before wet-lab validation.
 
-The Python layer is not a full rewrite of the three-species MATLAB project. It deliberately migrates only the capabilities needed for the current hLF/OPN productivity workflow.
+The Python layer is not a full rewrite of the three-species MATLAB project. It deliberately migrates only the capabilities needed for the current target-protein productivity workflow.
 
 ## What It Does
 
@@ -34,7 +34,7 @@ The Python layer is not a full rewrite of the three-species MATLAB project. It d
 |---|---|
 | Cross-species MATLAB models | Reference model construction, simulation scripts, figure scripts, enzyme data, and processed results are retained under the original folders |
 | Python pcSecPichia engine | Loads Pichia model inputs, applies media conditions, builds target-protein secretion plans, adds constraints, solves secretion-capacity scenarios, and summarizes results |
-| Target proteins | Supports built-in OPN, project hLF 710 aa target, OPN candidate targets, and custom target inputs |
+| Target proteins | Supports built-in reference targets, project-specific targets, candidate targets, and custom target inputs |
 | Medium conditions | Supports baseline and carbon-source conditions, including mixed-carbon objective probes |
 | KO/OE analysis | Supports candidate preview, screen rows, small candidate screens, and genome-wide KO/OE screen tooling |
 | Evidence layer | Adds gene catalog, gene-rule overlays, phenotype-evidence tiers, and recommendation wording for manual review |
@@ -44,7 +44,7 @@ The Python layer is not a full rewrite of the three-species MATLAB project. It d
 
 ```mermaid
 flowchart LR
-    A["hLF / OPN target input"] --> B["Target secretion plan"]
+    A["Target protein input"] --> B["Target secretion plan"]
     C["Medium condition"] --> D["pcSecPichia model loading"]
     B --> E["pcSec constraints"]
     D --> E
@@ -140,7 +140,7 @@ Runtime LP files, solver outputs, reports, and UI artifacts are written under `l
 - KO/OE results are not wet-lab success guarantees.
 - OE can be represented by reaction-level capacity proxies; that is not the same as a full gene-expression regulation model.
 - External database annotations support interpretation but do not alone prove phenotype effects.
-- hLF/OPN conclusions require target-specific alignment checks and experimental validation.
+- Conclusions are target-specific and require alignment checks and experimental validation for each target protein.
 - The Python implementation is scoped to current Pichia work and is not a complete migration of all original MATLAB species/features.
 
 ## Project Map
@@ -178,7 +178,7 @@ Slow solver/model checks are intentionally gated by environment variables. See [
 | Document | Use it for |
 |---|---|
 | [Docs Index](docs/README.md) | Current document entry points and archived notes |
-| [Current Requirements And Architecture](docs/pichia_current_architecture_and_requirements.md) | Active hLF/OPN workflow, boundaries, and system layering |
+| [Current Requirements And Architecture](docs/pichia_current_architecture_and_requirements.md) | Active target-protein workflow, boundaries, and system layering |
 | [Next Plan](docs/pichia_next_plan.md) | BLAST/RBH cache, Shadow LP toggle, and evidence integration priorities |
 | [BLAST/RBH Homology Crosswalk](docs/pichia_homology_crosswalk_architecture.md) | Offline SCE-to-Pichia homology evidence design |
 | [Data And Results Policy](docs/data_and_results_policy.md) | Protected directories, runtime artifacts, and archive rules |

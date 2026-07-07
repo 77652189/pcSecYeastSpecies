@@ -2,7 +2,7 @@
 
 # pcSecYeastSpecies
 
-**跨物种酵母分泌模型，以及面向 hLF / OPN 分泌工程决策的 Python pcSecPichia 工作台**
+**跨物种酵母分泌模型，以及面向目标蛋白分泌工程决策的 Python pcSecPichia 工作台**
 
 [![MATLAB](https://img.shields.io/badge/MATLAB-%E5%8F%82%E8%80%83%E6%A8%A1%E5%9E%8B-E16737)](https://www.mathworks.com/products/matlab.html)
 [![Python](https://img.shields.io/badge/Python-pcSecPichia%20%E5%BC%95%E6%93%8E-3776AB?logo=python&logoColor=white)](https://www.python.org/)
@@ -22,11 +22,11 @@
 | 层级 | 作用 |
 |---|---|
 | 原始研究模型 | 面向 *Saccharomyces cerevisiae*、*Komagataella phaffii* 和 *Kluyveromyces marxianus* 的跨物种蛋白分泌通量约束模型，主要由 MATLAB 代码、模型和结果数据组成 |
-| 当前应用工作台 | 围绕 *K. phaffii* 中 hLF / OPN 分泌表达设计的 Python `pcSecPichia` 引擎，以及 Streamlit / FastAPI 外壳 |
+| 当前应用工作台 | 围绕 *K. phaffii* 中目标蛋白分泌表达设计的 Python `pcSecPichia` 引擎，以及 Streamlit / FastAPI 外壳 |
 
-当前应用主线服务于研发讨论：在人乳铁蛋白（**hLF**）和骨桥蛋白（**OPN**）的毕赤酵母表达场景下，比较分泌负担、生长权衡和 KO/OE 改造候选，为湿实验前的候选优先级判断提供依据。
+当前应用主线服务于研发讨论：在特定目标蛋白的毕赤酵母表达场景下，比较分泌负担、生长权衡和 KO/OE 改造候选，为湿实验前的候选优先级判断提供依据。
 
-Python 层不是三物种 MATLAB 项目的完整重写，而是只迁移当前 hLF/OPN 产量提升工作流需要的能力。
+Python 层不是三物种 MATLAB 项目的完整重写，而是只迁移当前目标蛋白产量提升工作流需要的能力。
 
 ## 当前能力
 
@@ -34,7 +34,7 @@ Python 层不是三物种 MATLAB 项目的完整重写，而是只迁移当前 h
 |---|---|
 | 跨物种 MATLAB 模型 | 原始构建脚本、仿真脚本、figure 脚本、酶数据和处理结果保留在原目录 |
 | Python pcSecPichia 引擎 | 支持 Pichia 输入加载、培养基条件、目标蛋白分泌路径、约束构建、求解和结果摘要 |
-| 目标蛋白 | 支持内置 OPN、项目 hLF 710 aa、OPN 候选目标和自定义目标输入 |
+| 目标蛋白 | 支持内置参考目标、项目专属目标、候选目标和自定义目标输入 |
 | 培养基条件 | 支持基础碳源条件和混合碳源目标探针 |
 | KO/OE 分析 | 支持候选预览、筛查结果行、小规模候选筛查和全基因组 KO/OE 筛查工具 |
 | 证据层 | 支持基因目录、基因规则覆盖、表型证据分层和人工复核提示 |
@@ -44,7 +44,7 @@ Python 层不是三物种 MATLAB 项目的完整重写，而是只迁移当前 h
 
 ```mermaid
 flowchart LR
-    A["hLF / OPN 目标输入"] --> B["目标蛋白分泌路径"]
+    A["目标蛋白输入"] --> B["目标蛋白分泌路径"]
     C["培养基条件"] --> D["pcSecPichia 模型加载"]
     B --> E["pcSec 约束"]
     D --> E
@@ -140,7 +140,7 @@ LP 文件、求解输出、报告和 UI 运行产物会写入 `local_runs/`，�
 - KO/OE 结果不是实验成功率承诺。
 - OE 通常可能以反应层面的容量代理表示，并不等同于完整基因表达调控模型。
 - 外部数据库注释只能辅助解释，不能单独证明表型效果。
-- hLF/OPN 结果仍需目标蛋白特异性对齐检查和湿实验验证。
+- 结论具有目标蛋白特异性，每个目标蛋白都需要单独的对齐检查和湿实验验证。
 - Python 实现范围限定在当前 Pichia 工作流，不是所有 MATLAB 物种和功能的完整迁移。
 
 ## 项目结构
@@ -178,7 +178,7 @@ python -m pytest -q tests\test_pichia_secretion_service_contract.py
 | 文档 | 用途 |
 |---|---|
 | [文档索引](docs/README.md) | 当前文档入口和归档记录 |
-| [当前需求与架构](docs/pichia_current_architecture_and_requirements.md) | hLF/OPN 工作流、科学边界和系统分层 |
+| [当前需求与架构](docs/pichia_current_architecture_and_requirements.md) | 目标蛋白工作流、科学边界和系统分层 |
 | [下一步规划](docs/pichia_next_plan.md) | BLAST/RBH cache、Shadow LP 后端切换和证据整合优先级 |
 | [BLAST/RBH 同源映射架构](docs/pichia_homology_crosswalk_architecture.md) | 酿酒酵母到 Pichia 的离线同源证据层设计 |
 | [数据与结果治理策略](docs/data_and_results_policy.md) | 保护目录、运行产物和归档规则 |

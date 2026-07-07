@@ -2,6 +2,9 @@
 local_runs/
 python_pichia/local_runs/
 
+# Archived design/decision docs - internal detail not meant for public distribution
+docs/archive/
+
 # Generated solver artifacts outside local_runs
 *.lp
 *.lp.out

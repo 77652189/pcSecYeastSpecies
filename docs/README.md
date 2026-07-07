@@ -16,11 +16,7 @@
 
 ## 已归档内容
 
-| 归档文档 | 原因 |
-| --- | --- |
-| [COBRApy Phase 0 baseline](archive/cobrapy_phase0_baseline_assessment_2026-07-06.md) | 阶段性验证已完成，当前结论已合并到架构文档 |
-| [COBRApy Phase 3 installed validation](archive/cobrapy_phase3_installed_shadow_validation_2026-07-06.md) | 阶段性验证已完成，当前结论已合并到架构文档 |
-| [KO/OE genome screen design](archive/pichia_ko_oe_genome_screen_design_2026-07-02.md) | 长设计和历史排查记录已不适合作为当前入口 |
+历史计划、阶段验证和长排查记录保留在本地 `docs/archive/`，不纳入版本控制（包含项目内部设计细节，不适合公开分发）。
 
 ## 当前推荐阅读顺序
 
