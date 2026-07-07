@@ -1,6 +1,7 @@
 """Genome-wide KO/OE growth-vs-secretion tradeoff screen.
 
-Design rationale and rejected alternatives: docs/pichia_ko_oe_genome_screen_design.md
+Historical design rationale and rejected alternatives:
+docs/archive/pichia_ko_oe_genome_screen_design_2026-07-02.md
 
 For each gene's KO (or OE) plan, sweeps a set of fixed growth rates (mu) and
 reports the max feasible growth rate plus the secretion achieved there. This

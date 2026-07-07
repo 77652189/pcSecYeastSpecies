@@ -1,34 +1,53 @@
 # pcSecPichia 数据与结果治理策略
 
-状态：active
+状态：active  
+最后更新：2026-07-07
 
 ## 目录职责
 
-- `Data/` 只放稳定输入、参考数据、外部注释、目标蛋白输入和人工确认的候选数据；不放运行输出。
-- `Model/` 只放人工确认的 GEM 和 pcSec 模型资产；不放脚本生成的临时模型。
-- `Enzymedata/` 只放人工确认的酶约束资产；不放本地求解缓存。
-- `Results/` 是 legacy MATLAB results，只读参考历史结果，不是当前 Python 或 Streamlit 的默认输出目录。
-- `local_runs/` 是当前 Python、Streamlit、MATLAB harness、LP diff、缓存和验证证据的默认运行产物目录，并保持 ignored。
-- `python_pichia/local_runs/` 若被局部工具创建，也视为运行产物目录，并保持 ignored。
+- `Data/`：稳定输入、参考数据、外部注释、目标蛋白输入和人工确认的科学数据。
+- `Model/`：人工确认的 GEM / pcSec 模型资产。
+- `Enzymedata/`：人工确认的酶约束资产。
+- `Results/`：legacy MATLAB results，只读参考历史结果，不作为当前 Python / Streamlit 默认输出。
+- `local_runs/`：当前 Python、Streamlit、MATLAB harness、LP diff、cache 和验证证据的默认运行产物目录，保持 ignored。
+- `docs/archive/`：历史计划、阶段性验证记录和已被 active 文档吸收的长文档。
 
 ## 提交规则
 
-- 新生成的 LP、solver output、MATLAB harness output、Streamlit run result、缓存和盘点文件默认进入 `local_runs/`。
+- 新生成的 LP、solver output、BLAST cache、MATLAB harness output、Streamlit run result、Markdown report 默认进入 `local_runs/`。
 - 新增大文件前必须说明来源、是否可再生成、是否应进入 Git LFS，以及为什么不是运行产物。
 - `Data/`、`Model/`、`Enzymedata/`、`Results/` 的新增或修改必须被明确声明为科学资产变更。
-- 第一轮治理不移动历史 MATLAB 数据、不清理 Git 历史、不改变 legacy browser 对 `Results/` 的只读访问。
+- 本轮 BLAST/RBH 同源映射 cache 不写入 `Data/`，先作为 `local_runs/` 产物验证。
+- 若未来要把同源 crosswalk 升级为稳定资产，应单独建立 checkpoint，并说明来源、版本、生成命令和人工复核状态。
 
-## 当前盘点
+## 保护检查
 
-本 checkpoint 生成的只读盘点文件位于：
+每个涉及模型、screen、cache 或报告的任务结束前都应运行：
 
-- `local_runs/data_inventory_tracked_files.txt`
-- `local_runs/git_status_ignored_snapshot.txt`
-- `local_runs/data_inventory_by_extension.csv`
-- `local_runs/data_path_audit_matches.txt`
+```powershell
+git diff --name-only -- Code Model Enzymedata Results requirements.txt python_pichia\pyproject.toml
+```
 
-这些文件是本地治理证据，不提交到 Git。
+预期为空，除非该任务明确要求修改这些边界文件。
+
+## 归档规则
+
+归档不是删除历史，而是把不再作为当前入口的长文档移到 `docs/archive/`。
+
+适合归档：
+
+- 已完成阶段验证记录。
+- 已被当前架构文档吸收的旧计划。
+- 长篇排查记录，但当前下一步不再依赖其细节。
+- 与当前任务无关的历史候选或旧设计。
+
+不应归档：
+
+- 当前架构入口。
+- 下一步计划。
+- 数据边界和提交规则。
+- 当前任务的正式设计文档。
 
 ## 后续迁移边界
 
-如需迁移历史 `Results/`、启用 Git LFS、发布 GitHub Release artifact 或外部存储，应单独立项并先做 checkpoint。迁移前不得删除或移动 legacy MATLAB 结果。
+如需迁移历史 `Results/`、启用 Git LFS、发布 GitHub Release artifact 或接入外部存储，应单独立项并先做 checkpoint。迁移前不得删除或移动 legacy MATLAB 结果。

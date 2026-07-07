@@ -5,7 +5,7 @@ Usage (from the python_pichia/ directory, with src/ on PYTHONPATH):
     python tools/run_genome_wide_ko_oe_screen.py --mode fast --limit 50 --run-name pilot_50
     python tools/run_genome_wide_ko_oe_screen.py --mode fast --run-name overnight_full
 
-Design rationale: ../docs/pichia_ko_oe_genome_screen_design.md (in the repo root docs/ folder).
+Historical design rationale: ../docs/archive/pichia_ko_oe_genome_screen_design_2026-07-02.md.
 Writes CSV + a Markdown summary to local_runs/<run-name>/.
 """
 

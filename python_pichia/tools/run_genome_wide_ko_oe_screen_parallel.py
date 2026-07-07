@@ -10,7 +10,7 @@ Usage (from python_pichia/):
 
     python tools/run_genome_wide_ko_oe_screen_parallel.py --mode fast --workers 6 --run-name overnight_full
 
-Design rationale: ../docs/pichia_ko_oe_genome_screen_design.md
+Historical design rationale: ../docs/archive/pichia_ko_oe_genome_screen_design_2026-07-02.md
 """
 
 from __future__ import annotations

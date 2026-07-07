@@ -71,5 +71,7 @@ The last command must output nothing.
 
 The active project-level docs are:
 
+- `../docs/README.md`
 - `../docs/pichia_current_architecture_and_requirements.md`
 - `../docs/pichia_next_plan.md`
+- `../docs/pichia_homology_crosswalk_architecture.md`

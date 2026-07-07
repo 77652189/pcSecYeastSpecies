@@ -1,6 +1,6 @@
 """全基因组 KO/OE 分泌-生长权衡筛查页面。
 
-设计取舍见 pcSecYeastSpecies/docs/pichia_ko_oe_genome_screen_design.md。
+历史设计取舍见 pcSecYeastSpecies/docs/archive/pichia_ko_oe_genome_screen_design_2026-07-02.md。
 任何人都能直接打开这个页面触发筛查；筛查本身是小时级的后台任务，跑在独立
 子进程里（不是 Streamlit 内部线程），这样刷新/重启页面不会杀掉正在跑的任务。
 """

@@ -6,16 +6,18 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 ACTIVE_DOCS = {
-    "cobrapy_phase0_baseline_assessment_2026-07-06.md",
-    "cobrapy_phase3_installed_shadow_validation_2026-07-06.md",
     "data_and_results_policy.md",
+    "pichia_homology_crosswalk_architecture.md",
     "pichia_current_architecture_and_requirements.md",
     "pichia_next_plan.md",
-    "pichia_ko_oe_genome_screen_design.md",
+    "README.md",
 }
 
 ARCHIVED_REFERENCE_DOCS = {
+    "cobrapy_phase0_baseline_assessment_2026-07-06.md",
+    "cobrapy_phase3_installed_shadow_validation_2026-07-06.md",
     "opn_pichia_signal_peptide_candidates.md",
+    "pichia_ko_oe_genome_screen_design_2026-07-02.md",
     "pichia_medium_mixed_carbon_objective_plan_2026-06-30.md",
     "pichia_python_hlf_design_decisions.md",
     "pichia_python_hlf_project_710_alignment_status_2026-06-26.md",

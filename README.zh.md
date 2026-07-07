@@ -85,7 +85,7 @@ flowchart TD
 | 筛查工具 | [`python_pichia/tools/`](python_pichia/tools/) | 全基因组和局部 KO/OE 筛查脚本 |
 | 服务层 | [`app/services/`](app/services/) | 请求映射、后台任务、基因目录、筛查预览和仿真门面 |
 | UI 层 | [`app/ui/`](app/ui/) | Streamlit 页面和研发可读展示 |
-| 工作文档 | [`docs/pichia_current_architecture_and_requirements.md`](docs/pichia_current_architecture_and_requirements.md), [`docs/pichia_next_plan.md`](docs/pichia_next_plan.md) | 当前范围和下一步计划 |
+| 工作文档 | [`docs/README.md`](docs/README.md), [`docs/pichia_next_plan.md`](docs/pichia_next_plan.md) | 当前范围、架构和下一步计划 |
 
 ## 快速开始
 
@@ -177,9 +177,11 @@ python -m pytest -q tests\test_pichia_secretion_service_contract.py
 
 | 文档 | 用途 |
 |---|---|
+| [文档索引](docs/README.md) | 当前文档入口和归档记录 |
 | [当前需求与架构](docs/pichia_current_architecture_and_requirements.md) | hLF/OPN 工作流、科学边界和系统分层 |
-| [下一步规划](docs/pichia_next_plan.md) | KO/OE 工作流、MATLAB 迁移范围、报告整理和证据维护 |
-| [全基因组 KO/OE 设计](docs/pichia_ko_oe_genome_screen_design.md) | 批量筛查设计和取舍 |
+| [下一步规划](docs/pichia_next_plan.md) | BLAST/RBH cache、Shadow LP 后端切换和证据整合优先级 |
+| [BLAST/RBH 同源映射架构](docs/pichia_homology_crosswalk_architecture.md) | 酿酒酵母到 Pichia 的离线同源证据层设计 |
+| [数据与结果治理策略](docs/data_and_results_policy.md) | 保护目录、运行产物和归档规则 |
 
 ## 引用与联系人
 

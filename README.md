@@ -85,7 +85,7 @@ flowchart TD
 | Screen tooling | [`python_pichia/tools/`](python_pichia/tools/) | Genome-wide and focused KO/OE screen runners |
 | Service layer | [`app/services/`](app/services/) | Request mapping, background tasks, gene catalog, screen preview, and simulation facade |
 | UI layer | [`app/ui/`](app/ui/) | Streamlit pages and biology-facing presentation |
-| Working docs | [`docs/pichia_current_architecture_and_requirements.md`](docs/pichia_current_architecture_and_requirements.md), [`docs/pichia_next_plan.md`](docs/pichia_next_plan.md) | Active scope and next-plan documents |
+| Working docs | [`docs/README.md`](docs/README.md), [`docs/pichia_next_plan.md`](docs/pichia_next_plan.md) | Active scope, current architecture, and next-plan documents |
 
 ## Quick Start
 
@@ -177,9 +177,11 @@ Slow solver/model checks are intentionally gated by environment variables. See [
 
 | Document | Use it for |
 |---|---|
+| [Docs Index](docs/README.md) | Current document entry points and archived notes |
 | [Current Requirements And Architecture](docs/pichia_current_architecture_and_requirements.md) | Active hLF/OPN workflow, boundaries, and system layering |
-| [Next Plan](docs/pichia_next_plan.md) | KO/OE workflow, MATLAB migration scope, report cleanup, and evidence maintenance |
-| [Genome-wide KO/OE Design](docs/pichia_ko_oe_genome_screen_design.md) | Batch screen design and trade-offs |
+| [Next Plan](docs/pichia_next_plan.md) | BLAST/RBH cache, Shadow LP toggle, and evidence integration priorities |
+| [BLAST/RBH Homology Crosswalk](docs/pichia_homology_crosswalk_architecture.md) | Offline SCE-to-Pichia homology evidence design |
+| [Data And Results Policy](docs/data_and_results_policy.md) | Protected directories, runtime artifacts, and archive rules |
 
 ## Citation And Contact
 
