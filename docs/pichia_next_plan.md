@@ -13,9 +13,9 @@
 
 ## 当前推荐优先级
 
-### 1. BLAST/RBH 离线同源映射 cache
+### 1. BLAST/RBH Streamlit 同源审计
 
-目标：把酿酒酵母的分泌工程知识安全迁移到 Pichia 模型前，先建立可审计的同源证据层。
+目标：把酿酒酵母的分泌工程知识安全迁移到 Pichia 模型前，建立可审计的同源证据层，并让研发用户能在 Streamlit 中查看“基因命名标准化 + 同源规则迁移评估”结果。
 
 范围：
 
@@ -23,12 +23,26 @@
 - 用本地 BLAST+ 运行 SCE -> Pichia 和 Pichia -> SCE 双向 blastp。
 - 计算 reciprocal best hit、identity、evalue、query coverage、subject coverage。
 - 合并当前 Pichia GEM `gene_index`，明确候选是否是模型可操作 gene。
-- 输出 JSONL / TSV cache 和 Markdown summary。
-- 先覆盖 `SECRETION_GENE_CATALOG` 相关 query，但不自动写回 catalog。
+- 输出 homology cache、name audit、rule-transfer audit 和 summary。
+- 通过 `app/services` 只读 cache，通过 `app/ui` 展示、筛选、导出和解释结果。
+- 先覆盖 `SECRETION_GENE_CATALOG` 相关 query，但不自动写回 catalog，也不把同源命中直接当作 KO/OE 模型 gene。
+- CLI / scripts 只作为离线 cache builder，不是最终产品入口；Streamlit runtime 默认不跑 BLAST。
 
 设计文档：[BLAST/RBH 同源映射架构](pichia_homology_crosswalk_architecture.md)
 
-建议验收：
+固定执行轮次：
+
+1. Round 0：目标契约和现状审计，只更新 active 文档，明确 Streamlit 产品目标。
+2. Round 1：核心 schema 和 audit 输出落地，生成 homology / name / rule-transfer 三类 cache。
+3. Round 2：新增 app service facade，只读 cache、过滤、summary、导出，不运行 BLAST。
+4. Round 3：新增 Streamlit 页面“基因命名与同源规则审计”。
+5. Round 4：把 homology evidence 作为并行解释层接入 KO/OE 预览和 evidence summary，不改变 recommendation tier 边界。
+6. Round 5：预留离线外部数据库名称校对契约，不做 runtime 联网。
+7. Round 6：最终文档收束，说明已实现内容、边界和使用方式。
+
+每轮完成后都要 review 本轮 diff、运行 focused tests / compileall / 保护目录检查，并将本轮相关改动 commit + push。
+
+当前 cache builder 验收：
 
 ```powershell
 python -m pytest -q python_pichia\tests\test_homology_sequence_sources.py python_pichia\tests\test_homology_rbh.py python_pichia\tests\test_homology_crosswalk.py

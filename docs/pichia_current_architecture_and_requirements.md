@@ -15,6 +15,7 @@
 - 上游输入：密码子优化、信号肽筛选、目标蛋白序列和构建设计。
 - 核心问题：在现有 pcSecPichia 模型中比较分泌负担、生长权衡、KO/OE 改造方向和证据等级。
 - 当前重点：把模型可执行性、外部同源证据、表型证据和实验复核边界分开表达。
+- 当前 BLAST/RBH 产品目标：把离线同源 cache 提升为 Streamlit 中可查看、筛选、导出和解释的“基因命名标准化 + 同源规则迁移评估”功能；CLI / scripts 只作为离线证据生成层，不是最终用户入口。
 
 ## 架构分层
 
@@ -46,6 +47,7 @@ Streamlit UI / API facade
 - 支持 gene evidence、gene catalog、phenotype evidence 和 recommendation tier。
 - 支持 genome-wide / catalog-level KO/OE screen 工具。
 - 支持 Shadow LP constrained solve 路径，用于承载 pcSec 语义约束的可替代求解后端。
+- 已有 BLAST/RBH 离线 homology cache builder，可生成序列同源和模型 gene_index 可操作性证据；下一阶段是补齐 name audit / rule-transfer audit、service facade 和 Streamlit 浏览页面。
 
 ## COBRApy / Shadow LP 状态
 
@@ -67,6 +69,7 @@ Streamlit UI / API facade
 - OE reaction proxy：只是 reaction-level capacity proxy，不是完整 gene-level expression simulation。
 - 表型证据：只由明确 curated phenotype evidence 决定，且 KO / OE 必须按 intervention 分开。
 - 同源证据：BLAST/RBH 只能说明跨物种候选关系，不能直接变成模型可操作 gene。
+- 命名标准化和同源规则迁移评估必须同时区分 sequence-level homology evidence、external/database name evidence、current model gene_index operability 和 manual review status。
 - `experiment_calibrated` 只用于 host、target/context、intervention 严格匹配的高置信表型证据。
 
 ## 非目标

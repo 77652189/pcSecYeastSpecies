@@ -18,6 +18,7 @@
 - 新增大文件前必须说明来源、是否可再生成、是否应进入 Git LFS，以及为什么不是运行产物。
 - `Data/`、`Model/`、`Enzymedata/`、`Results/` 的新增或修改必须被明确声明为科学资产变更。
 - 本轮 BLAST/RBH 同源映射 cache 不写入 `Data/`，先作为 `local_runs/` 产物验证。
+- Streamlit 同源审计页面默认只读 `local_runs/` 或未来人工提升的稳定 cache；页面打开、筛选和导出不得默认运行 BLAST、联网查询或生成大文件。
 - 若未来要把同源 crosswalk 升级为稳定资产，应单独建立 checkpoint，并说明来源、版本、生成命令和人工复核状态。
 
 ## 保护检查

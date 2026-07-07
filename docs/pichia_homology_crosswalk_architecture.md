@@ -5,7 +5,7 @@
 
 ## 目标
 
-建立一个离线、可审计的同源映射证据层，把酿酒酵母分泌工程知识迁移到 Pichia 模型前先转化为结构化 crosswalk/cache。
+建立一个离线、可审计的同源映射证据层，把酿酒酵母分泌工程知识迁移到 Pichia 模型前先转化为结构化 crosswalk/cache，并把这些结果作为 Streamlit 中“基因命名标准化 + 同源规则迁移评估”的只读产品入口。
 
 该层只回答：
 
@@ -13,6 +13,8 @@
 这个 S. cerevisiae 基因在 Pichia 中是否有可信同源候选？
 这个候选是否存在于当前 Pichia GEM gene_index？
 是否需要人工复核？
+内部 common_name / gene_id 和外部/跨物种名称是否一致？
+同源规则迁移是否可作为解释层进入人工复核？
 ```
 
 该层不回答：
@@ -30,6 +32,9 @@
 - 不自动修改 `SECRETION_GENE_CATALOG`。
 - 不把 BLAST/RBH 命中直接当作模型可操作 gene。
 - 不把 RBH、identity 或 annotation 单独升级为 phenotype evidence。
+- Streamlit runtime 默认只读 cache，不默认联网、不默认运行 BLAST。
+- `app/services` 只做 cache 读取、过滤、summary 和导出 facade，不承载核心科学判断。
+- `app/ui` 只展示 python_pichia / service 产出的结构化结果，不实现同源或表型判断。
 - 首轮 cache 输出到 `local_runs/`，验证稳定后再讨论是否升级为稳定资产。
 
 ## 数据流
@@ -45,7 +50,9 @@ SECRETION_GENE_CATALOG / query list
   -> reciprocal best hit
   -> model gene_index join
   -> review_status
-  -> JSONL / TSV / Markdown report
+  -> homology cache / name audit / rule-transfer audit
+  -> app service read-only facade
+  -> Streamlit browser / filters / export
 ```
 
 ## 建议模块布局
@@ -262,6 +269,11 @@ Initial outputs should go under `local_runs/pichia_homology_cache/<run_name>/`:
 ```text
 sce_to_pichia_homology_cache.jsonl
 sce_to_pichia_homology_cache.tsv
+sce_to_pichia_name_audit.jsonl
+sce_to_pichia_name_audit.tsv
+sce_to_pichia_rule_transfer_audit.jsonl
+sce_to_pichia_rule_transfer_audit.tsv
+homology_audit_summary.json
 homology_cache_summary.md
 blast_forward.tsv
 blast_reverse.tsv
@@ -271,9 +283,12 @@ These outputs are review artifacts. They should not be committed until the proje
 
 ## Integration path
 
-Phase 1: build cache and report only.  
-Phase 2: join cache into gene evidence/capability profiles as `homology_evidence`.  
-Phase 3: expose homology evidence in KO/OE recommendation explanations.  
-Phase 4: after manual review, promote selected mappings into curated catalog or fixture data.
+- Round 0: target contract and current-state audit.
+- Round 1: build homology / name / rule-transfer audit cache outputs.
+- Round 2: expose cache through an app service facade.
+- Round 3: add the Streamlit audit browser.
+- Round 4: join homology evidence into KO/OE explanations without changing recommendation-tier science boundaries.
+- Round 5: add an offline external database crosscheck contract.
+- Round 6: update final docs and usage notes.
 
 At every phase, homology evidence remains separate from phenotype evidence and model executability.
