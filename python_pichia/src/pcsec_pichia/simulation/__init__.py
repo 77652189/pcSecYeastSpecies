@@ -46,6 +46,9 @@ class SecretionSimulationResult:
     growth_reaction_id: str = "BIOMASS"
     open_growth_reaction_ids: tuple[str, ...] = ("BIOMASS",)
     growth_reaction_status: str = "single_growth_reaction"
+    warnings: tuple[str, ...] = ()
+    solver_mode: str = "reference"
+    shadow_metadata: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)

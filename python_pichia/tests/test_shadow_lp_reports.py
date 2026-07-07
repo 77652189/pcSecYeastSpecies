@@ -8,6 +8,7 @@ from pcsec_pichia.analysis.shadow_lp import (
     ShadowHardcodeAuditResult,
     ShadowLadderLayerResult,
     ShadowLadderResult,
+    render_shadow_ladder_markdown,
     render_shadow_ladder_report_payload,
     write_shadow_ladder_report,
 )
@@ -20,11 +21,15 @@ def test_shadow_ladder_report_payload_contains_required_sections() -> None:
     payload = render_shadow_ladder_report_payload((ladder,), audit=audit)
 
     assert payload["summary"]["default_large_model_backend"] == "ScipyHighsBackend"
+    assert payload["summary"]["production_default_solver_mode"] == "reference"
     assert payload["summary"]["canonical_final_layer"] == "mitochondrial"
     assert payload["final_objectives"]["hLF"]["objective_rel_diff"] == 0.0
     assert "constraint_counts" in payload
     assert "backend_metadata" in payload
     assert "ribosome_translation" in payload["skipped_layers"]["hLF"]
+    assert "compare_mode_summary" in payload
+    assert "validation_matrix" in payload
+    assert "status_mismatches" in payload
     assert payload["no_hardcode_audit"]["passed"] is True
 
 
@@ -43,6 +48,55 @@ def test_shadow_ladder_json_and_markdown_reports_are_written_under_local_runs() 
     assert "backend" in markdown.lower()
     assert "mg/L" not in markdown
     assert "absolute fermentation titer" in markdown
+    assert "Compare Mode Summary" in markdown
+    assert "Validation Matrix" in markdown
+    assert "Status Mismatches" in markdown
+
+
+def test_shadow_ladder_report_payload_accepts_compare_and_validation_matrix_sections() -> None:
+    comparison = {
+        "target_id": "hLF",
+        "growth_rate": 0.1,
+        "objective_rel_diff": 0.0,
+        "constraint_count_diff": 0,
+        "within_tolerance": True,
+        "reference_status_category": "optimal",
+        "shadow_status_category": "optimal",
+    }
+    matrix = {
+        "cases": (
+            {
+                "target_id": "hLF",
+                "growth_rate": 0.1,
+                "reference_status": "optimal",
+                "shadow_status": "optimal",
+                "objective_rel_diff": 0.0,
+                "alignment_status": "aligned",
+            },
+            {
+                "target_id": "OPN_ALPHA_FULL_PROJECT",
+                "growth_rate": 0.15,
+                "reference_status": "optimal",
+                "shadow_status": "exception",
+                "objective_rel_diff": None,
+                "alignment_status": "review_required",
+            },
+        ),
+        "all_required_defaults_aligned": True,
+    }
+
+    payload = render_shadow_ladder_report_payload(
+        (_synthetic_ladder(),),
+        audit=_passing_audit(),
+        comparisons=(comparison,),
+        validation_matrix=matrix,
+    )
+    markdown = render_shadow_ladder_markdown(payload)
+
+    assert payload["compare_mode_summary"][0]["within_tolerance"] is True
+    assert payload["validation_matrix"]["all_required_defaults_aligned"] is True
+    assert len(payload["status_mismatches"]) == 1
+    assert "reference=optimal, shadow=exception" in markdown
 
 
 def _synthetic_ladder() -> ShadowLadderResult:

@@ -46,14 +46,30 @@ class ShadowHardcodeAuditResult:
 def render_shadow_ladder_report_payload(
     ladders: Iterable[ShadowLadderResult],
     audit: ShadowHardcodeAuditResult | None = None,
+    comparisons: Iterable[Any] = (),
+    validation_matrix: Any | None = None,
 ) -> dict[str, Any]:
     resolved_ladders = tuple(ladders)
     resolved_audit = audit or run_shadow_hardcode_audit()
+    comparison_payloads = tuple(_to_dict(item) for item in comparisons)
+    matrix_payload = None if validation_matrix is None else _to_dict(validation_matrix)
+    status_mismatches = tuple(
+        row
+        for row in comparison_payloads
+        if row.get("reference_status_category") != row.get("shadow_status_category")
+    )
+    if matrix_payload is not None:
+        status_mismatches = status_mismatches + tuple(
+            row
+            for row in matrix_payload.get("cases", ())
+            if row.get("reference_status") != row.get("shadow_status")
+        )
     return {
         "summary": {
             "target_ids": tuple(ladder.target_id for ladder in resolved_ladders),
             "default_large_model_backend": "ScipyHighsBackend",
             "canonical_final_layer": "mitochondrial",
+            "production_default_solver_mode": "reference",
             "no_absolute_yield_statement": NO_ABSOLUTE_YIELD_STATEMENT,
         },
         "targets": [ladder.to_dict() for ladder in resolved_ladders],
@@ -106,6 +122,9 @@ def render_shadow_ladder_report_payload(
             )
             for ladder in resolved_ladders
         },
+        "compare_mode_summary": comparison_payloads,
+        "validation_matrix": matrix_payload,
+        "status_mismatches": status_mismatches,
         "no_hardcode_audit": resolved_audit.to_dict(),
     }
 
@@ -115,9 +134,16 @@ def write_shadow_ladder_report(
     output_dir: Path,
     stem: str = "shadow_lp_ladder_report",
     audit: ShadowHardcodeAuditResult | None = None,
+    comparisons: Iterable[Any] = (),
+    validation_matrix: Any | None = None,
 ) -> tuple[Path, Path]:
     output_dir.mkdir(parents=True, exist_ok=True)
-    payload = render_shadow_ladder_report_payload(ladders, audit=audit)
+    payload = render_shadow_ladder_report_payload(
+        ladders,
+        audit=audit,
+        comparisons=comparisons,
+        validation_matrix=validation_matrix,
+    )
     json_path = output_dir / f"{stem}.json"
     markdown_path = output_dir / f"{stem}.md"
     json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -172,7 +198,70 @@ def render_shadow_ladder_markdown(payload: Mapping[str, Any]) -> str:
             "## Backend Metadata",
             "",
             f"- Default large-model backend: {payload['summary']['default_large_model_backend']}",
+            f"- Production default solver mode: {payload['summary']['production_default_solver_mode']}",
             f"- No-hardcode audit passed: {payload['no_hardcode_audit']['passed']}",
+            "",
+            "## Compare Mode Summary",
+            "",
+        ]
+    )
+    comparisons = payload.get("compare_mode_summary") or ()
+    if comparisons:
+        lines.extend(
+            [
+                "| target | growth rate | rel diff | constraint diff | within tolerance |",
+                "|---|---:|---:|---:|---|",
+            ]
+        )
+        for row in comparisons:
+            lines.append(
+                f"| {row['target_id']} | {_fmt(row['growth_rate'])} | "
+                f"{_fmt(row['objective_rel_diff'])} | {_fmt(row['constraint_count_diff'])} | "
+                f"{row['within_tolerance']} |"
+            )
+    else:
+        lines.append("- No compare-mode rows provided.")
+    lines.extend(
+        [
+            "",
+            "## Validation Matrix",
+            "",
+        ]
+    )
+    matrix = payload.get("validation_matrix")
+    if matrix:
+        lines.extend(
+            [
+                "| target | growth rate | reference status | shadow status | rel diff | alignment |",
+                "|---|---:|---|---|---:|---|",
+            ]
+        )
+        for row in matrix.get("cases", ()):
+            lines.append(
+                f"| {row['target_id']} | {_fmt(row['growth_rate'])} | {row['reference_status']} | "
+                f"{row['shadow_status']} | {_fmt(row['objective_rel_diff'])} | {row['alignment_status']} |"
+            )
+    else:
+        lines.append("- No validation matrix provided.")
+    lines.extend(
+        [
+            "",
+            "## Status Mismatches",
+            "",
+        ]
+    )
+    mismatches = payload.get("status_mismatches") or ()
+    if mismatches:
+        for row in mismatches:
+            target_id = row.get("target_id", "unknown")
+            growth_rate = row.get("growth_rate", "")
+            reference_status = row.get("reference_status_category", row.get("reference_status"))
+            shadow_status = row.get("shadow_status_category", row.get("shadow_status"))
+            lines.append(f"- {target_id} at {_fmt(growth_rate)}: reference={reference_status}, shadow={shadow_status}")
+    else:
+        lines.append("- None.")
+    lines.extend(
+        [
             "",
             "## Warnings",
             "",
@@ -187,7 +276,7 @@ def render_shadow_ladder_markdown(payload: Mapping[str, Any]) -> str:
 def run_shadow_hardcode_audit(root: Path | None = None) -> ShadowHardcodeAuditResult:
     repo_root = root or Path(__file__).resolve().parents[5]
     shadow_dir = repo_root / "python_pichia" / "src" / "pcsec_pichia" / "analysis" / "shadow_lp"
-    validation_only = ("validation.py",)
+    validation_only = ("validation.py", "comparison.py")
     audit_only = ("reports.py",)
     production_files = tuple(
         sorted(
@@ -237,6 +326,14 @@ def _objective_changes(ladder: ShadowLadderResult) -> tuple[dict[str, float | No
         if layer.objective is not None:
             previous = layer.objective
     return tuple(rows)
+
+
+def _to_dict(item: Any) -> dict[str, Any]:
+    if hasattr(item, "to_dict"):
+        return item.to_dict()
+    if isinstance(item, Mapping):
+        return dict(item)
+    raise TypeError(f"Report payload item is not serializable: {type(item)!r}")
 
 
 def _fmt(value: Any) -> str:
