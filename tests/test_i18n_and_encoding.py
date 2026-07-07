@@ -28,14 +28,18 @@ def test_user_facing_python_files_have_no_mojibake() -> None:
 
 def test_streamlit_entrypoint_keeps_all_demo_pages() -> None:
     text = Path("app/ui/streamlit_app.py").read_text(encoding="utf-8")
+    common_text = Path("app/ui/common.py").read_text(encoding="utf-8")
 
     assert "项目总览" in text
     assert "结果浏览" in text
     assert "仿真验证" in text
+    assert "基因命名与同源规则审计" in common_text
+    assert "HOMOLOGY_AUDIT_PAGE" in text
     assert "运行日志" in text
     assert "render_overview" in text
     assert "render_results_browser" in text
     assert "render_simulation" in text
+    assert "render_homology_audit" in text
     assert "render_logs" in text
 
 

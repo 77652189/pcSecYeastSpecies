@@ -14,8 +14,9 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-from app.ui.common import app_css, page_header, sidebar_navigation  # noqa: E402
+from app.ui.common import HOMOLOGY_AUDIT_PAGE, app_css, page_header, sidebar_navigation  # noqa: E402
 from app.ui.views.genome_wide_screen import render_genome_wide_screen  # noqa: E402
+from app.ui.views.homology_audit import render_homology_audit  # noqa: E402
 from app.ui.views.logs import render_logs  # noqa: E402
 from app.ui.views.overview import render_overview  # noqa: E402
 from app.ui.views.results import render_results_browser  # noqa: E402
@@ -42,6 +43,8 @@ def main() -> None:
         _render_simulation_reloaded()
     elif page == "全基因组KO/OE筛查":
         render_genome_wide_screen()
+    elif page == HOMOLOGY_AUDIT_PAGE:
+        render_homology_audit()
     elif page == "运行日志":
         render_logs()
     else:

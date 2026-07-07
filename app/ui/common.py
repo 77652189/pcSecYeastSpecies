@@ -168,6 +168,7 @@ def page_header() -> None:
 
 
 NAV_RADIO_KEY = "app_page_nav"
+HOMOLOGY_AUDIT_PAGE = "基因命名与同源规则审计"
 # Streamlit forbids writing to st.session_state[key] once that key's widget has
 # rendered in the current script run (raises StreamlitAPIException) - and the nav
 # radio below always renders first, before any page-specific code runs. So a page
@@ -189,7 +190,7 @@ def sidebar_navigation() -> str:
     st.sidebar.title("演示导航")
     page = st.sidebar.radio(
         "选择功能",
-        ["项目总览", "结果浏览", "仿真验证", "全基因组KO/OE筛查", "运行日志"],
+        ["项目总览", "结果浏览", "仿真验证", "全基因组KO/OE筛查", HOMOLOGY_AUDIT_PAGE, "运行日志"],
         index=0,
         key=NAV_RADIO_KEY,
     )
@@ -201,8 +202,9 @@ def sidebar_navigation() -> str:
         1. 项目总览
         2. 结果浏览
         3. 全基因组KO/OE筛查（探索：找出哪些基因值得关注）
-        4. 仿真验证（核实：可从筛查结果候选行直接跳转过来并自动填好靶点/基因）
-        5. 运行日志
+        4. 基因命名与同源规则审计（复核：查看离线 BLAST/RBH 证据和规则迁移状态）
+        5. 仿真验证（核实：可从筛查结果候选行直接跳转过来并自动填好靶点/基因）
+        6. 运行日志
         """
     )
     if page == "结果浏览":
