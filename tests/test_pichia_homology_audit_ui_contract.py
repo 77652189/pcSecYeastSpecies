@@ -42,6 +42,14 @@ def test_homology_audit_view_uses_service_facade_not_engine_runtime() -> None:
     assert not {"run_blastp", "make_blast_db", "makeblastdb"} & called_names
 
 
+def test_homology_audit_name_table_includes_external_crosscheck_columns() -> None:
+    import app.ui.views.homology_audit as view
+
+    assert "external_crosscheck_status" in view.NAME_AUDIT_COLUMNS
+    assert "external_crosscheck_sources" in view.NAME_AUDIT_COLUMNS
+    assert "external_crosscheck_warnings" in view.NAME_AUDIT_COLUMNS
+
+
 def test_homology_audit_page_handles_missing_cache_without_crashing(monkeypatch) -> None:
     import app.ui.views.homology_audit as view
 

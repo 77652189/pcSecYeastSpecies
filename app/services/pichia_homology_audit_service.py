@@ -213,6 +213,9 @@ def _row_matches_query(row: dict[str, Any], query_text: str) -> bool:
         row.get("pichia_gene_id"),
         row.get("pichia_model_gene_id"),
         row.get("external_accession"),
+        row.get("external_crosscheck_status"),
+        row.get("external_crosscheck_sources"),
+        row.get("external_crosscheck_warnings"),
     )
     return any(query_text in str(value or "").lower() for value in searchable)
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +10,8 @@ from pcsec_pichia.homology.cache_schema import (
     BlastConfig,
     CatalogHomologyQuery,
     CacheWriteResult,
+    ExternalDatabaseCrosscheck,
+    ExternalNameReference,
     HomologyAuditSummary,
     HomologyCrosswalkRow,
     NameAuditRow,
@@ -18,7 +20,14 @@ from pcsec_pichia.homology.cache_schema import (
     RuleTransferAuditRow,
 )
 from pcsec_pichia.homology.review_rules import (
+    EXTERNAL_ALIAS_CONFIRMED,
+    EXTERNAL_CONFLICT,
+    EXTERNAL_CROSSCHECK_NOT_AVAILABLE,
+    EXTERNAL_LOCUS_CONFIRMED,
+    EXTERNAL_MATCH_CONFIRMED,
+    EXTERNAL_REFERENCE_INCOMPLETE,
     classify_homology_review_status,
+    classify_external_name_crosscheck,
     classify_name_consistency,
     classify_rule_transfer_status,
 )
@@ -109,7 +118,10 @@ def build_homology_crosswalk(
     return tuple(rows)
 
 
-def build_name_audit_rows(crosswalk: tuple[HomologyCrosswalkRow, ...]) -> tuple[NameAuditRow, ...]:
+def build_name_audit_rows(
+    crosswalk: tuple[HomologyCrosswalkRow, ...],
+    external_references: tuple[ExternalNameReference, ...] = (),
+) -> tuple[NameAuditRow, ...]:
     """Build name-audit rows while keeping model operability separate."""
 
     rows: list[NameAuditRow] = []
@@ -140,7 +152,82 @@ def build_name_audit_rows(crosswalk: tuple[HomologyCrosswalkRow, ...]) -> tuple[
                 warnings=row.warnings,
             )
         )
-    return tuple(rows)
+    name_rows = tuple(rows)
+    if not external_references:
+        return name_rows
+    crosschecks = build_external_database_crosschecks(name_rows, external_references)
+    return merge_external_crosschecks_into_name_audit(name_rows, crosschecks)
+
+
+def build_external_database_crosschecks(
+    name_rows: tuple[NameAuditRow, ...],
+    external_references: tuple[ExternalNameReference, ...],
+) -> tuple[ExternalDatabaseCrosscheck, ...]:
+    """Build offline external database name crosschecks for name-audit rows."""
+
+    crosschecks: list[ExternalDatabaseCrosscheck] = []
+    references = tuple(sorted(external_references, key=_external_reference_sort_key))
+    for row in name_rows:
+        matches = [reference for reference in references if _reference_matches_name_row(row, reference)]
+        if not matches:
+            crosschecks.append(_not_available_crosscheck(row))
+            continue
+        for reference in matches:
+            status, warnings = classify_external_name_crosscheck(
+                internal_common_name=row.internal_common_name,
+                external_gene_name=row.external_gene_name,
+                external_locus_tag=row.external_locus_tag,
+                external_aliases=row.external_aliases,
+                reference_gene_name=reference.gene_name,
+                reference_locus_tag=reference.locus_tag,
+                reference_aliases=reference.aliases,
+            )
+            crosschecks.append(
+                ExternalDatabaseCrosscheck(
+                    internal_gene_id=row.internal_gene_id,
+                    internal_common_name=row.internal_common_name,
+                    internal_sequence_id=row.internal_sequence_id,
+                    external_accession=row.external_accession,
+                    source_database=reference.source_database,
+                    source_version=reference.source_version,
+                    taxon=reference.taxon,
+                    accession=reference.accession,
+                    gene_name=reference.gene_name,
+                    locus_tag=reference.locus_tag,
+                    aliases=reference.aliases,
+                    retrieved_at=reference.retrieved_at,
+                    match_status=status,
+                    warnings=(*reference.warnings, *warnings),
+                )
+            )
+    return tuple(crosschecks)
+
+
+def merge_external_crosschecks_into_name_audit(
+    name_rows: tuple[NameAuditRow, ...],
+    crosschecks: tuple[ExternalDatabaseCrosscheck, ...],
+) -> tuple[NameAuditRow, ...]:
+    """Attach external crosscheck status to name-audit rows without changing RBH fields."""
+
+    crosschecks_by_key: dict[tuple[str, str, str, str], list[ExternalDatabaseCrosscheck]] = {}
+    for crosscheck in crosschecks:
+        crosschecks_by_key.setdefault(_crosscheck_key(crosscheck), []).append(crosscheck)
+
+    merged: list[NameAuditRow] = []
+    for row in name_rows:
+        row_crosschecks = tuple(crosschecks_by_key.get(_name_audit_key(row), ()))
+        status = _combined_external_status(row_crosschecks)
+        sources = _external_crosscheck_sources(row_crosschecks)
+        warnings = _external_crosscheck_warnings(row_crosschecks)
+        merged.append(
+            replace(
+                row,
+                external_crosscheck_status=status,
+                external_crosscheck_sources=sources,
+                external_crosscheck_warnings=warnings,
+            )
+        )
+    return tuple(merged)
 
 
 def build_rule_transfer_audit_rows(crosswalk: tuple[HomologyCrosswalkRow, ...]) -> tuple[RuleTransferAuditRow, ...]:
@@ -260,8 +347,10 @@ def load_name_audit_cache(path: Path) -> tuple[NameAuditRow, ...]:
             NameAuditRow(
                 **{
                     **payload,
-                    "external_aliases": tuple(payload.get("external_aliases", ())),
-                    "warnings": tuple(payload.get("warnings", ())),
+                    "external_aliases": _tuple_from_payload(payload.get("external_aliases")),
+                    "external_crosscheck_sources": _tuple_from_payload(payload.get("external_crosscheck_sources")),
+                    "external_crosscheck_warnings": _tuple_from_payload(payload.get("external_crosscheck_warnings")),
+                    "warnings": _tuple_from_payload(payload.get("warnings")),
                 }
             )
         )
@@ -280,6 +369,13 @@ def load_rule_transfer_audit_cache(path: Path) -> tuple[RuleTransferAuditRow, ..
             )
         )
     return tuple(rows)
+
+
+def load_external_name_reference_cache(path: Path) -> tuple[ExternalNameReference, ...]:
+    """Load offline external name references from JSONL or TSV without network access."""
+
+    payloads = _read_tsv(path) if path.suffix.lower() == ".tsv" else _read_jsonl(path)
+    return tuple(_external_name_reference_from_payload(payload) for payload in payloads)
 
 
 def _sce_symbol_lookup(records: tuple[ProteinRecord, ...]) -> dict[str, ProteinRecord]:
@@ -385,3 +481,153 @@ def _count_by(rows: tuple[Any, ...], attribute: str) -> dict[str, int]:
         value = str(getattr(row, attribute))
         counts[value] = counts.get(value, 0) + 1
     return dict(sorted(counts.items()))
+
+
+def _external_name_reference_from_payload(payload: dict[str, object]) -> ExternalNameReference:
+    return ExternalNameReference(
+        source_database=str(payload.get("source_database") or ""),
+        source_version=str(payload.get("source_version") or ""),
+        taxon=str(payload.get("taxon") or ""),
+        accession=str(payload.get("accession") or ""),
+        gene_name=str(payload.get("gene_name") or ""),
+        locus_tag=str(payload.get("locus_tag") or ""),
+        aliases=_tuple_from_payload(payload.get("aliases")),
+        retrieved_at=str(payload.get("retrieved_at") or ""),
+        warnings=_tuple_from_payload(payload.get("warnings")),
+    )
+
+
+def _not_available_crosscheck(row: NameAuditRow) -> ExternalDatabaseCrosscheck:
+    return ExternalDatabaseCrosscheck(
+        internal_gene_id=row.internal_gene_id,
+        internal_common_name=row.internal_common_name,
+        internal_sequence_id=row.internal_sequence_id,
+        external_accession=row.external_accession,
+        match_status=EXTERNAL_CROSSCHECK_NOT_AVAILABLE,
+    )
+
+
+def _reference_matches_name_row(row: NameAuditRow, reference: ExternalNameReference) -> bool:
+    accession_matches = bool(
+        row.external_accession
+        and reference.accession
+        and _normalize_crosscheck_token(row.external_accession) == _normalize_crosscheck_token(reference.accession)
+    )
+    locus_candidates = (row.external_locus_tag, row.internal_gene_id)
+    locus_matches = any(
+        candidate
+        and reference.locus_tag
+        and _normalize_crosscheck_token(candidate) == _normalize_crosscheck_token(reference.locus_tag)
+        for candidate in locus_candidates
+    )
+    if accession_matches or locus_matches:
+        return True
+
+    row_names = _name_row_tokens(row)
+    reference_names = {
+        token
+        for token in (
+            _normalize_crosscheck_token(reference.gene_name),
+            *(_normalize_crosscheck_token(alias) for alias in reference.aliases),
+        )
+        if token
+    }
+    return bool(row_names & reference_names)
+
+
+def _name_row_tokens(row: NameAuditRow) -> set[str]:
+    tokens: set[str] = set()
+    for value in (row.internal_common_name, row.external_gene_name, *row.external_aliases):
+        text = str(value or "").replace("/", " ").replace(",", " ").replace(";", " ")
+        tokens.update(_normalize_crosscheck_token(token) for token in text.split())
+    return {token for token in tokens if token}
+
+
+def _combined_external_status(crosschecks: tuple[ExternalDatabaseCrosscheck, ...]) -> str:
+    statuses = [crosscheck.match_status for crosscheck in crosschecks if crosscheck.match_status]
+    if not statuses:
+        return EXTERNAL_CROSSCHECK_NOT_AVAILABLE
+    priority = (
+        EXTERNAL_CONFLICT,
+        EXTERNAL_MATCH_CONFIRMED,
+        EXTERNAL_ALIAS_CONFIRMED,
+        EXTERNAL_LOCUS_CONFIRMED,
+        EXTERNAL_REFERENCE_INCOMPLETE,
+        EXTERNAL_CROSSCHECK_NOT_AVAILABLE,
+    )
+    for status in priority:
+        if status in statuses:
+            return status
+    return statuses[0]
+
+
+def _external_crosscheck_sources(crosschecks: tuple[ExternalDatabaseCrosscheck, ...]) -> tuple[str, ...]:
+    sources: list[str] = []
+    for crosscheck in crosschecks:
+        if not crosscheck.source_database:
+            continue
+        source = crosscheck.source_database
+        if crosscheck.source_version:
+            source = f"{source}:{crosscheck.source_version}"
+        if crosscheck.accession:
+            source = f"{source}:{crosscheck.accession}"
+        sources.append(source)
+    return tuple(sorted(dict.fromkeys(sources)))
+
+
+def _external_crosscheck_warnings(crosschecks: tuple[ExternalDatabaseCrosscheck, ...]) -> tuple[str, ...]:
+    warnings = [
+        str(warning)
+        for crosscheck in crosschecks
+        for warning in crosscheck.warnings
+        if str(warning).strip()
+    ]
+    return tuple(dict.fromkeys(warnings))
+
+
+def _external_reference_sort_key(reference: ExternalNameReference) -> tuple[str, str, str, str]:
+    return (
+        reference.source_database,
+        reference.source_version,
+        reference.accession,
+        reference.locus_tag,
+    )
+
+
+def _name_audit_key(row: NameAuditRow) -> tuple[str, str, str, str]:
+    return (
+        row.internal_common_name,
+        row.internal_sequence_id,
+        row.external_accession,
+        row.internal_gene_id,
+    )
+
+
+def _crosscheck_key(crosscheck: ExternalDatabaseCrosscheck) -> tuple[str, str, str, str]:
+    return (
+        crosscheck.internal_common_name,
+        crosscheck.internal_sequence_id,
+        crosscheck.external_accession,
+        crosscheck.internal_gene_id,
+    )
+
+
+def _normalize_crosscheck_token(value: object) -> str:
+    return str(value or "").strip().upper().replace(" ", "").replace("_", "").replace("-", "")
+
+
+def _tuple_from_payload(value: object) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, (list, tuple)):
+        return tuple(str(item).strip() for item in value if str(item).strip())
+    text = str(value).strip()
+    if not text:
+        return ()
+    return tuple(part.strip() for part in text.split(";") if part.strip())
+
+
+def _read_tsv(path: Path) -> list[dict[str, object]]:
+    with path.open("r", encoding="utf-8", newline="") as handle:
+        reader = csv.DictReader(handle, delimiter="\t")
+        return [dict(row) for row in reader]

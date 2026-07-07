@@ -6,22 +6,31 @@ from pcsec_pichia.homology.cache_schema import (
     BlastConfig,
     BlastHit,
     CatalogHomologyQuery,
+    ExternalNameReference,
+    NameAuditRow,
     ProteinRecord,
     ReciprocalBestHit,
 )
 from pcsec_pichia.homology.crosswalk import (
+    build_external_database_crosschecks,
     build_homology_crosswalk,
     build_name_audit_rows,
     build_rule_transfer_audit_rows,
+    load_external_name_reference_cache,
     load_homology_cache,
     load_name_audit_cache,
     load_rule_transfer_audit_cache,
+    merge_external_crosschecks_into_name_audit,
     summarize_homology_audits,
     write_homology_cache,
     write_name_audit_cache,
     write_rule_transfer_audit_cache,
 )
 from pcsec_pichia.homology.review_rules import (
+    EXTERNAL_ALIAS_CONFIRMED,
+    EXTERNAL_CONFLICT,
+    EXTERNAL_LOCUS_CONFIRMED,
+    EXTERNAL_MATCH_CONFIRMED,
     LOW_IDENTITY_REVIEW_REQUIRED,
     MODEL_READY_RBH_HIGH_CONFIDENCE,
     NO_RECIPROCAL_HIT,
@@ -153,6 +162,75 @@ def test_build_name_audit_rows_flags_name_conflict() -> None:
     assert audit[0].name_consistency_status == "sequence_name_conflict"
 
 
+def test_external_reference_cache_loads_jsonl_and_tsv(tmp_path: Path) -> None:
+    jsonl = tmp_path / "external_refs.jsonl"
+    tsv = tmp_path / "external_refs.tsv"
+    jsonl.write_text(
+        (
+            '{"source_database":"UniProt","source_version":"2026_01","taxon":"Komagataella phaffii",'
+            '"accession":"C4R","gene_name":"KAR2","locus_tag":"PAS_chr2-1_0140",'
+            '"aliases":["BiP"],"retrieved_at":"2026-07-07","warnings":["offline snapshot"]}\n'
+        ),
+        encoding="utf-8",
+    )
+    tsv.write_text(
+        "\t".join(
+            [
+                "source_database",
+                "source_version",
+                "taxon",
+                "accession",
+                "gene_name",
+                "locus_tag",
+                "aliases",
+                "retrieved_at",
+                "warnings",
+            ]
+        )
+        + "\n"
+        + "\t".join(["SGD", "R64", "Saccharomyces cerevisiae", "S000001", "KAR2", "YJL034W", "BiP;GRP78", "2026-07-07", ""])
+        + "\n",
+        encoding="utf-8",
+    )
+
+    jsonl_refs = load_external_name_reference_cache(jsonl)
+    tsv_refs = load_external_name_reference_cache(tsv)
+
+    assert jsonl_refs[0].source_database == "UniProt"
+    assert jsonl_refs[0].aliases == ("BiP",)
+    assert jsonl_refs[0].warnings == ("offline snapshot",)
+    assert tsv_refs[0].source_database == "SGD"
+    assert tsv_refs[0].aliases == ("BiP", "GRP78")
+
+
+def test_external_crosscheck_merges_status_without_overriding_rbh_facts() -> None:
+    name_rows = (
+        _name_row("KAR2 / BiP", "YJL034W", "C4R", "KAR2", "PAS_chr2-1_0140"),
+        _name_row("DOA10", "YIL030C", "C4D", "DOA10", "PAS_chr3_0123"),
+        _name_row("VPS1", "YOR069W", "", "", "PAS_chr1_0440"),
+        _name_row("HRD1", "YOL013C", "C4H", "HRD1", "PAS_chr4_0156"),
+    )
+    references = (
+        ExternalNameReference("UniProt", "2026_01", "Komagataella phaffii", "C4R", "KAR2", "PAS_chr2-1_0140"),
+        ExternalNameReference("UniProt", "2026_01", "Komagataella phaffii", "C4D", "SSM4", "PAS_chr3_0123", ("DOA10",)),
+        ExternalNameReference("NCBI", "2026_01", "Komagataella phaffii", "", "", "PAS_chr1_0440"),
+        ExternalNameReference("UniProt", "2026_01", "Komagataella phaffii", "C4H", "PEP4", "PAS_chr4_0156"),
+    )
+
+    crosschecks = build_external_database_crosschecks(name_rows, references)
+    merged = merge_external_crosschecks_into_name_audit(name_rows, crosschecks)
+    by_name = {row.internal_common_name: row for row in merged}
+
+    assert by_name["KAR2 / BiP"].external_crosscheck_status == EXTERNAL_MATCH_CONFIRMED
+    assert by_name["DOA10"].external_crosscheck_status == EXTERNAL_ALIAS_CONFIRMED
+    assert by_name["VPS1"].external_crosscheck_status == EXTERNAL_LOCUS_CONFIRMED
+    assert by_name["HRD1"].external_crosscheck_status == EXTERNAL_CONFLICT
+    assert by_name["HRD1"].review_status == MODEL_READY_RBH_HIGH_CONFIDENCE
+    assert by_name["HRD1"].is_rbh is True
+    assert by_name["HRD1"].in_model_gene_index is True
+    assert by_name["HRD1"].external_crosscheck_warnings
+
+
 def test_rule_transfer_audit_rows_cover_ready_not_model_low_confidence_and_no_rbh() -> None:
     queries = (
         CatalogHomologyQuery(internal_common_name="KAR2", query_symbol="KAR2"),
@@ -251,3 +329,30 @@ def test_homology_audit_summary_counts_all_three_outputs() -> None:
     assert summary.homology_row_count == 1
     assert summary.name_audit_row_count == 1
     assert summary.rule_transfer_status_counts == {RULE_TRANSFER_READY: 1}
+
+
+def _name_row(
+    common_name: str,
+    sce_orf: str,
+    accession: str,
+    gene_name: str,
+    locus_tag: str,
+) -> NameAuditRow:
+    return NameAuditRow(
+        internal_gene_id=locus_tag,
+        internal_common_name=common_name,
+        internal_sequence_id=sce_orf,
+        external_accession=accession,
+        external_gene_name=gene_name,
+        external_locus_tag=locus_tag,
+        external_aliases=(),
+        identity_pct=75.0,
+        query_coverage=95.0,
+        subject_coverage=95.0,
+        evalue=1e-100,
+        is_rbh=True,
+        in_model_gene_index=True,
+        name_consistency_status="name_confirmed_by_rbh",
+        review_status=MODEL_READY_RBH_HIGH_CONFIDENCE,
+        warnings=(),
+    )

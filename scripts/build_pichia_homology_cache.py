@@ -18,6 +18,7 @@ from pcsec_pichia.homology.crosswalk import (
     build_homology_crosswalk,
     build_name_audit_rows,
     build_rule_transfer_audit_rows,
+    load_external_name_reference_cache,
     summarize_homology_audits,
     write_homology_cache,
     write_name_audit_cache,
@@ -100,7 +101,8 @@ def main(argv: list[str] | None = None) -> int:
     reverse_hits = parse_blast_tsv(reverse_tsv) if reverse_tsv.exists() else ()
     rbh_calls = compute_reciprocal_best_hits(forward_hits, reverse_hits)
     crosswalk = build_homology_crosswalk(queries, sce_records, pichia_records, model_gene_index, rbh_calls, config)
-    name_audit = build_name_audit_rows(crosswalk)
+    external_references = _load_external_references(args.external_name_reference_cache, root)
+    name_audit = build_name_audit_rows(crosswalk, external_references=external_references)
     rule_transfer_audit = build_rule_transfer_audit_rows(crosswalk)
     jsonl_path = output_dir / "sce_to_pichia_homology_cache.jsonl"
     tsv_path = output_dir / "sce_to_pichia_homology_cache.tsv"
@@ -130,6 +132,7 @@ def main(argv: list[str] | None = None) -> int:
                 "name_audit_row_count": name_write_result.row_count,
                 "name_audit_jsonl_path": str(name_jsonl_path),
                 "name_audit_tsv_path": str(name_tsv_path),
+                "external_name_reference_count": len(external_references),
                 "rule_transfer_row_count": rule_write_result.row_count,
                 "rule_transfer_jsonl_path": str(rule_jsonl_path),
                 "rule_transfer_tsv_path": str(rule_tsv_path),
@@ -156,6 +159,11 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--catalog-only", action="store_true")
     parser.add_argument("--skip-blast", action="store_true")
     parser.add_argument("--parse-existing", action="store_true")
+    parser.add_argument(
+        "--external-name-reference-cache",
+        default="",
+        help="Optional offline JSONL/TSV cache for future UniProt/NCBI/SGD/KEGG name crosschecks.",
+    )
     return parser.parse_args(argv)
 
 
@@ -259,6 +267,17 @@ def _all_sce_queries(records: tuple[ProteinRecord, ...]) -> tuple[CatalogHomolog
         )
         for record in records
     )
+
+
+def _load_external_references(cache_path: str, root: Path):
+    if not cache_path:
+        return ()
+    path = Path(cache_path)
+    if not path.is_absolute():
+        path = root / path
+    if not path.exists():
+        return ()
+    return load_external_name_reference_cache(path)
 
 
 def _write_summary(json_path: Path, md_path: Path, summary: object) -> None:

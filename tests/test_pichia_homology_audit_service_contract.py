@@ -45,6 +45,8 @@ def test_service_loads_and_filters_name_and_rule_transfer_audits(tmp_path: Path)
     assert len(payload["name_audit_rows"]) == 1
     assert len(payload["rule_transfer_audit_rows"]) == 1
     assert payload["name_audit_rows"][0]["name_consistency_status"] == "name_confirmed_by_rbh"
+    assert payload["name_audit_rows"][0]["external_crosscheck_status"] == "external_match_confirmed"
+    assert payload["name_audit_rows"][0]["external_crosscheck_sources"] == ["UniProt:2026_01:C4R"]
     assert payload["rule_transfer_audit_rows"][0]["rule_transfer_status"] == "rule_transfer_ready"
 
 
@@ -120,6 +122,9 @@ def _write_cache_run(path: Path) -> Path:
             in_model_gene_index=True,
             name_consistency_status="name_confirmed_by_rbh",
             review_status="model_ready_rbh_high_confidence",
+            external_crosscheck_status="external_match_confirmed",
+            external_crosscheck_sources=("UniProt:2026_01:C4R",),
+            external_crosscheck_warnings=(),
             warnings=(),
         ),
         NameAuditRow(

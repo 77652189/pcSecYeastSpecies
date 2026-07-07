@@ -23,6 +23,13 @@ RULE_TRANSFER_PARALOG_RISK = "rule_transfer_paralog_risk"
 RULE_TRANSFER_UNRESOLVED = "rule_transfer_unresolved"
 RULE_TRANSFER_NOT_SUPPORTED = "rule_transfer_not_supported"
 
+EXTERNAL_CROSSCHECK_NOT_AVAILABLE = "not_available"
+EXTERNAL_MATCH_CONFIRMED = "external_match_confirmed"
+EXTERNAL_ALIAS_CONFIRMED = "external_alias_confirmed"
+EXTERNAL_LOCUS_CONFIRMED = "external_locus_confirmed"
+EXTERNAL_CONFLICT = "external_conflict"
+EXTERNAL_REFERENCE_INCOMPLETE = "external_reference_incomplete"
+
 
 def classify_homology_review_status(
     *,
@@ -114,6 +121,41 @@ def classify_rule_transfer_status(
     return RULE_TRANSFER_NOT_SUPPORTED, (f"unsupported homology status: {homology_review_status}",)
 
 
+def classify_external_name_crosscheck(
+    *,
+    internal_common_name: str,
+    external_gene_name: str | None,
+    external_locus_tag: str | None,
+    external_aliases: tuple[str, ...] = (),
+    reference_gene_name: str | None,
+    reference_locus_tag: str | None,
+    reference_aliases: tuple[str, ...] = (),
+) -> tuple[str, tuple[str, ...]]:
+    """Classify offline external database agreement without changing RBH facts."""
+
+    candidate_names = _candidate_name_tokens(
+        internal_common_name=internal_common_name,
+        external_gene_name=external_gene_name,
+        external_aliases=external_aliases,
+    )
+    reference_name = _normalize_name(reference_gene_name or "")
+    reference_alias_names = {_normalize_name(alias) for alias in reference_aliases if alias}
+    candidate_locus = _normalize_name(external_locus_tag or "")
+    reference_locus = _normalize_name(reference_locus_tag or "")
+
+    if reference_name and reference_name in candidate_names:
+        return EXTERNAL_MATCH_CONFIRMED, ()
+    if candidate_names & reference_alias_names:
+        return EXTERNAL_ALIAS_CONFIRMED, ()
+    if reference_name or reference_alias_names:
+        return EXTERNAL_CONFLICT, (
+            "external reference name or alias does not match current RBH-derived name fields",
+        )
+    if candidate_locus and reference_locus and candidate_locus == reference_locus:
+        return EXTERNAL_LOCUS_CONFIRMED, ()
+    return EXTERNAL_REFERENCE_INCOMPLETE, ("external reference lacks comparable name, alias, or locus data",)
+
+
 def _normalize_name(value: str) -> str:
     return value.strip().upper().replace(" ", "").replace("_", "").replace("-", "")
 
@@ -121,3 +163,17 @@ def _normalize_name(value: str) -> str:
 def _split_name_tokens(value: str) -> set[str]:
     normalized = value.replace("/", " ").replace(",", " ").replace(";", " ")
     return {_normalize_name(token) for token in normalized.split() if token}
+
+
+def _candidate_name_tokens(
+    *,
+    internal_common_name: str,
+    external_gene_name: str | None,
+    external_aliases: tuple[str, ...],
+) -> set[str]:
+    names = _split_name_tokens(internal_common_name)
+    external = _normalize_name(external_gene_name or "")
+    if external:
+        names.add(external)
+    names.update(_normalize_name(alias) for alias in external_aliases if alias)
+    return {name for name in names if name}

@@ -2,6 +2,11 @@ from __future__ import annotations
 
 from pcsec_pichia.homology.review_rules import (
     ALIAS_CONFIRMED_BY_RBH,
+    EXTERNAL_ALIAS_CONFIRMED,
+    EXTERNAL_CONFLICT,
+    EXTERNAL_LOCUS_CONFIRMED,
+    EXTERNAL_MATCH_CONFIRMED,
+    EXTERNAL_REFERENCE_INCOMPLETE,
     LOW_IDENTITY_REVIEW_REQUIRED,
     MODEL_READY_RBH_HIGH_CONFIDENCE,
     NO_RECIPROCAL_HIT,
@@ -13,6 +18,7 @@ from pcsec_pichia.homology.review_rules import (
     RULE_TRANSFER_SUPPORTED_NOT_MODEL_OPERABLE,
     RULE_TRANSFER_UNRESOLVED,
     SEQUENCE_NAME_CONFLICT,
+    classify_external_name_crosscheck,
     classify_homology_review_status,
     classify_name_consistency,
     classify_rule_transfer_status,
@@ -133,3 +139,60 @@ def test_rule_transfer_statuses_preserve_model_and_confidence_boundaries() -> No
     assert low_confidence == RULE_TRANSFER_LOW_CONFIDENCE
     assert unresolved == RULE_TRANSFER_UNRESOLVED
     assert not_supported == RULE_TRANSFER_NOT_SUPPORTED
+
+
+def test_external_name_crosscheck_classifies_name_alias_locus_and_conflict() -> None:
+    name_status, name_warnings = classify_external_name_crosscheck(
+        internal_common_name="KAR2 / BiP",
+        external_gene_name="KAR2",
+        external_locus_tag="PAS_chr2-1_0140",
+        external_aliases=(),
+        reference_gene_name="KAR2",
+        reference_locus_tag="PAS_chr2-1_0140",
+        reference_aliases=(),
+    )
+    alias_status, _ = classify_external_name_crosscheck(
+        internal_common_name="DOA10",
+        external_gene_name="DOA10",
+        external_locus_tag="PAS_chr3_0123",
+        external_aliases=(),
+        reference_gene_name="SSM4",
+        reference_locus_tag="PAS_chr3_0123",
+        reference_aliases=("DOA10",),
+    )
+    locus_status, _ = classify_external_name_crosscheck(
+        internal_common_name="VPS1",
+        external_gene_name="",
+        external_locus_tag="PAS_chr1_0440",
+        external_aliases=(),
+        reference_gene_name="",
+        reference_locus_tag="PAS_chr1_0440",
+        reference_aliases=(),
+    )
+    conflict_status, conflict_warnings = classify_external_name_crosscheck(
+        internal_common_name="HRD1",
+        external_gene_name="HRD1",
+        external_locus_tag="PAS_chr4_0156",
+        external_aliases=(),
+        reference_gene_name="PEP4",
+        reference_locus_tag="PAS_chr4_0156",
+        reference_aliases=(),
+    )
+    incomplete_status, incomplete_warnings = classify_external_name_crosscheck(
+        internal_common_name="SEC12",
+        external_gene_name="",
+        external_locus_tag="",
+        external_aliases=(),
+        reference_gene_name="",
+        reference_locus_tag="",
+        reference_aliases=(),
+    )
+
+    assert name_status == EXTERNAL_MATCH_CONFIRMED
+    assert name_warnings == ()
+    assert alias_status == EXTERNAL_ALIAS_CONFIRMED
+    assert locus_status == EXTERNAL_LOCUS_CONFIRMED
+    assert conflict_status == EXTERNAL_CONFLICT
+    assert "does not match" in conflict_warnings[0]
+    assert incomplete_status == EXTERNAL_REFERENCE_INCOMPLETE
+    assert "lacks comparable" in incomplete_warnings[0]

@@ -108,6 +108,19 @@ class HomologyCrosswalkRow:
 
 
 @dataclass(frozen=True)
+class ExternalNameReference:
+    source_database: str
+    source_version: str
+    taxon: str
+    accession: str = ""
+    gene_name: str = ""
+    locus_tag: str = ""
+    aliases: tuple[str, ...] = field(default_factory=tuple)
+    retrieved_at: str = ""
+    warnings: tuple[str, ...] = field(default_factory=tuple)
+
+
+@dataclass(frozen=True)
 class NameAuditRow:
     internal_gene_id: str
     internal_common_name: str
@@ -124,6 +137,27 @@ class NameAuditRow:
     in_model_gene_index: bool
     name_consistency_status: str
     review_status: str
+    external_crosscheck_status: str = "not_available"
+    external_crosscheck_sources: tuple[str, ...] = field(default_factory=tuple)
+    external_crosscheck_warnings: tuple[str, ...] = field(default_factory=tuple)
+    warnings: tuple[str, ...] = field(default_factory=tuple)
+
+
+@dataclass(frozen=True)
+class ExternalDatabaseCrosscheck:
+    internal_gene_id: str = ""
+    internal_common_name: str = ""
+    internal_sequence_id: str = ""
+    external_accession: str = ""
+    source_database: str = ""
+    source_version: str = ""
+    taxon: str = ""
+    accession: str = ""
+    gene_name: str = ""
+    locus_tag: str = ""
+    aliases: tuple[str, ...] = field(default_factory=tuple)
+    retrieved_at: str = ""
+    match_status: str = "not_available"
     warnings: tuple[str, ...] = field(default_factory=tuple)
 
 
