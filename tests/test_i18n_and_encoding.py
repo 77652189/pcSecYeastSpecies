@@ -43,5 +43,13 @@ def test_streamlit_internal_modules_do_not_use_reserved_pages_directory() -> Non
     assert not Path("app/ui/pages").exists()
 
 
+def test_app_css_does_not_fetch_external_font_assets() -> None:
+    text = Path("app/ui/common.py").read_text(encoding="utf-8")
+
+    assert "@import url(" not in text
+    assert "fonts.googleapis.com" not in text
+    assert "letter-spacing: -" not in text
+
+
 def _read_ui_text(*paths: str) -> str:
     return "\n".join(Path(path).read_text(encoding="utf-8") for path in paths)
