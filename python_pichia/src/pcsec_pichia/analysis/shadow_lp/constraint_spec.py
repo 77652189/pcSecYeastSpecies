@@ -31,6 +31,7 @@ class ConstraintBlock:
     mapped_reaction_count: int = 0
     missing_mapping_count: int = 0
     warnings: tuple[str, ...] = ()
+    metadata: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
