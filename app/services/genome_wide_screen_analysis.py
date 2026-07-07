@@ -106,7 +106,14 @@ def analyze_single_target(frame: pd.DataFrame, target_id: str) -> DimensionalRes
     target_rows = frame[frame.target_id == target_id].copy()
     _ensure_solver_outcome_columns(target_rows)
     ko = target_rows[target_rows.intervention_type == "KO"].dropna(subset=["secretion_ratio_vs_wildtype"])
-    oe = target_rows[target_rows.intervention_type == "OE"].dropna(subset=["secretion_ratio_vs_wildtype"])
+    # Excludes candidate_kind == "complex_oe_hypothesis" rows - those are surfaced separately
+    # below (complex_oe_hypothesis dimension) with their hypothesis_note caveat attached. A
+    # hypothesis row landing above SECRETION_UP_THRESHOLD would otherwise also qualify for
+    # oe_yield_up, which has no hypothesis_note column - readers would mistake an untested
+    # "same complex ratio applied wholesale" guess for an ordinary, individually-tested OE win.
+    oe = target_rows[
+        (target_rows.intervention_type == "OE") & (target_rows.candidate_kind != "complex_oe_hypothesis")
+    ].dropna(subset=["secretion_ratio_vs_wildtype"])
 
     display_cols = ["gene_id", "common_name", "candidate_kind"]
     solver_cols = [

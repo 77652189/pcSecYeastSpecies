@@ -490,8 +490,8 @@ def catalog_reaction_candidates() -> tuple[dict[str, Any], ...]:
 
     Most catalog entries were curated from literature that only reported one direction
     (usually OE) for a given complex-formation reaction - e.g. PDI1/ERO1/ERV2 only ever
-    had oe_reaction_id set, DOA10 only ever had ko_reaction_id set. But a reaction can
-    always be validly bounded to zero (KO) or scaled up (OE) regardless of which direction
+    had oe_reaction_id set. But a reaction can always be validly bounded to zero (KO) or
+    scaled up (OE) regardless of which direction
     the original paper happened to test; only screening the one direction the literature
     reported undersells what the model can actually tell you. Many entries are subunits of
     the same curated complex and share one reaction id (e.g. PDI1/ERO1/ERV2 all point to

@@ -377,6 +377,24 @@ def test_complex_oe_hypothesis_dimension_excludes_ordinary_oe_rows() -> None:
     assert list(result.oe_yield_up["gene_id"]) == ["G_ORDINARY"]
 
 
+def test_complex_oe_hypothesis_rows_above_threshold_do_not_leak_into_oe_yield_up() -> None:
+    """Regression test: a hypothesis row that happens to land above SECRETION_UP_THRESHOLD
+    used to also qualify for oe_yield_up (which has no hypothesis_note column), so a reader
+    could mistake an untested "same complex ratio applied wholesale" guess for an ordinary,
+    individually-verified OE win.
+    """
+    frame = _frame(
+        [
+            _row("R1", "OE", secretion_ratio=1.05, candidate_kind="complex_oe_hypothesis", hypothesis_note="note"),
+        ]
+    )
+
+    result = analyze_single_target(frame, "hLF")
+
+    assert list(result.complex_oe_hypothesis["gene_id"]) == ["R1"]
+    assert result.oe_yield_up.empty
+
+
 def test_to_summary_dict_includes_complex_oe_hypothesis() -> None:
     frame = _frame(
         [
