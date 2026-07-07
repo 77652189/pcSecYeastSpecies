@@ -23,6 +23,7 @@ from pcsec_pichia.pipeline import (
 from pcsec_pichia.screens import ScreenResult, plan_gene_overexpression, split_existing_genes
 from pcsec_pichia.screens.planning import _canonicalize_gene_ids, build_screen_plan
 from pcsec_pichia.services.gene_evidence import GeneExternalEvidence
+from pcsec_pichia.services.homology_evidence import GeneHomologyEvidence
 from pcsec_pichia.targets import target_spec_from_mapping
 
 
@@ -347,13 +348,27 @@ def test_pipeline_gene_evidence_annotation_uses_injected_cache_when_cwd_differs(
             evidence_confidence="high_exact_locus_tag",
         )
     }
+    homology = {
+        "G1": GeneHomologyEvidence(
+            gene_id="G1",
+            query_symbol="KAR2",
+            pichia_gene_id="G1",
+            pichia_model_gene_id="G1",
+            homology_review_status="model_ready_rbh_high_confidence",
+            rule_transfer_status="rule_transfer_ready",
+            name_consistency_status="name_confirmed_by_rbh",
+        )
+    }
 
-    annotated = _annotate_gene_evidence(result, evidence_by_gene=evidence)
+    annotated = _annotate_gene_evidence(result, evidence_by_gene=evidence, homology_evidence_by_gene=homology)
 
     row = annotated.rows[0]
     assert row["database_annotation_sources"] == ["offline_cache"]
     assert row["database_annotation_confidence"] == "high_exact_locus_tag"
+    assert row["homology_evidence"]["query_symbol"] == "KAR2"
+    assert row["rule_transfer_status"] == "rule_transfer_ready"
     assert row["recommendation_tier"] == "model_executable"
+    assert row["recommendation_tier"] != "experiment_calibrated"
 
 
 def test_screen_plan_uses_manual_candidates_without_solving() -> None:

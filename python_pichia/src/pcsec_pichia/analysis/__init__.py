@@ -68,6 +68,11 @@ class YieldImprovementCandidateRecommendation:
     database_annotation_confidence: str
     model_gpr_executable: bool
     oe_reaction_proxy: bool
+    homology_evidence: dict[str, object]
+    homology_review_status: str
+    rule_transfer_status: str
+    name_consistency_status: str
+    homology_warnings: tuple[str, ...]
     phenotype_evidence: dict[str, object]
     recommendation_tier: str
     recommendation_tier_reason: str
@@ -421,6 +426,11 @@ def _yield_candidate_recommendation(
         database_annotation_confidence=str(row.get("database_annotation_confidence") or row.get("evidence_confidence") or ""),
         model_gpr_executable=model_gpr_executable,
         oe_reaction_proxy=oe_reaction_proxy,
+        homology_evidence=row.get("homology_evidence") if isinstance(row.get("homology_evidence"), dict) else {},
+        homology_review_status=str(row.get("homology_review_status") or ""),
+        rule_transfer_status=str(row.get("rule_transfer_status") or ""),
+        name_consistency_status=str(row.get("name_consistency_status") or ""),
+        homology_warnings=tuple(str(item) for item in row.get("homology_warnings") or ()),
         phenotype_evidence=phenotype_payload,
         recommendation_tier=recommendation_tier,
         recommendation_tier_reason=tier_reason,

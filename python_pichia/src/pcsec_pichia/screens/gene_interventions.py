@@ -12,6 +12,7 @@ from pcsec_pichia.services.gene_evidence import (
     recommendation_tier_for_candidate,
     resolve_gene_identifier,
 )
+from pcsec_pichia.services.homology_evidence import GeneHomologyEvidence, homology_evidence_for_gene
 
 
 RULE_TOKEN_PATTERN = re.compile(r"x\((\d+)\)")
@@ -80,6 +81,11 @@ class GeneCapabilityProfile:
     database_annotation_confidence: str
     model_gpr_executable: bool
     oe_reaction_proxy: bool
+    homology_evidence: dict[str, object]
+    homology_review_status: str
+    rule_transfer_status: str
+    name_consistency_status: str
+    homology_warnings: tuple[str, ...]
     phenotype_evidence: dict[str, dict[str, object]]
     recommendation_tier: dict[str, str]
     recommendation_tier_reason: dict[str, str]
@@ -95,6 +101,7 @@ class GeneCapabilityProfile:
             "gpr_rules",
             "missing_information",
             "database_annotation_sources",
+            "homology_warnings",
         ):
             payload[key] = list(payload[key])
         return payload
@@ -252,6 +259,7 @@ def build_gene_capability_profile(
     complex_subunits: dict[str, list[dict[str, object]]] | None = None,
     aliases: tuple[str, ...] = (),
     evidence_by_gene: dict[str, GeneExternalEvidence] | None = None,
+    homology_evidence_by_gene: dict[str, GeneHomologyEvidence] | None = None,
     target_protein_context: str | None = None,
 ) -> GeneCapabilityProfile:
     input_gene_id = str(gene_id or "").strip()
@@ -259,11 +267,17 @@ def build_gene_capability_profile(
     external_evidence = evidence_for_gene(input_gene_id, evidence_records)
     canonical_gene_id = resolve_gene_identifier(input_gene_id, evidence_records, model=model)
     profile_aliases = tuple(aliases or (external_evidence.aliases if external_evidence else ()))
+    homology_evidence = homology_evidence_for_gene(
+        input_gene_id,
+        homology_evidence_by_gene,
+        aliases=tuple(item for item in (canonical_gene_id, *profile_aliases) if item),
+    )
     if not canonical_gene_id or not _gene_exists(model, canonical_gene_id):
         evidence_fields = _capability_evidence_fields(
             canonical_gene_id or input_gene_id,
             profile_aliases,
             external_evidence,
+            homology_evidence,
             target_protein_context,
             resolved=False,
         )
@@ -292,6 +306,7 @@ def build_gene_capability_profile(
             canonical_gene_id,
             profile_aliases,
             external_evidence,
+            homology_evidence,
             target_protein_context,
             resolved=True,
         )
@@ -321,6 +336,7 @@ def build_gene_capability_profile(
         canonical_gene_id,
         profile_aliases,
         external_evidence,
+        homology_evidence,
         target_protein_context,
         resolved=True,
         model_gpr_executable=ko_plan.ko_support_status == "ko_runnable_gpr_gene_deletion",
@@ -360,6 +376,7 @@ def _capability_evidence_fields(
     gene_id: str,
     aliases: tuple[str, ...],
     external_evidence: GeneExternalEvidence | None,
+    homology_evidence: GeneHomologyEvidence | None,
     target_protein_context: str | None,
     *,
     resolved: bool,
@@ -368,6 +385,7 @@ def _capability_evidence_fields(
 ) -> dict[str, object]:
     database_sources = tuple(external_evidence.evidence_sources) if external_evidence else ()
     database_confidence = external_evidence.evidence_confidence if external_evidence else ""
+    homology_payload = homology_evidence.to_dict() if homology_evidence else {}
     ko_tier, ko_reason, ko_evidence = recommendation_tier_for_candidate(
         gene_id=gene_id,
         intervention_type="KO",
@@ -396,6 +414,11 @@ def _capability_evidence_fields(
         "database_annotation_confidence": database_confidence,
         "model_gpr_executable": model_gpr_executable,
         "oe_reaction_proxy": oe_reaction_proxy,
+        "homology_evidence": homology_payload,
+        "homology_review_status": str(homology_payload.get("homology_review_status") or ""),
+        "rule_transfer_status": str(homology_payload.get("rule_transfer_status") or ""),
+        "name_consistency_status": str(homology_payload.get("name_consistency_status") or ""),
+        "homology_warnings": tuple(str(item) for item in homology_payload.get("warnings", ()) or ()),
         "phenotype_evidence": phenotype_payload,
         "recommendation_tier": {"KO": ko_tier, "OE": oe_tier},
         "recommendation_tier_reason": {"KO": ko_reason, "OE": oe_reason},

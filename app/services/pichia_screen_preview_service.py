@@ -66,10 +66,16 @@ def _preview_screen_inputs_for_model(
                 "External GPR overlay was enabled, but no high-confidence executable rules were available."
             )
     from pcsec_pichia.services.gene_evidence import DEFAULT_GENE_EVIDENCE_CACHE, load_gene_evidence_cache
+    from pcsec_pichia.services.homology_evidence import (
+        DEFAULT_HOMOLOGY_AUDIT_CACHE_DIR,
+        load_homology_evidence_cache,
+    )
     from pcsec_pichia.screens.planning import build_screen_plan
 
     evidence_cache_path = (repo_root / DEFAULT_GENE_EVIDENCE_CACHE) if repo_root is not None else None
     evidence_by_gene = load_gene_evidence_cache(evidence_cache_path)
+    homology_cache_dir = (repo_root / DEFAULT_HOMOLOGY_AUDIT_CACHE_DIR) if repo_root is not None else None
+    homology_evidence_by_gene = load_homology_evidence_cache(homology_cache_dir)
 
     screen_plan = build_screen_plan(
         model,
@@ -102,6 +108,7 @@ def _preview_screen_inputs_for_model(
             gene_id,
             complex_subunits=complex_subunits,
             evidence_by_gene=evidence_by_gene,
+            homology_evidence_by_gene=homology_evidence_by_gene,
             target_protein_context=target_context,
         ).to_dict()
         for gene_id in _dedupe_text_tuple((*ko_gene_ids, *oe_gene_ids))
@@ -117,6 +124,7 @@ def _preview_screen_inputs_for_model(
                 if mapped_id == canonical_gene_id and input_id != canonical_gene_id
             ),
             evidence_by_gene=evidence_by_gene,
+            homology_evidence_by_gene=homology_evidence_by_gene,
             target_protein_context=target_context,
         ).to_dict()
         for canonical_gene_id in _dedupe_text_tuple((*ko_canonical_ids, *oe_canonical_ids))
@@ -288,6 +296,11 @@ def _capability_evidence_preview_fields(
         "phenotype_evidence": phenotype.get(key, {}),
         "recommendation_tier": tier.get(key, "manual_review_required"),
         "recommendation_tier_reason": reason.get(key, ""),
+        "homology_evidence": data.get("homology_evidence") or {},
+        "homology_review_status": data.get("homology_review_status", ""),
+        "rule_transfer_status": data.get("rule_transfer_status", ""),
+        "name_consistency_status": data.get("name_consistency_status", ""),
+        "homology_warnings": list(data.get("homology_warnings") or []),
     }
 
 

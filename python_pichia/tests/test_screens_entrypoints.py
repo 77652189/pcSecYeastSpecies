@@ -30,6 +30,7 @@ from pcsec_pichia.services.gene_evidence import (
     phenotype_evidence_for_candidate,
     recommendation_tier_for_candidate,
 )
+from pcsec_pichia.services.homology_evidence import GeneHomologyEvidence
 from pcsec_pichia.targets import TargetSpec, load_builtin_targets
 
 
@@ -295,6 +296,82 @@ def test_gene_capability_profile_keeps_ko_oe_phenotype_tiers_separate() -> None:
     assert profile["recommendation_tier"]["OE"] == "model_executable"
     assert profile["phenotype_evidence"]["KO"]["essentiality_status"] == "essential"
     assert "OE" not in profile["phenotype_evidence"]
+
+
+def test_gene_capability_profile_passes_homology_without_upgrading_tiers() -> None:
+    class TinyModel:
+        rxns = ["R1"]
+        rules = ["x(1)"]
+        gr_rules = ["G1"]
+        genes = ["G1"]
+        gene_index = {"G1": 0}
+        reaction_index = {"R1": 0}
+
+    homology = {
+        "g1": GeneHomologyEvidence(
+            gene_id="G1",
+            internal_common_name="KAR2 / BiP",
+            query_symbol="KAR2",
+            sce_orf="YJL034W",
+            pichia_gene_id="G1",
+            pichia_model_gene_id="G1",
+            is_rbh=True,
+            in_model_gene_index=True,
+            identity_pct=75.0,
+            homology_review_status="model_ready_rbh_high_confidence",
+            rule_transfer_status="rule_transfer_ready",
+            name_consistency_status="name_confirmed_by_rbh",
+        )
+    }
+
+    profile = build_gene_capability_profile(
+        TinyModel(),
+        "G1",
+        homology_evidence_by_gene=homology,
+    ).to_dict()
+
+    assert profile["homology_evidence"]["query_symbol"] == "KAR2"
+    assert profile["homology_review_status"] == "model_ready_rbh_high_confidence"
+    assert profile["rule_transfer_status"] == "rule_transfer_ready"
+    assert profile["name_consistency_status"] == "name_confirmed_by_rbh"
+    assert profile["recommendation_tier"]["KO"] == "model_executable"
+    assert profile["recommendation_tier"]["OE"] == "model_executable"
+    assert profile["recommendation_tier"]["OE"] != "experiment_calibrated"
+    assert profile["phenotype_evidence"] == {}
+
+
+def test_rbh_not_in_model_homology_stays_non_executable() -> None:
+    class TinyModel:
+        rxns = ["R1"]
+        rules = ["x(1)"]
+        gr_rules = ["G1"]
+        genes = ["G1"]
+        gene_index = {"G1": 0}
+        reaction_index = {"R1": 0}
+
+    homology = {
+        "pas_missing": GeneHomologyEvidence(
+            gene_id="PAS_MISSING",
+            pichia_gene_id="PAS_MISSING",
+            is_rbh=True,
+            in_model_gene_index=False,
+            homology_review_status="rbh_not_in_model",
+            rule_transfer_status="rule_transfer_supported_not_model_operable",
+            warnings=("RBH supports homology, but candidate is not present in current Pichia GEM gene_index",),
+        )
+    }
+
+    profile = build_gene_capability_profile(
+        TinyModel(),
+        "PAS_MISSING",
+        homology_evidence_by_gene=homology,
+    ).to_dict()
+
+    assert profile["resolved"] is False
+    assert profile["model_gpr_executable"] is False
+    assert profile["rule_transfer_status"] == "rule_transfer_supported_not_model_operable"
+    assert profile["recommendation_tier"]["KO"] == "manual_review_required"
+    assert profile["recommendation_tier"]["OE"] == "manual_review_required"
 
 
 def test_ko_essentiality_remains_highest_priority_when_multiple_phenotype_records() -> None:

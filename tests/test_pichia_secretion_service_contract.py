@@ -645,6 +645,52 @@ def test_screen_input_preview_resolves_manual_ko_oe_candidates() -> None:
     assert "未解析" in set(display_frame["置信度"])
 
 
+def test_screen_input_preview_passes_homology_evidence_without_changing_tier(monkeypatch) -> None:
+    from pcsec_pichia.services import homology_evidence
+    from pcsec_pichia.services.homology_evidence import GeneHomologyEvidence
+
+    class TinyModel:
+        rxns = ["R1"]
+        rules = ["x(1)"]
+        gr_rules = ["G1"]
+        genes = ["G1"]
+        gene_index = {"G1": 0}
+        reaction_index = {"R1": 0}
+
+    monkeypatch.setattr(
+        homology_evidence,
+        "load_homology_evidence_cache",
+        lambda cache_dir=None: {
+            "g1": GeneHomologyEvidence(
+                gene_id="G1",
+                internal_common_name="KAR2 / BiP",
+                query_symbol="KAR2",
+                pichia_gene_id="G1",
+                pichia_model_gene_id="G1",
+                homology_review_status="model_ready_rbh_high_confidence",
+                rule_transfer_status="rule_transfer_ready",
+                name_consistency_status="name_confirmed_by_rbh",
+                is_rbh=True,
+                in_model_gene_index=True,
+            )
+        },
+    )
+    request = SecretionRunRequest(
+        target_source="builtin",
+        target_id="OPN_ALPHA_FULL_PROJECT",
+        ko_gene_ids=("G1",),
+        oe_gene_ids=("G1",),
+    )
+
+    preview = _preview_screen_inputs_for_model(TinyModel(), request)
+
+    assert preview["gene_capabilities"][0]["homology_review_status"] == "model_ready_rbh_high_confidence"
+    assert preview["ko_genes"][0]["rule_transfer_status"] == "rule_transfer_ready"
+    assert preview["oe_genes"][0]["homology_evidence"]["query_symbol"] == "KAR2"
+    assert preview["oe_genes"][0]["recommendation_tier"] == "model_executable"
+    assert preview["oe_genes"][0]["recommendation_tier"] != "experiment_calibrated"
+
+
 def test_screen_input_preview_resolves_gene_aliases_with_offline_evidence(monkeypatch) -> None:
     from pcsec_pichia.services import gene_evidence
     from pcsec_pichia.services.gene_evidence import GeneExternalEvidence

@@ -40,6 +40,12 @@ from pcsec_pichia.services.gene_evidence import (
     recommendation_tier_for_candidate,
 )
 from pcsec_pichia.services.gene_catalog import build_lightweight_secretion_gene_evidence
+from pcsec_pichia.services.homology_evidence import (
+    DEFAULT_HOMOLOGY_AUDIT_CACHE_DIR,
+    GeneHomologyEvidence,
+    homology_evidence_for_gene,
+    load_homology_evidence_cache,
+)
 from pcsec_pichia.services.gene_rule_overlay import (
     DEFAULT_GENE_RULE_EVIDENCE_CACHE,
     apply_gpr_overlay_for_analysis,
@@ -160,6 +166,7 @@ def run_pichia_secretion_simulation(
                 "External GPR overlay was enabled, but no high-confidence executable rules were available."
             )
     evidence_by_gene = load_gene_evidence_cache(root / DEFAULT_GENE_EVIDENCE_CACHE)
+    homology_evidence_by_gene = load_homology_evidence_cache(root / DEFAULT_HOMOLOGY_AUDIT_CACHE_DIR)
     screen_plan = build_screen_plan(
         screen_model,
         request,
@@ -258,7 +265,14 @@ def run_pichia_secretion_simulation(
                         baseline_objective_value=oe_reaction.baseline_objective_value)
         for rid in screen_plan["unresolved_oe_reaction_ids"]))
     screens_list = [ko, ko_reaction, oe_gene, oe_reaction]
-    screens_list = [_annotate_gene_evidence(result, evidence_by_gene=evidence_by_gene) for result in screens_list]
+    screens_list = [
+        _annotate_gene_evidence(
+            result,
+            evidence_by_gene=evidence_by_gene,
+            homology_evidence_by_gene=homology_evidence_by_gene,
+        )
+        for result in screens_list
+    ]
     candidate_rows = tuple(row for result in screens_list for row in result.rows)
     yield_recommendations = analyze_yield_improvement_candidates(
         candidate_rows,
@@ -418,12 +432,17 @@ def _split_gene_id_text(value: str) -> list[str]:
 def _annotate_gene_evidence(
     result: ScreenResult,
     evidence_by_gene: dict[str, Any] | None = None,
+    homology_evidence_by_gene: dict[str, GeneHomologyEvidence] | None = None,
 ) -> ScreenResult:
     evidence_by_gene = load_gene_evidence_cache() if evidence_by_gene is None else evidence_by_gene
+    homology_evidence_by_gene = (
+        load_homology_evidence_cache() if homology_evidence_by_gene is None else homology_evidence_by_gene
+    )
     rows: list[dict[str, Any]] = []
     for row in result.rows:
         gene_id = str(row.get("canonical_gene_id") or row.get("gene_id") or row.get("input_gene_id") or "").strip()
         record = evidence_for_gene(gene_id, evidence_by_gene)
+        homology_fields = _candidate_homology_fields(row, homology_evidence_by_gene)
         if record is None:
             rows.append(
                 {
@@ -439,6 +458,7 @@ def _annotate_gene_evidence(
                     "evidence_sources": [],
                     "evidence_confidence": "low_model_only",
                     "wet_lab_readiness": "model_only_not_experiment_ready",
+                    **homology_fields,
                     **_candidate_evidence_tier_fields(row, None, result.target_id),
                 }
             )
@@ -457,6 +477,7 @@ def _annotate_gene_evidence(
                 "evidence_sources": list(record.evidence_sources),
                 "evidence_confidence": record.evidence_confidence,
                 "wet_lab_readiness": record.wet_lab_readiness,
+                **homology_fields,
                 **_candidate_evidence_tier_fields(row, record, result.target_id),
             }
         )
@@ -471,6 +492,27 @@ def _annotate_gene_evidence(
         result_status=result.result_status,
         matlab_alignment_status=result.matlab_alignment_status,
     )
+
+
+def _candidate_homology_fields(
+    row: dict[str, Any],
+    homology_evidence_by_gene: dict[str, GeneHomologyEvidence] | None,
+) -> dict[str, Any]:
+    gene_id = str(row.get("canonical_gene_id") or row.get("gene_id") or row.get("input_gene_id") or "").strip()
+    aliases = tuple(
+        str(row.get(key) or "")
+        for key in ("input_gene_id", "display_name", "standard_gene_symbol", "candidate_id")
+        if str(row.get(key) or "").strip()
+    )
+    evidence = homology_evidence_for_gene(gene_id, homology_evidence_by_gene, aliases=aliases)
+    payload = evidence.to_dict() if evidence else {}
+    return {
+        "homology_evidence": payload,
+        "homology_review_status": str(payload.get("homology_review_status") or ""),
+        "rule_transfer_status": str(payload.get("rule_transfer_status") or ""),
+        "name_consistency_status": str(payload.get("name_consistency_status") or ""),
+        "homology_warnings": list(payload.get("warnings") or []),
+    }
 
 
 def _candidate_evidence_tier_fields(

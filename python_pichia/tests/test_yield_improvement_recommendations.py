@@ -296,6 +296,36 @@ def test_yield_recommendation_annotation_only_is_not_experiment_calibrated() -> 
     assert row["database_annotation_sources"] == ("UniProt", "KEGG")
 
 
+def test_yield_recommendation_homology_only_is_not_experiment_calibrated() -> None:
+    result = analyze_yield_improvement_candidates(
+        [
+            {
+                "target_id": "OPN_ALPHA_FULL_PROJECT",
+                "candidate_id": "HOMOLOGY_ONLY",
+                "gene_id": "HOMOLOGY_ONLY",
+                "input_gene_id": "HOMOLOGY_ONLY",
+                "intervention_type": "OE_gene_proxy",
+                "success": False,
+                "status": "not_run_no_gpr_effect",
+                "delta_objective": "",
+                "homology_evidence": {"query_symbol": "KAR2"},
+                "homology_review_status": "model_ready_rbh_high_confidence",
+                "rule_transfer_status": "rule_transfer_ready",
+                "name_consistency_status": "name_confirmed_by_rbh",
+                "homology_warnings": ["homology evidence only"],
+            }
+        ],
+        target_id="OPN_ALPHA_FULL_PROJECT",
+    )
+    row = summarize_yield_improvement_recommendations(result)["not_recommended_candidates"][0]
+
+    assert row["homology_evidence"]["query_symbol"] == "KAR2"
+    assert row["rule_transfer_status"] == "rule_transfer_ready"
+    assert row["recommendation_tier"] == "manual_review_required"
+    assert row["recommendation_tier"] != "experiment_calibrated"
+    assert row["oe_reaction_proxy"] is False
+
+
 def test_yield_recommendation_not_run_oe_proxy_is_manual_review() -> None:
     result = analyze_yield_improvement_candidates(
         [

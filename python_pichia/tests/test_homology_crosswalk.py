@@ -32,6 +32,7 @@ from pcsec_pichia.homology.review_rules import (
     RULE_TRANSFER_SUPPORTED_NOT_MODEL_OPERABLE,
     RULE_TRANSFER_UNRESOLVED,
 )
+from pcsec_pichia.services.homology_evidence import build_homology_evidence_map
 
 
 def _hit(query: str, subject: str) -> BlastHit:
@@ -220,6 +221,12 @@ def test_name_and_rule_transfer_cache_outputs_are_stable(tmp_path: Path) -> None
     assert "rule_transfer_status" in rule_header
     assert load_name_audit_cache(tmp_path / "name.jsonl")[0].name_consistency_status == "name_confirmed_by_rbh"
     assert load_rule_transfer_audit_cache(tmp_path / "rule.jsonl")[0].rule_transfer_status == RULE_TRANSFER_READY
+
+    evidence = build_homology_evidence_map(name_rows=name_rows, rule_rows=rule_rows)
+    kar2 = evidence["pas_chr2-1_0140"]
+    assert kar2.name_consistency_status == "name_confirmed_by_rbh"
+    assert kar2.rule_transfer_status == RULE_TRANSFER_READY
+    assert kar2.homology_review_status == MODEL_READY_RBH_HIGH_CONFIDENCE
 
 
 def test_homology_audit_summary_counts_all_three_outputs() -> None:
