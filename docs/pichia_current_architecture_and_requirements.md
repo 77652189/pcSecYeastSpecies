@@ -47,7 +47,8 @@ Streamlit UI / API facade
 - 支持 gene evidence、gene catalog、phenotype evidence 和 recommendation tier。
 - 支持 genome-wide / catalog-level KO/OE screen 工具。
 - 支持 Shadow LP constrained solve 路径，用于承载 pcSec 语义约束的可替代求解后端。
-- 已有 BLAST/RBH 离线 homology cache builder，可生成序列同源和模型 gene_index 可操作性证据；下一阶段是补齐 name audit / rule-transfer audit、service facade 和 Streamlit 浏览页面。
+- 已有 BLAST/RBH 离线 homology cache builder，可生成 homology cache、name audit、rule-transfer audit、summary 和离线 external name crosscheck 字段。
+- 已有 Streamlit 页面“基因命名与同源规则审计”，通过 `app/services` 只读 cache，支持查看、筛选、导出和解释同源命名/规则迁移结果。
 
 ## COBRApy / Shadow LP 状态
 

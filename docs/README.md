@@ -11,7 +11,7 @@
 | --- | --- |
 | [当前架构与需求](pichia_current_architecture_and_requirements.md) | 当前工作目标、系统分层、能力边界和 COBRApy / Shadow LP 状态 |
 | [下一步计划](pichia_next_plan.md) | 接下来应做什么、暂不做什么、每项的验证命令 |
-| [BLAST/RBH 同源映射架构](pichia_homology_crosswalk_architecture.md) | 酿酒酵母到 Pichia 的离线同源证据层设计，以及 Streamlit 命名/规则迁移审计的产品边界 |
+| [BLAST/RBH 同源映射架构](pichia_homology_crosswalk_architecture.md) | 酿酒酵母到 Pichia 的离线同源证据层实现、cache/service/UI 入口，以及 Streamlit 命名/规则迁移审计边界 |
 | [数据与结果治理策略](data_and_results_policy.md) | 哪些目录只读、哪些产物进 `local_runs/`、何时需要 checkpoint |
 
 ## 已归档内容

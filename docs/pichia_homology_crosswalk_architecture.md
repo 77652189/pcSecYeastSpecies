@@ -55,7 +55,7 @@ SECRETION_GENE_CATALOG / query list
   -> Streamlit browser / filters / export
 ```
 
-## 建议模块布局
+## 实际模块布局
 
 ```text
 python_pichia/src/pcsec_pichia/homology/
@@ -68,6 +68,19 @@ python_pichia/src/pcsec_pichia/homology/
   review_rules.py
   catalog_inputs.py
 
+python_pichia/src/pcsec_pichia/services/
+  homology_evidence.py
+
+app/services/
+  pichia_homology_audit_service.py
+
+app/ui/views/
+  homology_audit.py
+
+app/ui/
+  common.py
+  streamlit_app.py
+
 scripts/
   build_pichia_homology_cache.py
 
@@ -76,6 +89,14 @@ python_pichia/tests/
   test_homology_blast_parser.py
   test_homology_rbh.py
   test_homology_crosswalk.py
+  test_homology_review_rules.py
+  test_screens_entrypoints.py
+  test_yield_improvement_recommendations.py
+
+tests/
+  test_pichia_homology_audit_service_contract.py
+  test_pichia_homology_audit_ui_contract.py
+  test_pichia_secretion_service_contract.py
 ```
 
 ## 数据结构
@@ -118,7 +139,8 @@ class ReciprocalBestHit:
 ```python
 @dataclass(frozen=True)
 class HomologyCrosswalkRow:
-    sce_symbol: str
+    internal_common_name: str
+    query_symbol: str
     sce_orf: str | None
     pichia_gene_id: str | None
     pichia_model_gene_id: str | None
@@ -129,6 +151,65 @@ class HomologyCrosswalkRow:
     subject_coverage: float | None
     in_model_gene_index: bool
     review_status: str
+    warnings: tuple[str, ...]
+```
+
+```python
+@dataclass(frozen=True)
+class NameAuditRow:
+    internal_gene_id: str
+    internal_common_name: str
+    internal_sequence_id: str
+    external_accession: str
+    external_gene_name: str
+    external_locus_tag: str
+    external_aliases: tuple[str, ...]
+    name_consistency_status: str
+    review_status: str
+    external_crosscheck_status: str = "not_available"
+    external_crosscheck_sources: tuple[str, ...] = ()
+    external_crosscheck_warnings: tuple[str, ...] = ()
+```
+
+```python
+@dataclass(frozen=True)
+class RuleTransferAuditRow:
+    internal_common_name: str
+    query_symbol: str
+    sce_orf: str
+    pichia_gene_id: str
+    pichia_model_gene_id: str
+    homology_review_status: str
+    rule_transfer_status: str
+    warnings: tuple[str, ...]
+```
+
+```python
+@dataclass(frozen=True)
+class ExternalNameReference:
+    source_database: str
+    source_version: str
+    taxon: str
+    accession: str
+    gene_name: str
+    locus_tag: str
+    aliases: tuple[str, ...]
+    retrieved_at: str
+    warnings: tuple[str, ...]
+```
+
+```python
+@dataclass(frozen=True)
+class ExternalDatabaseCrosscheck:
+    source_database: str
+    source_version: str
+    taxon: str
+    accession: str
+    gene_name: str
+    locus_tag: str
+    aliases: tuple[str, ...]
+    retrieved_at: str
+    match_status: str
     warnings: tuple[str, ...]
 ```
 
@@ -227,28 +308,90 @@ no_reciprocal_hit
 unresolved_query_symbol
 ```
 
+Additional audit statuses:
+
+```text
+name_confirmed_by_rbh
+alias_confirmed_by_rbh
+sequence_name_conflict
+external_name_missing
+internal_name_missing
+
+rule_transfer_ready
+rule_transfer_supported_not_model_operable
+rule_transfer_low_confidence
+rule_transfer_paralog_risk
+rule_transfer_unresolved
+rule_transfer_not_supported
+
+not_available
+external_match_confirmed
+external_alias_confirmed
+external_locus_confirmed
+external_conflict
+external_reference_incomplete
+```
+
 ### crosswalk.py
 
 ```python
 def build_homology_crosswalk(
-    sce_queries: Iterable[CatalogHomologyQuery],
-    sce_records: Iterable[ProteinRecord],
-    pichia_records: Iterable[ProteinRecord],
+    sce_queries: tuple[CatalogHomologyQuery, ...],
+    sce_records: tuple[ProteinRecord, ...],
+    pichia_records: tuple[ProteinRecord, ...],
     model_gene_index: set[str],
+    rbh_calls: tuple[ReciprocalBestHit, ...],
     blast_config: BlastConfig,
-) -> HomologyCrosswalk:
+) -> tuple[HomologyCrosswalkRow, ...]:
     """Build the full offline crosswalk from local sequence assets and BLAST results."""
 ```
 
 ```python
-def write_homology_cache(crosswalk: HomologyCrosswalk, jsonl_path: Path, tsv_path: Path) -> CacheWriteResult:
+def build_name_audit_rows(
+    crosswalk: tuple[HomologyCrosswalkRow, ...],
+    external_references: tuple[ExternalNameReference, ...] = (),
+) -> tuple[NameAuditRow, ...]:
+    """Build name-audit rows while keeping model operability separate."""
+```
+
+```python
+def build_rule_transfer_audit_rows(crosswalk: tuple[HomologyCrosswalkRow, ...]) -> tuple[RuleTransferAuditRow, ...]:
+    """Build rule-transfer audit rows without changing phenotype evidence."""
+```
+
+```python
+def load_external_name_reference_cache(path: Path) -> tuple[ExternalNameReference, ...]:
+    """Load offline external name references from JSONL or TSV without network access."""
+```
+
+```python
+def write_homology_cache(crosswalk: tuple[HomologyCrosswalkRow, ...], jsonl_path: Path, tsv_path: Path) -> CacheWriteResult:
     """Write deterministic cache outputs for review and downstream use."""
 ```
 
 ```python
-def load_homology_cache(path: Path) -> HomologyCrosswalk:
+def load_homology_cache(path: Path) -> tuple[HomologyCrosswalkRow, ...]:
     """Load a previously generated cache without rerunning BLAST."""
 ```
+
+### app service facade
+
+```python
+def load_homology_audit_browser_data(...) -> dict[str, Any]:
+    """Read cached homology audit rows for Streamlit display without running BLAST."""
+```
+
+```python
+def export_homology_audit_rows(rows: list[dict[str, Any]], *, file_format: str = "tsv") -> bytes:
+    """Export currently filtered rows as UTF-8 TSV/CSV bytes."""
+```
+
+### Streamlit UI
+
+- `app/ui/common.py` 注册导航项：`基因命名与同源规则审计`。
+- `app/ui/streamlit_app.py` 调用 `render_homology_audit()`。
+- `app/ui/views/homology_audit.py` 展示 summary metrics、命名标准化、同源规则迁移评估、缓存状态与导出三个 tab。
+- UI 只读 service 返回的结构化结果，不导入 `pcsec_pichia` engine，不运行 BLAST。
 
 ## Review status interpretation
 
@@ -274,21 +417,37 @@ sce_to_pichia_name_audit.tsv
 sce_to_pichia_rule_transfer_audit.jsonl
 sce_to_pichia_rule_transfer_audit.tsv
 homology_audit_summary.json
-homology_cache_summary.md
+homology_audit_summary.md
 blast_forward.tsv
 blast_reverse.tsv
 ```
 
 These outputs are review artifacts. They should not be committed until the project decides to promote a curated cache to stable scientific input.
 
+Optional input for future external database review:
+
+```text
+--external-name-reference-cache <offline-jsonl-or-tsv>
+```
+
+The expected reference fields are `source_database`, `source_version`, `taxon`, `accession`, `gene_name`, `locus_tag`, `aliases`, `retrieved_at`, and `warnings`. This is an offline cache contract only; no online UniProt / NCBI / SGD / KEGG fetcher is implemented in the Streamlit runtime.
+
 ## Integration path
 
-- Round 0: target contract and current-state audit.
-- Round 1: build homology / name / rule-transfer audit cache outputs.
-- Round 2: expose cache through an app service facade.
-- Round 3: add the Streamlit audit browser.
-- Round 4: join homology evidence into KO/OE explanations without changing recommendation-tier science boundaries.
-- Round 5: add an offline external database crosscheck contract.
-- Round 6: update final docs and usage notes.
+- Round 0: target contract and current-state audit completed.
+- Round 1: homology / name / rule-transfer audit cache outputs completed.
+- Round 2: app service facade completed.
+- Round 3: Streamlit audit browser completed.
+- Round 4: homology evidence joined into KO/OE explanations without changing recommendation-tier science boundaries.
+- Round 5: offline external database crosscheck contract completed.
+- Round 6: final docs and usage notes completed in active docs.
 
 At every phase, homology evidence remains separate from phenotype evidence and model executability.
+
+## Current usage
+
+```powershell
+python scripts\build_pichia_homology_cache.py --catalog-only --output-dir local_runs\pichia_homology_cache\manual_review
+```
+
+Then open Streamlit and use the “基因命名与同源规则审计” navigation item. The page reads the latest valid cache run, displays missing-cache guidance when cache files are absent, and exports only the currently filtered rows.

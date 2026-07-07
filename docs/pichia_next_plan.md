@@ -13,11 +13,11 @@
 
 ## 当前推荐优先级
 
-### 1. BLAST/RBH Streamlit 同源审计
+### 1. BLAST/RBH Streamlit 同源审计（已完成可用切片）
 
 目标：把酿酒酵母的分泌工程知识安全迁移到 Pichia 模型前，建立可审计的同源证据层，并让研发用户能在 Streamlit 中查看“基因命名标准化 + 同源规则迁移评估”结果。
 
-范围：
+已完成范围：
 
 - 从本地 pcSecYeast / pcSecPichia protein sequence 资产导出 FASTA。
 - 用本地 BLAST+ 运行 SCE -> Pichia 和 Pichia -> SCE 双向 blastp。
@@ -27,6 +27,8 @@
 - 通过 `app/services` 只读 cache，通过 `app/ui` 展示、筛选、导出和解释结果。
 - 先覆盖 `SECRETION_GENE_CATALOG` 相关 query，但不自动写回 catalog，也不把同源命中直接当作 KO/OE 模型 gene。
 - CLI / scripts 只作为离线 cache builder，不是最终产品入口；Streamlit runtime 默认不跑 BLAST。
+- KO/OE 预览和 yield recommendation 行已透传 homology evidence / review status / rule-transfer status / warnings，但 recommendation tier 不因 RBH 或 annotation 自动升级。
+- 已预留离线 external name crosscheck 契约，可读 JSONL/TSV reference cache 并在 Streamlit name audit 表中显示 external status/source/warnings；本阶段未实现在线抓取器。
 
 设计文档：[BLAST/RBH 同源映射架构](pichia_homology_crosswalk_architecture.md)
 
@@ -40,15 +42,35 @@
 6. Round 5：预留离线外部数据库名称校对契约，不做 runtime 联网。
 7. Round 6：最终文档收束，说明已实现内容、边界和使用方式。
 
-每轮完成后都要 review 本轮 diff、运行 focused tests / compileall / 保护目录检查，并将本轮相关改动 commit + push。
+Round 0 到 Round 6 已完成并按轮次 commit / push 到功能分支；每轮均保留 focused tests / compileall / 保护目录检查记录。
 
-当前 cache builder 验收：
+当前使用方式：
 
 ```powershell
-python -m pytest -q python_pichia\tests\test_homology_sequence_sources.py python_pichia\tests\test_homology_rbh.py python_pichia\tests\test_homology_crosswalk.py
-python -m compileall -q python_pichia\src
+# 生成离线 cache；页面不会自动运行 BLAST
+python scripts\build_pichia_homology_cache.py --catalog-only --output-dir local_runs\pichia_homology_cache\manual_review
+
+# 如已有人工准备的外部名称 reference JSONL/TSV，可显式合并到 name audit
+python scripts\build_pichia_homology_cache.py --catalog-only --external-name-reference-cache local_runs\external_name_refs.tsv --output-dir local_runs\pichia_homology_cache\manual_review
+```
+
+Streamlit 入口：启动 `app/ui/streamlit_app.py` 后打开导航项“基因命名与同源规则审计”。页面只读 `local_runs/pichia_homology_cache` 下最新有效 cache run，支持搜索、状态筛选、RBH / model gene 筛选、identity 阈值筛选和 TSV/CSV 导出。
+
+最终验收：
+
+```powershell
+python -m pytest -q python_pichia\tests\test_homology_blast_parser.py python_pichia\tests\test_homology_rbh.py python_pichia\tests\test_homology_review_rules.py python_pichia\tests\test_homology_crosswalk.py python_pichia\tests\test_homology_sequence_sources.py
+python -m pytest -q python_pichia\tests\test_screens_entrypoints.py python_pichia\tests\test_yield_improvement_recommendations.py
+python -m pytest -q tests\test_pichia_homology_audit_service_contract.py tests\test_pichia_homology_audit_ui_contract.py tests\test_pichia_secretion_service_contract.py
+python -m compileall -q app python_pichia\src scripts
 git diff --name-only -- Code Model Enzymedata Results requirements.txt python_pichia\pyproject.toml
 ```
+
+保留下一步：
+
+- 人工复核 smoke / production cache 后，决定是否把某个 crosswalk 版本提升为稳定科学资产。
+- 如要接 UniProt / NCBI / SGD / KEGG，只新增离线 builder 或手工导入流程；Streamlit runtime 仍保持不联网。
+- 对 external conflict、paralog risk 和 `rbh_not_in_model` 逐条做人工复核，再决定是否调整 curated catalog 或模型 GPR 映射。
 
 ### 2. Shadow LP service/backend toggle
 
