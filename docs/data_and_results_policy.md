@@ -12,6 +12,8 @@
 - `local_runs/`：当前 Python、Streamlit、MATLAB harness、LP diff、cache 和验证证据的默认运行产物目录，保持 ignored。
 - `docs/archive/`：历史计划、阶段性验证记录和已被 active 文档吸收的长文档。
 
+明确口径：`Results/` 是 legacy MATLAB results，不是当前 Python 或 Streamlit 的默认输出目录。`local_runs/` 是当前 Python、Streamlit、MATLAB harness 本地运行产物、缓存和验证证据的默认位置。
+
 ## 提交规则
 
 - 新生成的 LP、solver output、BLAST cache、MATLAB harness output、Streamlit run result、Markdown report 默认进入 `local_runs/`。

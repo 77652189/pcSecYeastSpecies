@@ -37,6 +37,8 @@ Streamlit UI / API facade
 - `Code/`、`Model/`、`Enzymedata/`、`Results/` 是 MATLAB/reference 资产目录，默认只读。
 - `local_runs/` 存放本地运行产物、缓存、报告和验证证据，默认不提交。
 
+数据与结果目录边界：`Results/` 保留为 legacy MATLAB results，只读参考，不作为当前 Python / Streamlit 输出目录；当前运行产物统一进入 ignored `local_runs/`。
+
 ## 已有能力
 
 - 加载 pcSecPichia 参考模型输入。

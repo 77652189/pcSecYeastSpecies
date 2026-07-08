@@ -11,6 +11,10 @@
 - 新运行产物、cache、报告和验证证据默认写入 ignored `local_runs/`。
 - 输出必须保留模型边界，不声明 mg/L 绝对产量或实验成功率。
 
+## 数据治理 checkpoint
+
+本轮已固定数据与结果目录职责：当前运行产物统一进入 ignored `local_runs/`，`Results/` 仅作为 legacy MATLAB results 只读参考。历史 `Results/` 迁移、Git LFS 改造或仓库历史瘦身不在当前开发轮次中处理，后续如需推进应单独立项和 checkpoint。
+
 ## 当前推荐优先级
 
 ### 1. BLAST/RBH Streamlit 同源审计（已完成可用切片）
