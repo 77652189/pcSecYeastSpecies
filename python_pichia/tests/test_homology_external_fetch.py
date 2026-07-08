@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import importlib.util
 import importlib
 import json
+from pathlib import Path
+import sys
 import urllib.request
 
+from pcsec_pichia.homology.cache_schema import ExternalNameReference, HomologyCrosswalkRow, NameAuditRow
+from pcsec_pichia.homology.crosswalk import build_name_audit_rows, load_external_name_reference_cache
 from pcsec_pichia.homology.external_fetch import (
     ExternalFetchConfig,
+    ExternalFetchResult,
     HttpResponse,
     fetch_ncbi_name_reference,
     fetch_sgd_name_reference,
@@ -157,3 +163,147 @@ def test_external_fetch_module_does_not_connect_on_import(monkeypatch) -> None:
     import pcsec_pichia.homology.external_fetch as external_fetch
 
     importlib.reload(external_fetch)
+
+
+def test_external_reference_builder_collects_deduped_name_audit_queries() -> None:
+    builder = _load_builder_module()
+    rows = (
+        _name_row("KAR2 / BiP", "YJL034W", "C4R8K4", "KAR2", "PAS_chr2-1_0140"),
+        _name_row("KAR2 duplicate", "YJL034W", "C4R8K4", "KAR2", "PAS_chr2-1_0140"),
+    )
+
+    queries = builder.collect_external_reference_queries(rows)
+
+    assert [(query.match_key, query.query) for query in queries] == [
+        ("external_accession", "C4R8K4"),
+        ("external_locus_tag", "PAS_chr2-1_0140"),
+        ("external_gene_name", "KAR2"),
+        ("internal_common_name", "KAR2 / BiP"),
+        ("internal_sequence_id", "YJL034W"),
+        ("internal_common_name", "KAR2 duplicate"),
+    ]
+
+
+def test_external_reference_builder_writes_loadable_jsonl_and_partial_failure_summary(tmp_path: Path) -> None:
+    builder = _load_builder_module()
+    rows = (
+        _name_row("KAR2 / BiP", "YJL034W", "C4R8K4", "KAR2", "PAS_chr2-1_0140"),
+        _name_row("HRD1", "YOL013C", "C4H", "HRD1", "PAS_chr4_0156"),
+    )
+
+    def fake_fetch(query: str, config: ExternalFetchConfig) -> tuple[ExternalFetchResult, ...]:
+        if query == "C4R8K4":
+            return (
+                ExternalFetchResult(
+                    "UniProt",
+                    query,
+                    True,
+                    (
+                        ExternalNameReference(
+                            "UniProt",
+                            "2026_01",
+                            "Komagataella phaffii",
+                            "C4R8K4",
+                            "KAR2",
+                            "PAS_chr2-1_0140",
+                            ("BiP",),
+                            "2026-07-08T00:00:00+00:00",
+                        ),
+                    ),
+                ),
+            )
+        return (ExternalFetchResult("UniProt", query, False, warnings=("simulated failure",)),)
+
+    references, summary = builder.build_external_reference_cache(
+        rows,
+        config=ExternalFetchConfig(enabled_sources=("uniprot",), retry_count=0),
+        sources=("uniprot",),
+        limit=2,
+        fetch_many=fake_fetch,
+    )
+    output = tmp_path / "external_name_references.jsonl"
+    builder.write_external_reference_cache(references, output)
+
+    loaded = load_external_name_reference_cache(output)
+
+    assert summary["query_count"] == 2
+    assert summary["success_count"] == 1
+    assert summary["failure_count"] == 1
+    assert summary["source_counts"] == {"UniProt": 1}
+    assert any("simulated failure" in warning for warning in summary["warnings"])
+    assert loaded[0].source_database == "UniProt"
+    assert loaded[0].warnings == ("query=C4R8K4; match_key=external_accession",)
+
+
+def test_external_reference_builder_output_drives_name_audit_crosscheck_status() -> None:
+    crosswalk = (
+        HomologyCrosswalkRow(
+            internal_common_name="KAR2 / BiP",
+            query_symbol="KAR2",
+            sce_orf="YJL034W",
+            pichia_gene_id="PAS_chr2-1_0140",
+            pichia_model_gene_id="PAS_chr2-1_0140",
+            is_rbh=True,
+            identity_pct=75.0,
+            evalue=1e-100,
+            query_coverage=95.0,
+            subject_coverage=95.0,
+            in_model_gene_index=True,
+            review_status="model_ready_rbh_high_confidence",
+            external_accession="C4R8K4",
+            external_gene_name="KAR2",
+            external_locus_tag="PAS_chr2-1_0140",
+        ),
+    )
+    references = (
+        ExternalNameReference(
+            "UniProt",
+            "2026_01",
+            "Komagataella phaffii",
+            "C4R8K4",
+            "KAR2",
+            "PAS_chr2-1_0140",
+            ("BiP",),
+            "2026-07-08T00:00:00+00:00",
+        ),
+    )
+
+    name_rows = build_name_audit_rows(crosswalk, external_references=references)
+
+    assert name_rows[0].external_crosscheck_status == "external_match_confirmed"
+
+
+def _load_builder_module():
+    path = Path(__file__).resolve().parents[2] / "scripts" / "build_pichia_external_name_reference_cache.py"
+    spec = importlib.util.spec_from_file_location("build_pichia_external_name_reference_cache", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _name_row(
+    common_name: str,
+    sce_orf: str,
+    accession: str,
+    gene_name: str,
+    locus_tag: str,
+) -> NameAuditRow:
+    return NameAuditRow(
+        internal_gene_id=locus_tag,
+        internal_common_name=common_name,
+        internal_sequence_id=sce_orf,
+        external_accession=accession,
+        external_gene_name=gene_name,
+        external_locus_tag=locus_tag,
+        external_aliases=(),
+        identity_pct=75.0,
+        query_coverage=95.0,
+        subject_coverage=95.0,
+        evalue=1e-100,
+        is_rbh=True,
+        in_model_gene_index=True,
+        name_consistency_status="name_confirmed_by_rbh",
+        review_status="model_ready_rbh_high_confidence",
+    )
