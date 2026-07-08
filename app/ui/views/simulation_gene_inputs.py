@@ -122,6 +122,11 @@ def gene_mapping_rows_for_display(rows: list[dict[str, Any]]) -> pd.DataFrame:
             {
                 "基因": row.get("input_gene_id") or row.get("gene_id", ""),
                 "模型基因": row.get("canonical_gene_id") or row.get("gene_id", ""),
+                "显示名称": row.get("gene_display_name") or "",
+                "标准符号": row.get("standard_symbol") or "",
+                "蛋白名称": row.get("protein_name") or "",
+                "命名置信度": row.get("annotation_confidence") or "",
+                "命名状态": row.get("standard_name_status") or "",
                 "反应": row.get("reaction_id") or "未解析",
                 "分泌环节": row.get("secretory_process", ""),
                 "映射层级": MAPPING_LEVEL_LABELS.get(
@@ -176,6 +181,10 @@ def _render_screen_input_preview(target_id: str, state: GenePerturbationFormStat
                 {
                     "类别": group_label,
                     "输入": row.get("input_id"),
+                    "显示名称": row.get("gene_display_name") or "",
+                    "标准符号": row.get("standard_symbol") or "",
+                    "蛋白名称": row.get("protein_name") or "",
+                    "命名状态": row.get("standard_name_status") or "",
                     "状态": "已解析" if row.get("resolved") else "未解析",
                     "解析到的反应数": row.get("resolved_reaction_count"),
                     "反应预览": ", ".join(row.get("resolved_reactions_preview") or []),

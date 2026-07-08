@@ -28,6 +28,13 @@ SECRETION_DOWN_THRESHOLD = 0.99
 GROWTH_COST_THRESHOLD = 0.99
 GROWTH_FULLY_RETAINED_THRESHOLD = 0.999
 DIVERGENCE_TOP_N = 20
+STANDARD_NAME_COLUMNS = [
+    "gene_display_name",
+    "standard_symbol",
+    "protein_name",
+    "annotation_confidence",
+    "standard_name_status",
+]
 
 
 @dataclass(frozen=True)
@@ -82,6 +89,9 @@ def load_gene_tradeoff_csv(csv_path: str) -> pd.DataFrame:
         frame["common_name"] = ""
     if "hypothesis_note" not in frame.columns:
         frame["hypothesis_note"] = ""
+    for column in STANDARD_NAME_COLUMNS:
+        if column not in frame.columns:
+            frame[column] = ""
     _ensure_solver_outcome_columns(frame)
     return frame
 
@@ -115,7 +125,7 @@ def analyze_single_target(frame: pd.DataFrame, target_id: str) -> DimensionalRes
         (target_rows.intervention_type == "OE") & (target_rows.candidate_kind != "complex_oe_hypothesis")
     ].dropna(subset=["secretion_ratio_vs_wildtype"])
 
-    display_cols = ["gene_id", "common_name", "candidate_kind"]
+    display_cols = _display_columns(target_rows)
     solver_cols = [
         "secretory_process",
         "affected_reactions",
@@ -219,13 +229,23 @@ def analyze_target_divergence(frame: pd.DataFrame, target_ids: list[str], top_n:
         return pd.DataFrame()
     a_id, b_id = target_ids[0], target_ids[1]
     ko = frame[frame.intervention_type == "KO"]
-    a = ko[ko.target_id == a_id][["gene_id", "common_name", "secretion_ratio_vs_wildtype", "growth_retention_ratio"]]
+    name_cols = [column for column in ("gene_display_name", "standard_symbol") if column in ko.columns]
+    a = ko[ko.target_id == a_id][
+        ["gene_id", "common_name", *name_cols, "secretion_ratio_vs_wildtype", "growth_retention_ratio"]
+    ]
     b = ko[ko.target_id == b_id][["gene_id", "secretion_ratio_vs_wildtype", "growth_retention_ratio"]]
     merged = a.merge(b, on="gene_id", suffixes=(f"_{a_id}", f"_{b_id}"))
     ratio_a_col, ratio_b_col = f"secretion_ratio_vs_wildtype_{a_id}", f"secretion_ratio_vs_wildtype_{b_id}"
     merged = merged.dropna(subset=[ratio_a_col, ratio_b_col])
     merged["divergence"] = (merged[ratio_a_col] - merged[ratio_b_col]).abs()
     return merged.sort_values("divergence", ascending=False).head(top_n).reset_index(drop=True)
+
+
+def _display_columns(frame: pd.DataFrame) -> list[str]:
+    columns = ["gene_id"]
+    columns.extend(column for column in STANDARD_NAME_COLUMNS if column in frame.columns)
+    columns.extend(["common_name", "candidate_kind"])
+    return columns
 
 
 __all__ = [

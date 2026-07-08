@@ -8,6 +8,7 @@ from app import ensure_python_pichia_on_path
 ensure_python_pichia_on_path()
 
 from pcsec_pichia.core.paths import ProjectPaths
+from pcsec_pichia.services.gene_id_standardization import enrich_gene_standard_name_fields
 
 from app.services.pichia_secretion_schema import SecretionRunRequest
 
@@ -76,6 +77,7 @@ def _preview_screen_inputs_for_model(
     evidence_by_gene = load_gene_evidence_cache(evidence_cache_path)
     homology_cache_dir = (repo_root / DEFAULT_HOMOLOGY_AUDIT_CACHE_DIR) if repo_root is not None else None
     homology_evidence_by_gene = load_homology_evidence_cache(homology_cache_dir)
+    standard_name_lookup = _load_standard_name_lookup(repo_root)
 
     screen_plan = build_screen_plan(
         model,
@@ -140,6 +142,7 @@ def _preview_screen_inputs_for_model(
                 canonical_gene_capabilities.get(ko_canonical_by_input[gene_id]),
             ),
             canonical_gene_id=ko_canonical_by_input[gene_id],
+            standard_name_lookup=standard_name_lookup,
         )
         for gene_id in ko_gene_ids
     ]
@@ -157,6 +160,7 @@ def _preview_screen_inputs_for_model(
                 gene_capabilities.get(gene_id),
                 canonical_gene_capabilities.get(oe_canonical_by_input[gene_id]),
             ),
+            standard_name_lookup=standard_name_lookup,
         )
         for gene_id in oe_gene_ids
     ]
@@ -173,6 +177,7 @@ def _preview_screen_inputs_for_model(
         gene_mapping,
         _input_ids_by_canonical({**ko_canonical_by_input, **oe_canonical_by_input}),
     )
+    _attach_gene_mapping_standard_names(gene_mapping, standard_name_lookup)
     warnings = _dedupe_text_list([
         *overlay_warnings,
         *screen_plan.warnings,
@@ -205,8 +210,9 @@ def _gene_row(
     resolved: bool,
     capability: dict[str, Any] | None = None,
     canonical_gene_id: str | None = None,
+    standard_name_lookup: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    return {
+    row = {
         "input_id": gene_id,
         "canonical_gene_id": canonical_gene_id or (capability or {}).get("canonical_gene_id", gene_id),
         "intervention_type": intervention_type,
@@ -222,16 +228,25 @@ def _gene_row(
         "confidence": (capability or {}).get("confidence", ""),
         **_capability_evidence_preview_fields(capability, intervention_type),
     }
+    return enrich_gene_standard_name_fields(row, standard_name_lookup or {}, gene_key="canonical_gene_id")
 
 
 def _reaction_row(reaction_id: str, intervention_type: str, resolved: bool) -> dict[str, Any]:
     return {
         "input_id": reaction_id,
+        "candidate_kind": "reaction_only",
         "intervention_type": intervention_type,
         "resolved": resolved,
         "status": "resolved" if resolved else "unresolved_reaction",
         "resolved_reaction_count": 1 if resolved else 0,
         "resolved_reactions_preview": [reaction_id] if resolved else [],
+        "gene_display_name": "",
+        "standard_symbol": "",
+        "protein_name": "",
+        "external_ids": {},
+        "annotation_sources": [],
+        "annotation_confidence": "",
+        "standard_name_status": "not_gene_candidate",
     }
 
 
@@ -241,6 +256,7 @@ def _oe_gene_row_from_plan(
     limit: int,
     input_id: str | None = None,
     capability: dict[str, Any] | None = None,
+    standard_name_lookup: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     executable = list(getattr(plan, "executable_reactions", ()))
     resolved = bool(getattr(plan, "resolved", False))
@@ -251,7 +267,7 @@ def _oe_gene_row_from_plan(
         status = "not_run_no_gpr_effect"
     elif getattr(plan, "oe_support_status", "") == "oe_explain_only_no_capacity_model":
         status = "not_run_gene_oe_proxy"
-    return {
+    row = {
         "input_id": input_id or plan.gene_id,
         "canonical_gene_id": plan.gene_id,
         "intervention_type": "OE_gene_proxy",
@@ -273,6 +289,7 @@ def _oe_gene_row_from_plan(
         "truncated": len(executable) > limit,
         **_capability_evidence_preview_fields(capability, "OE"),
     }
+    return enrich_gene_standard_name_fields(row, standard_name_lookup or {}, gene_key="canonical_gene_id")
 
 
 def _capability_evidence_preview_fields(
@@ -402,6 +419,30 @@ def _attach_gene_mapping_input_ids(
         row["input_gene_ids"] = input_ids
         row["input_gene_id"] = input_ids[0] if len(input_ids) == 1 else ", ".join(input_ids)
         row["canonical_gene_id"] = canonical_id
+
+
+def _attach_gene_mapping_standard_names(
+    gene_mapping: dict[str, Any],
+    standard_name_lookup: dict[str, Any],
+) -> None:
+    for collection_key in ("genes", "rows"):
+        updated = []
+        for row in gene_mapping.get(collection_key) or []:
+            updated.append(enrich_gene_standard_name_fields(dict(row), standard_name_lookup, gene_key="canonical_gene_id"))
+        if updated:
+            gene_mapping[collection_key] = updated
+
+
+def _load_standard_name_lookup(repo_root: Path | None = None) -> dict[str, Any]:
+    from pcsec_pichia.services.gene_id_standardization import build_standard_name_lookup
+
+    try:
+        from app.services.pichia_gene_catalog_service import load_pichia_gene_id_standardization
+
+        paths = ProjectPaths(repo_root=repo_root) if repo_root is not None else None
+        return build_standard_name_lookup(load_pichia_gene_id_standardization(paths=paths))
+    except Exception:
+        return {}
 
 
 __all__ = ["preview_screen_inputs", "_preview_screen_inputs_for_model"]

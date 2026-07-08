@@ -39,6 +39,11 @@ from pcsec_pichia.services.gene_evidence import (
     load_gene_evidence_cache,
     recommendation_tier_for_candidate,
 )
+from pcsec_pichia.services.gene_id_standardization import (
+    PichiaGeneIdStandardName,
+    build_standard_name_lookup,
+    enrich_gene_standard_name_fields,
+)
 from pcsec_pichia.services.gene_catalog import build_lightweight_secretion_gene_evidence
 from pcsec_pichia.services.homology_evidence import (
     DEFAULT_HOMOLOGY_AUDIT_CACHE_DIR,
@@ -438,6 +443,7 @@ def _annotate_gene_evidence(
     homology_evidence_by_gene = (
         load_homology_evidence_cache() if homology_evidence_by_gene is None else homology_evidence_by_gene
     )
+    standard_name_lookup = build_standard_name_lookup(_standard_name_rows_from_gene_evidence(evidence_by_gene))
     rows: list[dict[str, Any]] = []
     for row in result.rows:
         gene_id = str(row.get("canonical_gene_id") or row.get("gene_id") or row.get("input_gene_id") or "").strip()
@@ -445,7 +451,8 @@ def _annotate_gene_evidence(
         homology_fields = _candidate_homology_fields(row, homology_evidence_by_gene)
         if record is None:
             rows.append(
-                {
+                enrich_gene_standard_name_fields(
+                    {
                     **row,
                     "standard_gene_symbol": "",
                     "display_name": row.get("input_gene_id") or row.get("gene_id") or row.get("candidate_id"),
@@ -460,11 +467,14 @@ def _annotate_gene_evidence(
                     "wet_lab_readiness": "model_only_not_experiment_ready",
                     **homology_fields,
                     **_candidate_evidence_tier_fields(row, None, result.target_id),
-                }
+                    },
+                    standard_name_lookup,
+                )
             )
             continue
         rows.append(
-            {
+            enrich_gene_standard_name_fields(
+                {
                 **row,
                 "standard_gene_symbol": record.standard_gene_symbol,
                 "display_name": record.display_name,
@@ -479,7 +489,9 @@ def _annotate_gene_evidence(
                 "wet_lab_readiness": record.wet_lab_readiness,
                 **homology_fields,
                 **_candidate_evidence_tier_fields(row, record, result.target_id),
-            }
+                },
+                standard_name_lookup,
+            )
         )
     return ScreenResult(
         target_id=result.target_id,
@@ -492,6 +504,27 @@ def _annotate_gene_evidence(
         result_status=result.result_status,
         matlab_alignment_status=result.matlab_alignment_status,
     )
+
+
+def _standard_name_rows_from_gene_evidence(evidence_by_gene: dict[str, Any]) -> tuple[PichiaGeneIdStandardName, ...]:
+    rows: list[PichiaGeneIdStandardName] = []
+    for record in evidence_by_gene.values():
+        gene_id = str(getattr(record, "canonical_gene_id", "") or getattr(record, "gene_id", "") or "").strip()
+        if not gene_id:
+            continue
+        sources = tuple(str(item).strip() for item in (getattr(record, "evidence_sources", ()) or ()) if str(item).strip())
+        rows.append(
+            PichiaGeneIdStandardName(
+                gene_id=gene_id,
+                display_name=str(getattr(record, "display_name", "") or gene_id),
+                standard_symbol=str(getattr(record, "standard_gene_symbol", "") or ""),
+                protein_name=str(getattr(record, "protein_name", "") or ""),
+                external_ids=dict(getattr(record, "external_ids", None) or {}),
+                annotation_sources=sources or ("model_only",),
+                annotation_confidence=str(getattr(record, "evidence_confidence", "") or "low_model_only"),
+            )
+        )
+    return tuple(rows)
 
 
 def _candidate_homology_fields(

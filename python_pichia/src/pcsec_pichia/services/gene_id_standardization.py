@@ -7,6 +7,24 @@ from typing import Any
 
 
 GENE_ID_STANDARDIZATION_SCHEMA_VERSION = 1
+STANDARD_NAME_FIELD_NAMES: tuple[str, ...] = (
+    "gene_display_name",
+    "standard_symbol",
+    "protein_name",
+    "external_ids",
+    "annotation_sources",
+    "annotation_confidence",
+    "standard_name_status",
+)
+NON_GENE_CANDIDATE_KINDS: frozenset[str] = frozenset(
+    {
+        "catalog_reaction",
+        "complex_hypothesis",
+        "complex_oe_hypothesis",
+        "reaction_only",
+        "reaction-only",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -82,6 +100,76 @@ def summarize_pichia_gene_id_standardization_rows(
         "annotation_source_counts": dict(sorted(source_counts.items())),
         "gpr_status_counts": dict(sorted(gpr_status_counts.items())),
     }
+
+
+def build_standard_name_lookup(
+    rows: list[PichiaGeneIdStandardName | dict[str, Any]] | tuple[PichiaGeneIdStandardName | dict[str, Any], ...],
+) -> dict[str, PichiaGeneIdStandardName]:
+    """Build a gene_id-primary lookup for display-only standard name enrichment."""
+
+    lookup: dict[str, PichiaGeneIdStandardName] = {}
+    for row in rows:
+        record = row if isinstance(row, PichiaGeneIdStandardName) else _row_from_payload(row)
+        gene_id = str(record.gene_id or "").strip()
+        if gene_id:
+            lookup[gene_id] = record
+    return lookup
+
+
+def standard_name_fields_for_gene(
+    gene_id: str,
+    lookup: dict[str, PichiaGeneIdStandardName],
+    *,
+    candidate_kind: str = "gene",
+    intervention_type: str = "",
+) -> dict[str, Any]:
+    """Return display-only standard naming fields for a candidate gene id."""
+
+    if _is_non_gene_candidate(candidate_kind, intervention_type):
+        return _standard_name_empty_fields("not_gene_candidate")
+    resolved_gene_id = str(gene_id or "").strip()
+    if not resolved_gene_id:
+        return _standard_name_empty_fields("missing_standard_name")
+    record = lookup.get(resolved_gene_id)
+    if record is None:
+        return _standard_name_empty_fields("missing_standard_name")
+    sources = tuple(record.annotation_sources)
+    status = "model_only" if sources == ("model_only",) else "annotated"
+    return {
+        "gene_display_name": record.display_name or resolved_gene_id,
+        "standard_symbol": record.standard_symbol,
+        "protein_name": record.protein_name,
+        "external_ids": dict(record.external_ids),
+        "annotation_sources": list(sources),
+        "annotation_confidence": record.annotation_confidence,
+        "standard_name_status": status,
+    }
+
+
+def enrich_gene_standard_name_fields(
+    row: dict[str, Any],
+    lookup: dict[str, PichiaGeneIdStandardName],
+    *,
+    gene_key: str = "gene_id",
+) -> dict[str, Any]:
+    """Append standard naming fields without changing executable gene/reaction ids."""
+
+    enriched = dict(row)
+    gene_id = str(enriched.get("canonical_gene_id") or enriched.get(gene_key) or enriched.get("input_gene_id") or "")
+    fields = standard_name_fields_for_gene(
+        gene_id,
+        lookup,
+        candidate_kind=str(enriched.get("candidate_kind") or "gene"),
+        intervention_type=str(enriched.get("intervention_type") or ""),
+    )
+    enriched.update(fields)
+    return enriched
+
+
+def standard_name_fields_for_csv(row: dict[str, Any]) -> dict[str, Any]:
+    """Return stable CSV values for standard naming fields."""
+
+    return {key: _standard_name_csv_value(row.get(key)) for key in STANDARD_NAME_FIELD_NAMES}
 
 
 def write_pichia_gene_id_standardization_cache(
@@ -164,6 +252,30 @@ def _is_model_only(row: PichiaGeneIdStandardName) -> bool:
     return row.annotation_sources == ("model_only",)
 
 
+def _is_non_gene_candidate(candidate_kind: str, intervention_type: str) -> bool:
+    kind = str(candidate_kind or "").strip().lower()
+    intervention = str(intervention_type or "").strip()
+    return kind in NON_GENE_CANDIDATE_KINDS or intervention in {"KO_reaction", "OE_reaction"}
+
+
+def _standard_name_empty_fields(status: str) -> dict[str, Any]:
+    return {
+        "gene_display_name": "",
+        "standard_symbol": "",
+        "protein_name": "",
+        "external_ids": {},
+        "annotation_sources": [],
+        "annotation_confidence": "",
+        "standard_name_status": status,
+    }
+
+
+def _standard_name_csv_value(value: Any) -> Any:
+    if isinstance(value, (dict, list, tuple)):
+        return json.dumps(value, ensure_ascii=False, sort_keys=True)
+    return value
+
+
 def _external_ids(value: object) -> dict[str, str]:
     if not isinstance(value, dict):
         return {}
@@ -182,9 +294,14 @@ def _tuple_strings(value: object) -> tuple[str, ...]:
 
 __all__ = [
     "GENE_ID_STANDARDIZATION_SCHEMA_VERSION",
+    "STANDARD_NAME_FIELD_NAMES",
     "PichiaGeneIdStandardName",
     "build_pichia_gene_id_standardization_rows",
+    "build_standard_name_lookup",
+    "enrich_gene_standard_name_fields",
     "load_pichia_gene_id_standardization_cache",
     "summarize_pichia_gene_id_standardization_rows",
+    "standard_name_fields_for_csv",
+    "standard_name_fields_for_gene",
     "write_pichia_gene_id_standardization_cache",
 ]

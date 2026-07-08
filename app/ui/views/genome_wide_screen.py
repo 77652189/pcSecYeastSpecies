@@ -341,7 +341,10 @@ def _render_verifiable_table(df: pd.DataFrame, *, target_id: str, intervention_t
         candidate_id = str(row["gene_id"])
         candidate_kind = str(row["candidate_kind"]) if "candidate_kind" in row else "gene"
         common_name = str(row["common_name"]) if "common_name" in row and row["common_name"] else ""
-        display_label = f"{common_name} ({candidate_id})" if common_name else candidate_id
+        standard_symbol = str(row.get("standard_symbol") or "").strip()
+        gene_display_name = str(row.get("gene_display_name") or "").strip()
+        friendly_name = standard_symbol or gene_display_name or common_name
+        display_label = f"{friendly_name} ({candidate_id})" if friendly_name else candidate_id
         if st.button(
             f"在仿真验证中核实 {display_label}（{intervention_type}，靶点 {target_id}）",
             key=f"{table_key}_verify_btn",

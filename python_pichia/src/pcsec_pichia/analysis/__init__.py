@@ -54,6 +54,11 @@ class ProteinLpAttributionResult:
 class YieldImprovementCandidateRecommendation:
     candidate_id: str
     display_name: str
+    gene_display_name: str
+    standard_symbol: str
+    protein_name: str
+    annotation_confidence: str
+    standard_name_status: str
     model_gene_id: str
     locus_tag: str
     intervention_type: str
@@ -412,6 +417,11 @@ def _yield_candidate_recommendation(
     return YieldImprovementCandidateRecommendation(
         candidate_id=str(row.get("candidate_id") or row.get("input_gene_id") or row.get("reaction_id") or display_name),
         display_name=display_name,
+        gene_display_name=str(row.get("gene_display_name") or ""),
+        standard_symbol=str(row.get("standard_symbol") or ""),
+        protein_name=str(row.get("protein_name") or ""),
+        annotation_confidence=str(row.get("annotation_confidence") or ""),
+        standard_name_status=str(row.get("standard_name_status") or ""),
         model_gene_id=str(row.get("canonical_gene_id") or row.get("gene_id") or evidence.get("mapped_model_gene_id") or evidence.get("declared_model_gene_id") or ""),
         locus_tag=str(row.get("canonical_gene_id") or row.get("gene_id") or evidence.get("mapped_model_gene_id") or evidence.get("declared_model_gene_id") or ""),
         intervention_type=intervention_type,
@@ -587,6 +597,8 @@ def _yield_recommendation_sort_key(item: YieldImprovementCandidateRecommendation
 
 def _yield_display_name(row: dict[str, Any], evidence: dict[str, object]) -> str:
     for value in (
+        row.get("standard_symbol"),
+        row.get("gene_display_name"),
         evidence.get("common_name"),
         row.get("display_name"),
         row.get("standard_gene_symbol"),

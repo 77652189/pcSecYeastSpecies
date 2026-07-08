@@ -25,6 +25,13 @@ CANDIDATE_COLUMNS: tuple[str, ...] = (
     "candidate_id",
     "gene_id",
     "canonical_gene_id",
+    "gene_display_name",
+    "standard_symbol",
+    "protein_name",
+    "external_ids",
+    "annotation_sources",
+    "annotation_confidence",
+    "standard_name_status",
     "reaction_id",
     "input_gene_id",
     "resolved_reaction_id",
@@ -72,6 +79,11 @@ CORE_CANDIDATE_EXPLANATION_COLUMNS: tuple[str, ...] = (
     "candidate_id",
     "gene_id",
     "canonical_gene_id",
+    "gene_display_name",
+    "standard_symbol",
+    "protein_name",
+    "annotation_confidence",
+    "standard_name_status",
     "reaction_id",
     "input_gene_id",
     "resolved_reaction_id",
@@ -507,6 +519,7 @@ def normalize_candidate_explanation_row(row: dict[str, Any]) -> dict[str, Any]:
         or row.get("candidate_id"),
         "未解析候选",
     )
+    display_label = _candidate_summary_label(row, candidate_id)
     process = _text(row.get("secretory_process"), "未解析")
     mapping_level = _text(row.get("mapping_level"), "unresolved")
     mapping_confidence = _text(row.get("mapping_confidence"), "unresolved")
@@ -521,7 +534,7 @@ def normalize_candidate_explanation_row(row: dict[str, Any]) -> dict[str, Any]:
     delta_text = _delta_text(delta)
     status_note = _status_note(status, solver_status, effect_label)
     summary = (
-        f"{intervention_type} `{candidate_id}`：{effect_label}；"
+        f"{intervention_type} `{display_label}`：{effect_label}；"
         f"关联环节：{process}；映射置信度：{_confidence_label(mapping_confidence)}；"
         f"GPR：{gpr_role}；依据：{simulation_basis}；"
         f"Δobjective={delta_text}。{status_note}"
@@ -532,6 +545,13 @@ def normalize_candidate_explanation_row(row: dict[str, Any]) -> dict[str, Any]:
         summary = f"{summary} {mapping_interpretation}"
     return {
         "candidate_id": candidate_id,
+        "gene_id": _text(row.get("gene_id")),
+        "canonical_gene_id": _text(row.get("canonical_gene_id")),
+        "gene_display_name": _text(row.get("gene_display_name")),
+        "standard_symbol": _text(row.get("standard_symbol")),
+        "protein_name": _text(row.get("protein_name")),
+        "annotation_confidence": _text(row.get("annotation_confidence")),
+        "standard_name_status": _text(row.get("standard_name_status")),
         "intervention_type": intervention_type,
         "effect_bucket": effect_label,
         "secretory_process": process,
@@ -546,6 +566,14 @@ def normalize_candidate_explanation_row(row: dict[str, Any]) -> dict[str, Any]:
         "solver_status_label": solver_status,
         "summary": summary,
     }
+
+
+def _candidate_summary_label(row: dict[str, Any], candidate_id: str) -> str:
+    for key in ("standard_symbol", "gene_display_name", "display_name", "standard_gene_symbol"):
+        value = _text(row.get(key))
+        if value and value != candidate_id:
+            return f"{value} ({candidate_id})"
+    return candidate_id
 
 
 def _effect_bucket(row: dict[str, Any]) -> str:

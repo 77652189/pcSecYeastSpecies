@@ -23,6 +23,14 @@ if str(_SRC_DIR) not in sys.path:
     sys.path.insert(0, str(_SRC_DIR))
 
 from pcsec_pichia.loading import load_pcsec_pichia_inputs, repo_root  # noqa: E402
+from pcsec_pichia.services.gene_id_standardization import (  # noqa: E402
+    STANDARD_NAME_FIELD_NAMES,
+    PichiaGeneIdStandardName,
+    build_standard_name_lookup,
+    enrich_gene_standard_name_fields,
+    load_pichia_gene_id_standardization_cache,
+    standard_name_fields_for_csv,
+)
 from pcsec_pichia.screens.genome_wide_tradeoff import (  # noqa: E402
     DEFAULT_REFERENCE_GROWTH_RATE,
     run_genome_wide_tradeoff_screen,
@@ -32,6 +40,7 @@ from pcsec_pichia.targets import load_builtin_targets  # noqa: E402
 CSV_FIELDS = [
     "target_id",
     "gene_id",
+    *STANDARD_NAME_FIELD_NAMES,
     "intervention_type",
     "support_status",
     "secretory_process",
@@ -62,10 +71,19 @@ def _csv_value(value: object) -> object:
     return value
 
 
-def _row_to_csv_record(row: dict[str, object]) -> dict[str, object]:
+def _row_to_csv_record(
+    row: dict[str, object],
+    standard_name_lookup: dict[str, PichiaGeneIdStandardName] | None = None,
+) -> dict[str, object]:
+    row = (
+        enrich_gene_standard_name_fields(row, standard_name_lookup)
+        if standard_name_lookup is not None
+        else row
+    )
     return {
         "target_id": row["target_id"],
         "gene_id": row["gene_id"],
+        **standard_name_fields_for_csv(row),
         "intervention_type": row["intervention_type"],
         "support_status": row["support_status"],
         "secretory_process": row["secretory_process"],
@@ -102,6 +120,29 @@ def parse_args() -> argparse.Namespace:
     return args
 
 
+def _load_standard_name_lookup(root: Path, gene_ids: list[str]) -> dict[str, PichiaGeneIdStandardName]:
+    cache_path = (
+        root
+        / "local_runs"
+        / "streamlit_pichia_runs"
+        / "gene_catalog_cache"
+        / "pichia_gene_id_standardization.json"
+    )
+    rows = load_pichia_gene_id_standardization_cache(cache_path) if cache_path.exists() else ()
+    if not rows:
+        rows = tuple(
+            PichiaGeneIdStandardName(
+                gene_id=str(gene_id),
+                display_name=str(gene_id),
+                annotation_sources=("model_only",),
+                annotation_confidence="low_model_only",
+            )
+            for gene_id in gene_ids
+            if str(gene_id).strip()
+        )
+    return build_standard_name_lookup(rows)
+
+
 def main() -> None:
     args = parse_args()
     root = repo_root()
@@ -121,6 +162,7 @@ def main() -> None:
     else:
         gene_ids = all_gene_ids
     print(f"[{time.strftime('%H:%M:%S')}] screening {len(gene_ids)} genes, mode={args.mode}")
+    standard_name_lookup = _load_standard_name_lookup(root, gene_ids)
 
     targets_by_id = {target.target_id: target for target in load_builtin_targets(root)}
     target_ids = [target_id.strip() for target_id in args.targets.split(",") if target_id.strip()]
@@ -178,7 +220,7 @@ def main() -> None:
             )
 
             for row in result["rows"]:
-                writer.writerow(_row_to_csv_record(row))
+                writer.writerow(_row_to_csv_record(row, standard_name_lookup))
             csv_file.flush()
 
             skipped = sum(1 for row in result["rows"] if row["skipped_reason"])

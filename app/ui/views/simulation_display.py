@@ -6,6 +6,11 @@ import pandas as pd
 CANDIDATE_DISPLAY_COLUMNS = {
     "input_gene_id": "输入基因",
     "canonical_gene_id": "模型基因",
+    "gene_display_name": "标准显示名",
+    "standard_symbol": "标准符号",
+    "standard_name_status": "命名状态",
+    "annotation_sources": "命名来源",
+    "annotation_confidence": "命名置信度",
     "standard_gene_symbol": "标准基因名",
     "display_name": "显示名称",
     "protein_name": "蛋白名称",
@@ -277,7 +282,9 @@ def candidate_effect_counts(frame: pd.DataFrame) -> dict[str, int]:
 
 def candidate_row_label(index: int, row: pd.Series) -> str:
     gene = display_value(
-        row.get("standard_gene_symbol")
+        row.get("standard_symbol")
+        or row.get("gene_display_name")
+        or row.get("standard_gene_symbol")
         or row.get("display_name")
         or row.get("input_gene_id")
         or row.get("gene_id")

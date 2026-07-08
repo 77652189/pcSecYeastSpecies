@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 from pcsec_pichia.services.gene_id_standardization import (
+    build_standard_name_lookup,
     build_pichia_gene_id_standardization_rows,
+    enrich_gene_standard_name_fields,
     load_pichia_gene_id_standardization_cache,
     summarize_pichia_gene_id_standardization_rows,
+    standard_name_fields_for_csv,
     write_pichia_gene_id_standardization_cache,
 )
 
@@ -90,3 +93,47 @@ def test_gene_id_standardization_rejects_missing_or_duplicate_gene_ids() -> None
         assert "duplicate" in str(exc)
     else:  # pragma: no cover
         raise AssertionError("duplicate gene_id should fail")
+
+
+def test_standard_name_enrichment_statuses_and_csv_serialization() -> None:
+    rows = build_pichia_gene_id_standardization_rows(
+        [
+            {
+                "gene_id": "PAS_chr2-1_0140",
+                "display_name": "KAR2",
+                "standard_gene_symbol": "KAR2",
+                "protein_name": "BiP molecular chaperone",
+                "external_ids": {"uniprot": "C4R8K4"},
+                "evidence_sources": ["UniProt"],
+                "evidence_confidence": "high_exact_locus_tag",
+            },
+            {
+                "gene_id": "AT250_GQ_6803479",
+                "display_name": "AT250_GQ_6803479",
+                "external_ids": {},
+                "evidence_sources": [],
+            },
+        ]
+    )
+    lookup = build_standard_name_lookup(rows)
+
+    annotated = enrich_gene_standard_name_fields({"gene_id": "PAS_chr2-1_0140", "candidate_kind": "gene"}, lookup)
+    model_only = enrich_gene_standard_name_fields({"gene_id": "AT250_GQ_6803479", "candidate_kind": "gene"}, lookup)
+    missing = enrich_gene_standard_name_fields({"gene_id": "PAS_missing", "candidate_kind": "gene"}, lookup)
+    reaction = enrich_gene_standard_name_fields(
+        {"gene_id": "sec_Kar2p_complex_formation", "candidate_kind": "catalog_reaction"},
+        lookup,
+    )
+    csv_fields = standard_name_fields_for_csv(annotated)
+
+    assert annotated["gene_display_name"] == "KAR2"
+    assert annotated["standard_symbol"] == "KAR2"
+    assert annotated["protein_name"] == "BiP molecular chaperone"
+    assert annotated["annotation_confidence"] == "high_exact_locus_tag"
+    assert annotated["standard_name_status"] == "annotated"
+    assert model_only["standard_name_status"] == "model_only"
+    assert missing["standard_name_status"] == "missing_standard_name"
+    assert reaction["standard_name_status"] == "not_gene_candidate"
+    assert csv_fields["external_ids"] == '{"uniprot": "C4R8K4"}'
+    assert csv_fields["annotation_sources"] == '["UniProt"]'
+    assert "{" in csv_fields["external_ids"] and "'" not in csv_fields["external_ids"]
