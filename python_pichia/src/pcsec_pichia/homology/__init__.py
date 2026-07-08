@@ -14,6 +14,15 @@ from pcsec_pichia.homology.cache_schema import (
     ReciprocalBestHit,
     RuleTransferAuditRow,
 )
+from pcsec_pichia.homology.external_fetch import (
+    ExternalFetchConfig,
+    ExternalFetchResult,
+    HttpResponse,
+    fetch_external_name_references,
+    fetch_ncbi_name_reference,
+    fetch_sgd_name_reference,
+    fetch_uniprot_name_reference,
+)
 
 __all__ = [
     "BlastConfig",
@@ -21,11 +30,18 @@ __all__ = [
     "CacheWriteResult",
     "CatalogHomologyQuery",
     "ExternalDatabaseCrosscheck",
+    "ExternalFetchConfig",
+    "ExternalFetchResult",
     "ExternalNameReference",
+    "HttpResponse",
     "HomologyCrosswalkRow",
     "HomologyAuditSummary",
     "NameAuditRow",
     "ProteinRecord",
     "ReciprocalBestHit",
     "RuleTransferAuditRow",
+    "fetch_external_name_references",
+    "fetch_ncbi_name_reference",
+    "fetch_sgd_name_reference",
+    "fetch_uniprot_name_reference",
 ]
