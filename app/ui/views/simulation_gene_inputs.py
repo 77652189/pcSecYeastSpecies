@@ -9,6 +9,7 @@ import streamlit as st
 from app.services.pichia_screen_preview_service import preview_screen_inputs
 from app.services.pichia_secretion_schema import SecretionRunRequest
 from app.ui.common import PATHS
+from app.ui.views.hlf_opn_candidate_panel import render_hlf_opn_candidate_panel
 from app.ui.views.simulation_gene_catalog import render_gene_lookup_panel
 from app.ui.views.simulation_gene_text import parse_candidate_text
 
@@ -58,6 +59,7 @@ class GenePerturbationFormState:
 def render_gene_perturbation_form(target_id: str) -> GenePerturbationFormState:
     with st.expander("基因扰动", expanded=True):
         st.caption("可以从基因库选择，也可以手动输入。多个条目用逗号、分号或换行分隔；单次最多 20 个候选。")
+        render_hlf_opn_candidate_panel(target_id)
         render_gene_lookup_panel()
         with st.expander("输入说明", expanded=False):
             st.markdown(
