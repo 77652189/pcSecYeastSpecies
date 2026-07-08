@@ -5,6 +5,7 @@ from app.services.genome_wide_screen_registry import (
     latest_runs_by_group,
     older_runs_by_group,
     run_group_key,
+    run_scope_family,
 )
 from app.ui.views.genome_wide_screen import _split_result_runs
 
@@ -15,12 +16,14 @@ def _run(
     scope: str = "gene",
     targets: tuple[str, ...] = ("hLF",),
     status: str = "done",
+    done: int = 10,
+    total: int = 10,
 ) -> RunInfo:
     return RunInfo(
         run_name=run_name,
         status=status,
-        done=10,
-        total=10,
+        done=done,
+        total=total,
         targets=targets,
         mode="fast",
         pid=None,
@@ -66,6 +69,30 @@ def test_latest_runs_by_group_does_not_collapse_different_targets() -> None:
     latest = latest_runs_by_group(runs)
 
     assert {run.run_name for run in latest} == {"overnight_hLF_full", "overnight_OPN_full"}
+
+
+def test_latest_runs_by_group_does_not_let_gene_smoke_supersede_full_target_run() -> None:
+    """A tiny gene-scope smoke test for hLF is not a replacement for the full 1025-gene hLF run."""
+    runs = [
+        _run("phase5_solver_retry_smoke", scope="gene", targets=("hLF",), done=2, total=2),
+        _run("overnight_hLF_full", scope="gene", targets=("hLF",), done=1025, total=1025),
+    ]
+
+    latest = latest_runs_by_group(runs)
+    older = older_runs_by_group(runs)
+
+    assert {run.run_name for run in latest} == {"phase5_solver_retry_smoke", "overnight_hLF_full"}
+    assert older == []
+
+
+def test_run_scope_family_distinguishes_full_gene_sweeps_from_smoke_runs() -> None:
+    full = _run("overnight_hLF_full", scope="gene", targets=("hLF",), done=1025, total=1025)
+    smoke = _run("phase5_solver_retry_smoke", scope="gene", targets=("hLF",), done=2, total=2)
+    catalog = _run("catalog_reaction_screen", scope="catalog", targets=("hLF", "OPN"), done=244, total=244)
+
+    assert run_scope_family(full) == "gene"
+    assert run_scope_family(smoke) == "gene_limited"
+    assert run_scope_family(catalog) == "catalog"
 
 
 def test_latest_runs_by_group_surfaces_in_progress_rerun_over_stale_done_one() -> None:

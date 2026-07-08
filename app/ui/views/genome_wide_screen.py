@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pandas as pd
@@ -14,13 +15,14 @@ import streamlit as st
 
 from app.services import genome_wide_screen_analysis as analysis
 from app.services import genome_wide_screen_service as service
+from app.services import screen_report_service
 from app.services.genome_wide_screen_registry import (
     RunInfo,
     latest_runs_by_group,
     list_runs,
     older_runs_by_group,
+    run_scope_family,
 )
-from app.services.llm_report_service import get_default_generator
 from app.services.pichia_secretion_service import discover_project_paths
 from app.ui.common import request_navigation
 
@@ -55,6 +57,7 @@ def render_genome_wide_screen() -> None:
 
 SCOPE_LABELS = {
     "gene": "全基因组（约1025个基因，小时级）",
+    "gene_limited": "小规模基因试跑（smoke/pilot，分钟级）",
     "catalog": "策展复合体反应对照表（约30个反应，分钟级）",
     "complex_hypothesis": "复合体假设性整体过表达测试（源自已有KO筛查结果，分钟级）",
 }
@@ -165,14 +168,14 @@ def _render_run_list(runs: list[RunInfo]) -> None:
     # researchers looking for "the" result of one analysis type shouldn't have to pick it
     # out of a flat list that also contains superseded re-runs of the same thing.
     for scope, label in SCOPE_LABELS.items():
-        scope_runs = [run for run in latest if run.scope == scope]
+        scope_runs = [run for run in latest if run_scope_family(run) == scope]
         if not scope_runs:
             continue
         st.markdown(f"**{label}**")
         scope_runs = sorted(scope_runs, key=lambda run: run.targets)
         st.dataframe(_run_table_frame(scope_runs), width='stretch', hide_index=True)
 
-    unlabeled = [run for run in latest if run.scope not in SCOPE_LABELS]
+    unlabeled = [run for run in latest if run_scope_family(run) not in SCOPE_LABELS]
     if unlabeled:
         st.markdown("**其他**")
         st.dataframe(_run_table_frame(unlabeled), width='stretch', hide_index=True)
@@ -205,7 +208,7 @@ def _render_results_section(paths, runs: list[RunInfo]) -> None:
             viewing_older = st.selectbox(
                 "选择一个历史版本查看（选中后会替换下面的结果）",
                 options=[None, *older_done],
-                format_func=lambda run: "（不查看，显示下方最新结果）" if run is None else f"{run.run_name}（{SCOPE_LABELS.get(run.scope, run.scope)}）",
+                format_func=lambda run: "（不查看，显示下方最新结果）" if run is None else f"{run.run_name}（{SCOPE_LABELS.get(run_scope_family(run), run.scope)}）",
                 key="genome_wide_screen_older_run_select",
             )
 
@@ -218,7 +221,7 @@ def _render_results_section(paths, runs: list[RunInfo]) -> None:
             return
         selected_run = st.selectbox(
             "选择要查看的运行", options=latest_done,
-            format_func=lambda run: f"{run.run_name}（{SCOPE_LABELS.get(run.scope, run.scope)}）",
+            format_func=lambda run: f"{run.run_name}（{SCOPE_LABELS.get(run_scope_family(run), run.scope)}）",
         )
     run_name = selected_run.run_name
     # Older runs recorded before catalog scope existed always used gene_tradeoff_rows.csv;
@@ -243,7 +246,7 @@ def _render_results_section(paths, runs: list[RunInfo]) -> None:
             st.dataframe(divergence, width='stretch', hide_index=True)
 
     st.divider()
-    _render_llm_report_section(run_name, per_target_results)
+    _render_llm_report_section(paths, selected_run, csv_path)
 
 
 def _render_dimension_tables(result: analysis.DimensionalResults) -> None:
@@ -388,36 +391,64 @@ def _apply_verify_prefill(target_id: str, candidate_id: str, intervention_type: 
     st.rerun()
 
 
-def _render_llm_report_section(run_name: str, per_target_results: dict[str, analysis.DimensionalResults]) -> None:
-    st.subheader("生成总结报告")
-    report_path = _report_cache_path(run_name)
-    if report_path.exists():
-        st.markdown(report_path.read_text(encoding="utf-8"))
-        if st.button("重新生成报告"):
-            report_path.unlink()
-            st.rerun()
+def _render_llm_report_section(paths, selected_run: RunInfo, csv_path: Path) -> None:
+    st.subheader("研发建议报告（Writer LLM + Judge LLM）")
+    st.caption(
+        "页面只读取已有筛查结果生成 fact pack；点击按钮后才调用 LLM。"
+        "LLM 只能读取 fact pack，最终报告必须通过程序校验和 Judge 审核。"
+    )
+    try:
+        fact_pack = screen_report_service.build_fact_pack_for_runs(paths, csv_paths=(csv_path,))
+        fact_summary = screen_report_service.summarize_fact_pack(fact_pack)
+    except Exception as exc:  # noqa: BLE001 - user-facing diagnostic
+        st.error(f"fact pack 生成失败：{exc}")
         return
 
-    if st.button("用 LLM 生成总结和建议", type="primary"):
-        with st.spinner("正在调用 LLM 总结……"):
+    target_summary = fact_summary.get("targets", {})
+    st.dataframe(
+        pd.DataFrame(
+            [
+                {"靶点": target, **counts}
+                for target, counts in target_summary.items()
+            ]
+        ),
+        width="stretch",
+        hide_index=True,
+    )
+    st.download_button(
+        "下载 fact_pack.json",
+        data=json.dumps(fact_pack, ensure_ascii=False, indent=2),
+        file_name=f"{selected_run.run_name}_fact_pack.json",
+        mime="application/json",
+    )
+
+    latest_report_dirs = screen_report_service.latest_report_runs(paths)
+    latest_final = next((path / "final_report.md" for path in latest_report_dirs if (path / "final_report.md").exists()), None)
+    if latest_final:
+        with st.expander(f"查看最近一次已通过审核的报告：{latest_final.parent.name}", expanded=False):
+            report_text = latest_final.read_text(encoding="utf-8")
+            st.markdown(report_text)
+            st.download_button(
+                "下载 final_report.md",
+                data=report_text,
+                file_name="final_report.md",
+                mime="text/markdown",
+            )
+
+    if st.button("生成研发建议报告", type="primary", key=f"screen_report_generate_{selected_run.run_name}"):
+        with st.spinner("正在生成 fact pack、调用 Writer/Judge 并校验……"):
             try:
-                generator = get_default_generator()
-                summaries = [result.to_summary_dict() for result in per_target_results.values()]
-                report_text = generator.generate(
-                    summaries, run_metadata={"run_name": run_name, "targets": list(per_target_results)}
-                )
-            except Exception as exc:  # noqa: BLE001 - surface the real error to the user, this is user-facing config
-                st.error(f"报告生成失败：{exc}")
+                result = screen_report_service.generate_judged_screen_report(paths, csv_paths=(csv_path,))
+            except Exception as exc:  # noqa: BLE001 - missing LLM config should be visible, not fatal
+                st.error(f"报告生成未完成：{exc}")
+                st.info("如未配置 OPENAI_API_KEY，可先下载 fact_pack.json；测试环境使用 fake LLM，不依赖真实 API。")
                 return
-        report_path.write_text(report_text, encoding="utf-8")
-        st.rerun()
-
-
-def _report_cache_path(run_name: str) -> Path:
-    paths = _paths()
-    directory = paths.local_runs_dir / run_name
-    directory.mkdir(parents=True, exist_ok=True)
-    return directory / "llm_report.md"
+        if result.success and result.final_report_path:
+            st.success(f"报告已生成：{result.final_report_path}")
+            st.markdown(result.final_report_path.read_text(encoding="utf-8"))
+        else:
+            st.error("报告未通过程序校验或 Judge 审核，未生成 final_report.md。")
+            st.json({"validator": result.validator_result, "judge": result.judge_result, "manifest": str(result.manifest_path)})
 
 
 __all__ = ["render_genome_wide_screen"]

@@ -18,6 +18,7 @@ from pcsec_pichia.core.paths import ProjectPaths
 
 HEARTBEAT_STALE_SECONDS = 30 * 60
 REGISTRY_DIRNAME = "genome_wide_ko_oe_screen"
+GENE_FULL_RUN_MIN_TASKS = 1000
 
 
 @dataclass(frozen=True)
@@ -110,15 +111,34 @@ def list_active_runs(paths: ProjectPaths) -> list[RunInfo]:
     return [run for run in list_runs(paths) if run.status in {"starting", "running"} and not run.is_stale]
 
 
-def run_group_key(run: RunInfo) -> tuple[str, frozenset[str]]:
+def run_scope_family(run: RunInfo) -> str:
+    """Return the UI/reporting family for a run.
+
+    Gene-scope runs can be either full model sweeps or small smoke/pilot runs.
+    They share the same executable scope but should not be displayed or
+    superseded as the same analysis.
+    """
+    if run.scope != "gene":
+        return run.scope
+    total = max(run.total, run.done)
+    if total >= GENE_FULL_RUN_MIN_TASKS:
+        return "gene"
+    return "gene_limited"
+
+
+def run_group_key(run: RunInfo) -> tuple[str, frozenset[str], str]:
     """Two runs are "the same analysis, re-run" if they share scope and target set.
 
     e.g. a catalog-scope run over {hLF, OPN} superseding an older catalog-scope run over
     the same two targets is one group; gene-scope hLF and gene-scope OPN are NOT the same
     group even though they share a scope, since they cover different targets, not repeats
     of the same analysis.
+
+    Full gene-scope sweeps and small gene-scope smoke/pilot runs are also different
+    analyses. Without this distinction, a newer 2-gene hLF smoke run would hide the
+    older 1025-gene hLF overnight run as "superseded" history.
     """
-    return (run.scope, frozenset(run.targets))
+    return (run.scope, frozenset(run.targets), run_scope_family(run))
 
 
 def latest_runs_by_group(runs: list[RunInfo]) -> list[RunInfo]:
@@ -187,4 +207,5 @@ __all__ = [
     "older_runs_by_group",
     "registry_dir",
     "run_group_key",
+    "run_scope_family",
 ]
