@@ -14,6 +14,7 @@ GENE_CATALOG_CACHE_SCHEMA_VERSION = 1
 GENE_CATALOG_CACHE_DIR = Path("local_runs") / "streamlit_pichia_runs" / "gene_catalog_cache"
 GENE_CATALOG_CACHE_FILE = "full_model_gene_catalog.json"
 GENE_ID_STANDARDIZATION_CACHE_FILE = "pichia_gene_id_standardization.json"
+HLF_OPN_CANDIDATE_CACHE_FILE = "hlf_opn_candidate_genes.json"
 SECRETION_GENE_EVIDENCE_CACHE_FILE = "secretion_gene_evidence.json"
 
 
@@ -209,6 +210,104 @@ def pichia_gene_id_standardization_summary(
     return summarize_pichia_gene_id_standardization_rows(tuple(rows))
 
 
+def load_hlf_opn_candidate_genes(
+    *,
+    target_context: str | None = None,
+    include_shared: bool = True,
+    force_refresh: bool = False,
+    paths: ProjectPaths | None = None,
+) -> list[dict[str, Any]]:
+    """Return hLF/OPN-specific secretion candidate genes from the offline cache."""
+    ensure_python_pichia_on_path()
+
+    from pcsec_pichia.services.target_gene_candidates import (
+        build_hlf_opn_candidate_gene_rows,
+        filter_hlf_opn_candidate_gene_rows,
+        load_hlf_opn_candidate_gene_cache,
+        write_hlf_opn_candidate_gene_cache,
+    )
+
+    cache_path = hlf_opn_candidate_gene_cache_path(paths)
+    if not force_refresh and cache_path.exists():
+        cached_rows = load_hlf_opn_candidate_gene_cache(cache_path)
+        if cached_rows:
+            return [
+                row.to_dict()
+                for row in filter_hlf_opn_candidate_gene_rows(
+                    cached_rows,
+                    target_context=target_context,
+                    include_shared=include_shared,
+                )
+            ]
+
+    rows = build_hlf_opn_candidate_gene_rows(
+        full_model_rows=load_pichia_full_model_gene_catalog(paths=paths),
+        standard_name_rows=load_pichia_gene_id_standardization(paths=paths),
+        secretion_gene_catalog=_secretion_gene_catalog_entries(),
+        homology_evidence_by_gene=_load_offline_homology_evidence(paths),
+    )
+    write_hlf_opn_candidate_gene_cache(rows, cache_path)
+    return [
+        row.to_dict()
+        for row in filter_hlf_opn_candidate_gene_rows(
+            rows,
+            target_context=target_context,
+            include_shared=include_shared,
+        )
+    ]
+
+
+def hlf_opn_candidate_gene_summary(
+    *,
+    paths: ProjectPaths | None = None,
+) -> dict[str, Any]:
+    """Summarize the hLF/OPN candidate cache without running BLAST or online fetches."""
+    ensure_python_pichia_on_path()
+
+    from pcsec_pichia.services.target_gene_candidates import (
+        build_hlf_opn_candidate_gene_rows,
+        load_hlf_opn_candidate_gene_cache,
+        summarize_hlf_opn_candidate_gene_rows,
+    )
+
+    cache_path = hlf_opn_candidate_gene_cache_path(paths)
+    rows = load_hlf_opn_candidate_gene_cache(cache_path) if cache_path.exists() else ()
+    if not rows:
+        rows = build_hlf_opn_candidate_gene_rows(
+            full_model_rows=load_pichia_full_model_gene_catalog(paths=paths),
+            standard_name_rows=load_pichia_gene_id_standardization(paths=paths),
+            secretion_gene_catalog=_secretion_gene_catalog_entries(),
+            homology_evidence_by_gene=_load_offline_homology_evidence(paths),
+        )
+    return summarize_hlf_opn_candidate_gene_rows(tuple(rows))
+
+
+def hlf_opn_executable_candidate_inputs(
+    *,
+    target_context: str,
+    include_shared: bool = True,
+    paths: ProjectPaths | None = None,
+) -> dict[str, Any]:
+    """Return only model-executable KO/OE gene ids for the requested target context."""
+    ensure_python_pichia_on_path()
+
+    from pcsec_pichia.services.target_gene_candidates import (
+        executable_inputs_for_hlf_opn_candidates,
+        load_hlf_opn_candidate_gene_cache,
+    )
+
+    cache_path = hlf_opn_candidate_gene_cache_path(paths)
+    rows = load_hlf_opn_candidate_gene_cache(cache_path)
+    if not rows:
+        load_hlf_opn_candidate_genes(paths=paths)
+        rows = load_hlf_opn_candidate_gene_cache(cache_path)
+    return executable_inputs_for_hlf_opn_candidates(
+        rows,
+        target_context=target_context,
+        include_shared=include_shared,
+    )
+
+
 def build_pichia_gene_evidence_cache(
     paths: ProjectPaths | None = None,
     progress=None,
@@ -256,9 +355,27 @@ def pichia_gene_id_standardization_cache_path(paths: ProjectPaths | None = None)
     return resolved_paths.repo_root / GENE_CATALOG_CACHE_DIR / GENE_ID_STANDARDIZATION_CACHE_FILE
 
 
+def hlf_opn_candidate_gene_cache_path(paths: ProjectPaths | None = None) -> Path:
+    resolved_paths = paths or ProjectPaths.discover(Path(__file__))
+    return resolved_paths.repo_root / GENE_CATALOG_CACHE_DIR / HLF_OPN_CANDIDATE_CACHE_FILE
+
+
 def pichia_secretion_gene_evidence_cache_path(paths: ProjectPaths | None = None) -> Path:
     resolved_paths = paths or ProjectPaths.discover(Path(__file__))
     return resolved_paths.repo_root / GENE_CATALOG_CACHE_DIR / SECRETION_GENE_EVIDENCE_CACHE_FILE
+
+
+def _secretion_gene_catalog_entries() -> tuple[Any, ...]:
+    from pcsec_pichia.services.gene_catalog import SECRETION_GENE_CATALOG
+
+    return tuple(SECRETION_GENE_CATALOG)
+
+
+def _load_offline_homology_evidence(paths: ProjectPaths | None = None) -> dict[str, Any]:
+    from pcsec_pichia.services.homology_evidence import DEFAULT_HOMOLOGY_AUDIT_CACHE_DIR, load_homology_evidence_cache
+
+    resolved_paths = paths or ProjectPaths.discover(Path(__file__))
+    return load_homology_evidence_cache(resolved_paths.repo_root / DEFAULT_HOMOLOGY_AUDIT_CACHE_DIR)
 
 
 def _verified_secretion_gene_row(
@@ -638,6 +755,7 @@ def _is_secretory_lookup_process(process: str) -> bool:
 __all__ = [
     "GENE_CATALOG_CACHE_DIR",
     "GENE_ID_STANDARDIZATION_CACHE_FILE",
+    "HLF_OPN_CANDIDATE_CACHE_FILE",
     "SECRETION_GENE_EVIDENCE_CACHE_FILE",
     "build_pichia_gene_evidence_cache",
     "get_pichia_ko_genes_for_selection",
@@ -649,8 +767,12 @@ __all__ = [
     "list_pichia_gene_rule_evidence",
     "list_pichia_gene_options",
     "list_verified_secretion_gene_library",
+    "load_hlf_opn_candidate_genes",
     "load_pichia_gene_id_standardization",
     "load_pichia_full_model_gene_catalog",
+    "hlf_opn_candidate_gene_cache_path",
+    "hlf_opn_candidate_gene_summary",
+    "hlf_opn_executable_candidate_inputs",
     "pichia_gene_id_standardization_cache_path",
     "pichia_gene_id_standardization_summary",
     "pichia_full_model_gene_catalog_cache_path",
