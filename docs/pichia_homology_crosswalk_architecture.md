@@ -1,7 +1,7 @@
 # BLAST/RBH 同源映射架构
 
 状态：active  
-最后更新：2026-07-07
+最后更新：2026-07-08
 
 ## 目标
 
@@ -67,6 +67,7 @@ python_pichia/src/pcsec_pichia/homology/
   cache_schema.py
   review_rules.py
   catalog_inputs.py
+  external_fetch.py
 
 python_pichia/src/pcsec_pichia/services/
   homology_evidence.py
@@ -83,12 +84,14 @@ app/ui/
 
 scripts/
   build_pichia_homology_cache.py
+  build_pichia_external_name_reference_cache.py
 
 python_pichia/tests/
   test_homology_sequence_sources.py
   test_homology_blast_parser.py
   test_homology_rbh.py
   test_homology_crosswalk.py
+  test_homology_external_fetch.py
   test_homology_review_rules.py
   test_screens_entrypoints.py
   test_yield_improvement_recommendations.py
@@ -430,7 +433,16 @@ Optional input for future external database review:
 --external-name-reference-cache <offline-jsonl-or-tsv>
 ```
 
-The expected reference fields are `source_database`, `source_version`, `taxon`, `accession`, `gene_name`, `locus_tag`, `aliases`, `retrieved_at`, and `warnings`. This is an offline cache contract only; no online UniProt / NCBI / SGD / KEGG fetcher is implemented in the Streamlit runtime.
+The expected reference fields are `source_database`, `source_version`, `taxon`, `accession`, `gene_name`, `locus_tag`, `aliases`, `retrieved_at`, and `warnings`. This is an offline cache contract only. UniProt / NCBI / SGD fetch clients are available through `scripts/build_pichia_external_name_reference_cache.py`, but the Streamlit runtime only reads the generated cache and does not perform live network lookups.
+
+To build a small external reference cache for review:
+
+```powershell
+python scripts\build_pichia_external_name_reference_cache.py --homology-cache-dir local_runs\pichia_homology_cache\manual_review --output-path local_runs\pichia_homology_cache\manual_review\external_name_references.jsonl --sources uniprot,ncbi,sgd --limit 5
+python scripts\build_pichia_homology_cache.py --catalog-only --parse-existing --output-dir local_runs\pichia_homology_cache\manual_review_with_external --external-name-reference-cache local_runs\pichia_homology_cache\manual_review\external_name_references.jsonl
+```
+
+The Streamlit cache/export tab reports whether `external_name_references.jsonl` is present, the reference count/source counts, the recommended external build command, and the current `external_crosscheck_status` counts. These status fields do not change RBH calls, rule-transfer status, KO/OE recommendation tiers, or phenotype evidence.
 
 ## Integration path
 
@@ -440,7 +452,7 @@ The expected reference fields are `source_database`, `source_version`, `taxon`, 
 - Round 3: Streamlit audit browser completed.
 - Round 4: homology evidence joined into KO/OE explanations without changing recommendation-tier science boundaries.
 - Round 5: offline external database crosscheck contract completed.
-- Round 6: final docs and usage notes completed in active docs.
+- Round 6: external fetch clients, external reference cache builder, Streamlit external cache status, and final smoke/docs completed.
 
 At every phase, homology evidence remains separate from phenotype evidence and model executability.
 

@@ -1,7 +1,7 @@
 # pcSecPichia 下一步计划
 
 状态：active  
-最后更新：2026-07-07
+最后更新：2026-07-08
 
 ## 工作原则
 
@@ -28,7 +28,7 @@
 - 先覆盖 `SECRETION_GENE_CATALOG` 相关 query，但不自动写回 catalog，也不把同源命中直接当作 KO/OE 模型 gene。
 - CLI / scripts 只作为离线 cache builder，不是最终产品入口；Streamlit runtime 默认不跑 BLAST。
 - KO/OE 预览和 yield recommendation 行已透传 homology evidence / review status / rule-transfer status / warnings，但 recommendation tier 不因 RBH 或 annotation 自动升级。
-- 已预留离线 external name crosscheck 契约，可读 JSONL/TSV reference cache 并在 Streamlit name audit 表中显示 external status/source/warnings；本阶段未实现在线抓取器。
+- 已实现离线 external name crosscheck 契约、官方 UniProt / NCBI / SGD fetch clients、external reference cache builder，以及 Streamlit external cache 状态显示；Streamlit runtime 仍只读 cache，不做实时联网查询。
 
 设计文档：[BLAST/RBH 同源映射架构](pichia_homology_crosswalk_architecture.md)
 
@@ -39,8 +39,8 @@
 3. Round 2：新增 app service facade，只读 cache、过滤、summary、导出，不运行 BLAST。
 4. Round 3：新增 Streamlit 页面“基因命名与同源规则审计”。
 5. Round 4：把 homology evidence 作为并行解释层接入 KO/OE 预览和 evidence summary，不改变 recommendation tier 边界。
-6. Round 5：预留离线外部数据库名称校对契约，不做 runtime 联网。
-7. Round 6：最终文档收束，说明已实现内容、边界和使用方式。
+6. Round 5：离线外部数据库名称校对契约、官方 API fetch clients、external reference cache builder 和 Streamlit 状态显示。
+7. Round 6：端到端 smoke 与最终文档收束，说明已实现内容、边界和使用方式。
 
 Round 0 到 Round 6 已完成并按轮次 commit / push 到功能分支；每轮均保留 focused tests / compileall / 保护目录检查记录。
 
@@ -50,11 +50,14 @@ Round 0 到 Round 6 已完成并按轮次 commit / push 到功能分支；每轮
 # 生成离线 cache；页面不会自动运行 BLAST
 python scripts\build_pichia_homology_cache.py --catalog-only --output-dir local_runs\pichia_homology_cache\manual_review
 
-# 如已有人工准备的外部名称 reference JSONL/TSV，可显式合并到 name audit
-python scripts\build_pichia_homology_cache.py --catalog-only --external-name-reference-cache local_runs\external_name_refs.tsv --output-dir local_runs\pichia_homology_cache\manual_review
+# 小批量生成外部名称 reference cache；只在脚本中联网，Streamlit 不会实时联网
+python scripts\build_pichia_external_name_reference_cache.py --homology-cache-dir local_runs\pichia_homology_cache\manual_review --output-path local_runs\pichia_homology_cache\manual_review\external_name_references.jsonl --sources uniprot,ncbi,sgd --limit 5
+
+# 将外部名称 reference cache 显式合并到 name audit
+python scripts\build_pichia_homology_cache.py --catalog-only --parse-existing --external-name-reference-cache local_runs\pichia_homology_cache\manual_review\external_name_references.jsonl --output-dir local_runs\pichia_homology_cache\manual_review_with_external
 ```
 
-Streamlit 入口：启动 `app/ui/streamlit_app.py` 后打开导航项“基因命名与同源规则审计”。页面只读 `local_runs/pichia_homology_cache` 下最新有效 cache run，支持搜索、状态筛选、RBH / model gene 筛选、identity 阈值筛选和 TSV/CSV 导出。
+Streamlit 入口：启动 `app/ui/streamlit_app.py` 后打开导航项“基因命名与同源规则审计”。页面只读 `local_runs/pichia_homology_cache` 下最新有效 cache run，支持搜索、状态筛选、RBH / model gene 筛选、identity 阈值筛选、external cache 状态查看和 TSV/CSV 导出。
 
 最终验收：
 
@@ -69,7 +72,7 @@ git diff --name-only -- Code Model Enzymedata Results requirements.txt python_pi
 保留下一步：
 
 - 人工复核 smoke / production cache 后，决定是否把某个 crosswalk 版本提升为稳定科学资产。
-- 如要接 UniProt / NCBI / SGD / KEGG，只新增离线 builder 或手工导入流程；Streamlit runtime 仍保持不联网。
+- 如要扩展 UniProt / NCBI / SGD 字段或加入 KEGG，只改离线 builder 或手工导入流程；Streamlit runtime 仍保持不联网。
 - 对 external conflict、paralog risk 和 `rbh_not_in_model` 逐条做人工复核，再决定是否调整 curated catalog 或模型 GPR 映射。
 
 ### 2. Shadow LP service/backend toggle
