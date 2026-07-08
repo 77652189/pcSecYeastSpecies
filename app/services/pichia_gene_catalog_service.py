@@ -15,6 +15,7 @@ GENE_CATALOG_CACHE_DIR = Path("local_runs") / "streamlit_pichia_runs" / "gene_ca
 GENE_CATALOG_CACHE_FILE = "full_model_gene_catalog.json"
 GENE_ID_STANDARDIZATION_CACHE_FILE = "pichia_gene_id_standardization.json"
 HLF_OPN_CANDIDATE_CACHE_FILE = "hlf_opn_candidate_genes.json"
+HLF_OPN_OVERLAY_REVIEW_CACHE_FILE = "hlf_opn_gpr_overlay_review.json"
 SECRETION_GENE_EVIDENCE_CACHE_FILE = "secretion_gene_evidence.json"
 
 
@@ -308,6 +309,76 @@ def hlf_opn_executable_candidate_inputs(
     )
 
 
+def load_hlf_opn_gpr_overlay_review(
+    *,
+    target_context: str | None = None,
+    include_shared: bool = True,
+    force_refresh: bool = False,
+    paths: ProjectPaths | None = None,
+) -> list[dict[str, Any]]:
+    """Return review-only GPR overlay candidates for high-value hLF/OPN model-external genes."""
+    ensure_python_pichia_on_path()
+
+    from pcsec_pichia.services.target_gpr_overlay_review import (
+        build_hlf_opn_gpr_overlay_review_rows,
+        filter_hlf_opn_gpr_overlay_review_rows,
+        load_hlf_opn_gpr_overlay_review_cache,
+        write_hlf_opn_gpr_overlay_review_cache,
+    )
+
+    cache_path = hlf_opn_gpr_overlay_review_cache_path(paths)
+    if not force_refresh and cache_path.exists():
+        cached_rows = load_hlf_opn_gpr_overlay_review_cache(cache_path)
+        if cached_rows:
+            return [
+                row.to_dict()
+                for row in filter_hlf_opn_gpr_overlay_review_rows(
+                    cached_rows,
+                    target_context=target_context,
+                    include_shared=include_shared,
+                )
+            ]
+
+    rows = build_hlf_opn_gpr_overlay_review_rows(
+        candidate_rows=load_hlf_opn_candidate_genes(paths=paths),
+        gene_rule_evidence_by_name=_load_offline_gene_rule_evidence(paths),
+        model_reaction_ids=_load_model_reaction_ids(paths),
+    )
+    write_hlf_opn_gpr_overlay_review_cache(rows, cache_path)
+    return [
+        row.to_dict()
+        for row in filter_hlf_opn_gpr_overlay_review_rows(
+            rows,
+            target_context=target_context,
+            include_shared=include_shared,
+        )
+    ]
+
+
+def hlf_opn_gpr_overlay_review_summary(
+    *,
+    paths: ProjectPaths | None = None,
+) -> dict[str, Any]:
+    """Summarize review-only GPR overlay candidates without mutating model GPR rules."""
+    ensure_python_pichia_on_path()
+
+    from pcsec_pichia.services.target_gpr_overlay_review import (
+        build_hlf_opn_gpr_overlay_review_rows,
+        load_hlf_opn_gpr_overlay_review_cache,
+        summarize_hlf_opn_gpr_overlay_review_rows,
+    )
+
+    cache_path = hlf_opn_gpr_overlay_review_cache_path(paths)
+    rows = load_hlf_opn_gpr_overlay_review_cache(cache_path) if cache_path.exists() else ()
+    if not rows:
+        rows = build_hlf_opn_gpr_overlay_review_rows(
+            candidate_rows=load_hlf_opn_candidate_genes(paths=paths),
+            gene_rule_evidence_by_name=_load_offline_gene_rule_evidence(paths),
+            model_reaction_ids=_load_model_reaction_ids(paths),
+        )
+    return summarize_hlf_opn_gpr_overlay_review_rows(tuple(rows))
+
+
 def build_pichia_gene_evidence_cache(
     paths: ProjectPaths | None = None,
     progress=None,
@@ -360,6 +431,11 @@ def hlf_opn_candidate_gene_cache_path(paths: ProjectPaths | None = None) -> Path
     return resolved_paths.repo_root / GENE_CATALOG_CACHE_DIR / HLF_OPN_CANDIDATE_CACHE_FILE
 
 
+def hlf_opn_gpr_overlay_review_cache_path(paths: ProjectPaths | None = None) -> Path:
+    resolved_paths = paths or ProjectPaths.discover(Path(__file__))
+    return resolved_paths.repo_root / GENE_CATALOG_CACHE_DIR / HLF_OPN_OVERLAY_REVIEW_CACHE_FILE
+
+
 def pichia_secretion_gene_evidence_cache_path(paths: ProjectPaths | None = None) -> Path:
     resolved_paths = paths or ProjectPaths.discover(Path(__file__))
     return resolved_paths.repo_root / GENE_CATALOG_CACHE_DIR / SECRETION_GENE_EVIDENCE_CACHE_FILE
@@ -376,6 +452,21 @@ def _load_offline_homology_evidence(paths: ProjectPaths | None = None) -> dict[s
 
     resolved_paths = paths or ProjectPaths.discover(Path(__file__))
     return load_homology_evidence_cache(resolved_paths.repo_root / DEFAULT_HOMOLOGY_AUDIT_CACHE_DIR)
+
+
+def _load_offline_gene_rule_evidence(paths: ProjectPaths | None = None) -> dict[str, Any]:
+    from pcsec_pichia.services.gene_rule_overlay import DEFAULT_GENE_RULE_EVIDENCE_CACHE, load_gene_rule_evidence_cache
+
+    resolved_paths = paths or ProjectPaths.discover(Path(__file__))
+    return load_gene_rule_evidence_cache(resolved_paths.repo_root / DEFAULT_GENE_RULE_EVIDENCE_CACHE)
+
+
+def _load_model_reaction_ids(paths: ProjectPaths | None = None) -> set[str]:
+    from pcsec_pichia.loading import load_pcsec_pichia_inputs
+
+    resolved_paths = paths or ProjectPaths.discover(Path(__file__))
+    inputs = load_pcsec_pichia_inputs(resolved_paths.repo_root)
+    return {str(item) for item in getattr(inputs.prepared_model, "rxns", ())}
 
 
 def _verified_secretion_gene_row(
@@ -756,6 +847,7 @@ __all__ = [
     "GENE_CATALOG_CACHE_DIR",
     "GENE_ID_STANDARDIZATION_CACHE_FILE",
     "HLF_OPN_CANDIDATE_CACHE_FILE",
+    "HLF_OPN_OVERLAY_REVIEW_CACHE_FILE",
     "SECRETION_GENE_EVIDENCE_CACHE_FILE",
     "build_pichia_gene_evidence_cache",
     "get_pichia_ko_genes_for_selection",
@@ -773,6 +865,9 @@ __all__ = [
     "hlf_opn_candidate_gene_cache_path",
     "hlf_opn_candidate_gene_summary",
     "hlf_opn_executable_candidate_inputs",
+    "hlf_opn_gpr_overlay_review_cache_path",
+    "hlf_opn_gpr_overlay_review_summary",
+    "load_hlf_opn_gpr_overlay_review",
     "pichia_gene_id_standardization_cache_path",
     "pichia_gene_id_standardization_summary",
     "pichia_full_model_gene_catalog_cache_path",
