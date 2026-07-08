@@ -13,6 +13,7 @@ from pcsec_pichia.core.paths import ProjectPaths
 GENE_CATALOG_CACHE_SCHEMA_VERSION = 1
 GENE_CATALOG_CACHE_DIR = Path("local_runs") / "streamlit_pichia_runs" / "gene_catalog_cache"
 GENE_CATALOG_CACHE_FILE = "full_model_gene_catalog.json"
+GENE_ID_STANDARDIZATION_CACHE_FILE = "pichia_gene_id_standardization.json"
 SECRETION_GENE_EVIDENCE_CACHE_FILE = "secretion_gene_evidence.json"
 
 
@@ -159,6 +160,55 @@ def load_pichia_full_model_gene_catalog(
     return rows
 
 
+def load_pichia_gene_id_standardization(
+    *,
+    force_refresh: bool = False,
+    paths: ProjectPaths | None = None,
+) -> list[dict[str, Any]]:
+    """Return the gene_id-primary standard naming cache for current model genes."""
+    ensure_python_pichia_on_path()
+
+    from pcsec_pichia.services.gene_id_standardization import (
+        build_pichia_gene_id_standardization_rows,
+        load_pichia_gene_id_standardization_cache,
+        write_pichia_gene_id_standardization_cache,
+    )
+
+    cache_path = pichia_gene_id_standardization_cache_path(paths)
+    if not force_refresh and cache_path.exists():
+        cached_rows = load_pichia_gene_id_standardization_cache(cache_path)
+        if cached_rows:
+            return [row.to_dict() for row in cached_rows]
+
+    full_model_rows = load_pichia_full_model_gene_catalog(force_refresh=force_refresh, paths=paths)
+    rows = build_pichia_gene_id_standardization_rows(full_model_rows)
+    write_pichia_gene_id_standardization_cache(rows, cache_path)
+    return [row.to_dict() for row in rows]
+
+
+def pichia_gene_id_standardization_summary(
+    *,
+    paths: ProjectPaths | None = None,
+) -> dict[str, Any]:
+    """Summarize the gene_id-primary standard naming cache without rebuilding online evidence."""
+    ensure_python_pichia_on_path()
+
+    from pcsec_pichia.services.gene_id_standardization import (
+        build_pichia_gene_id_standardization_rows,
+        load_pichia_gene_id_standardization_cache,
+        summarize_pichia_gene_id_standardization_rows,
+    )
+
+    cache_path = pichia_gene_id_standardization_cache_path(paths)
+    if cache_path.exists():
+        rows = load_pichia_gene_id_standardization_cache(cache_path)
+    else:
+        rows = build_pichia_gene_id_standardization_rows(load_pichia_full_model_gene_catalog(paths=paths))
+    if not rows:
+        rows = build_pichia_gene_id_standardization_rows(load_pichia_full_model_gene_catalog(paths=paths))
+    return summarize_pichia_gene_id_standardization_rows(tuple(rows))
+
+
 def build_pichia_gene_evidence_cache(
     paths: ProjectPaths | None = None,
     progress=None,
@@ -199,6 +249,11 @@ def build_pichia_gene_evidence_cache(
 def pichia_full_model_gene_catalog_cache_path(paths: ProjectPaths | None = None) -> Path:
     resolved_paths = paths or ProjectPaths.discover(Path(__file__))
     return resolved_paths.repo_root / GENE_CATALOG_CACHE_DIR / GENE_CATALOG_CACHE_FILE
+
+
+def pichia_gene_id_standardization_cache_path(paths: ProjectPaths | None = None) -> Path:
+    resolved_paths = paths or ProjectPaths.discover(Path(__file__))
+    return resolved_paths.repo_root / GENE_CATALOG_CACHE_DIR / GENE_ID_STANDARDIZATION_CACHE_FILE
 
 
 def pichia_secretion_gene_evidence_cache_path(paths: ProjectPaths | None = None) -> Path:
@@ -582,6 +637,7 @@ def _is_secretory_lookup_process(process: str) -> bool:
 
 __all__ = [
     "GENE_CATALOG_CACHE_DIR",
+    "GENE_ID_STANDARDIZATION_CACHE_FILE",
     "SECRETION_GENE_EVIDENCE_CACHE_FILE",
     "build_pichia_gene_evidence_cache",
     "get_pichia_ko_genes_for_selection",
@@ -593,7 +649,10 @@ __all__ = [
     "list_pichia_gene_rule_evidence",
     "list_pichia_gene_options",
     "list_verified_secretion_gene_library",
+    "load_pichia_gene_id_standardization",
     "load_pichia_full_model_gene_catalog",
+    "pichia_gene_id_standardization_cache_path",
+    "pichia_gene_id_standardization_summary",
     "pichia_full_model_gene_catalog_cache_path",
     "pichia_secretion_gene_evidence_cache_path",
 ]
