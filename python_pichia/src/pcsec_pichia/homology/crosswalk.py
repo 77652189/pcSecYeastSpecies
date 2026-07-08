@@ -514,33 +514,17 @@ def _reference_matches_name_row(row: NameAuditRow, reference: ExternalNameRefere
         and _normalize_crosscheck_token(row.external_accession) == _normalize_crosscheck_token(reference.accession)
     )
     locus_candidates = (row.external_locus_tag, row.internal_gene_id)
+    reference_locus_candidates = (reference.locus_tag, reference.gene_name)
     locus_matches = any(
         candidate
-        and reference.locus_tag
-        and _normalize_crosscheck_token(candidate) == _normalize_crosscheck_token(reference.locus_tag)
+        and reference_value
+        and _normalize_crosscheck_token(candidate) == _normalize_crosscheck_token(reference_value)
         for candidate in locus_candidates
+        for reference_value in reference_locus_candidates
     )
     if accession_matches or locus_matches:
         return True
-
-    row_names = _name_row_tokens(row)
-    reference_names = {
-        token
-        for token in (
-            _normalize_crosscheck_token(reference.gene_name),
-            *(_normalize_crosscheck_token(alias) for alias in reference.aliases),
-        )
-        if token
-    }
-    return bool(row_names & reference_names)
-
-
-def _name_row_tokens(row: NameAuditRow) -> set[str]:
-    tokens: set[str] = set()
-    for value in (row.internal_common_name, row.external_gene_name, *row.external_aliases):
-        text = str(value or "").replace("/", " ").replace(",", " ").replace(";", " ")
-        tokens.update(_normalize_crosscheck_token(token) for token in text.split())
-    return {token for token in tokens if token}
+    return False
 
 
 def _combined_external_status(crosschecks: tuple[ExternalDatabaseCrosscheck, ...]) -> str:
@@ -548,10 +532,10 @@ def _combined_external_status(crosschecks: tuple[ExternalDatabaseCrosscheck, ...
     if not statuses:
         return EXTERNAL_CROSSCHECK_NOT_AVAILABLE
     priority = (
-        EXTERNAL_CONFLICT,
         EXTERNAL_MATCH_CONFIRMED,
         EXTERNAL_ALIAS_CONFIRMED,
         EXTERNAL_LOCUS_CONFIRMED,
+        EXTERNAL_CONFLICT,
         EXTERNAL_REFERENCE_INCOMPLETE,
         EXTERNAL_CROSSCHECK_NOT_AVAILABLE,
     )

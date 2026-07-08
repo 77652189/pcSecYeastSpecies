@@ -177,10 +177,20 @@ def test_external_reference_builder_collects_deduped_name_audit_queries() -> Non
     assert [(query.match_key, query.query) for query in queries] == [
         ("external_accession", "C4R8K4"),
         ("external_locus_tag", "PAS_chr2-1_0140"),
-        ("external_gene_name", "KAR2"),
-        ("internal_common_name", "KAR2 / BiP"),
-        ("internal_sequence_id", "YJL034W"),
-        ("internal_common_name", "KAR2 duplicate"),
+    ]
+
+
+def test_external_reference_builder_avoids_unscoped_sce_name_queries() -> None:
+    builder = _load_builder_module()
+    rows = (
+        _name_row("CDC48", "YDL126C", "C4R9A6", "PAS_FragD_0026", "PAS_FragD_0026"),
+    )
+
+    queries = builder.collect_external_reference_queries(rows)
+
+    assert [(query.match_key, query.query) for query in queries] == [
+        ("external_accession", "C4R9A6"),
+        ("external_locus_tag", "PAS_FragD_0026"),
     ]
 
 

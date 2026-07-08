@@ -113,9 +113,7 @@ def collect_external_reference_queries(
         for match_key, value in (
             ("external_accession", row.external_accession),
             ("external_locus_tag", row.external_locus_tag),
-            ("external_gene_name", row.external_gene_name),
-            ("internal_common_name", row.internal_common_name),
-            ("internal_sequence_id", row.internal_sequence_id),
+            ("internal_gene_id", row.internal_gene_id),
         ):
             query = str(value or "").strip()
             if not query or query.lower() in seen:

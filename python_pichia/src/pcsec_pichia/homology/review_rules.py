@@ -12,6 +12,7 @@ MANUAL_REVIEW_REQUIRED = "manual_review_required"
 
 NAME_CONFIRMED_BY_RBH = "name_confirmed_by_rbh"
 ALIAS_CONFIRMED_BY_RBH = "alias_confirmed_by_rbh"
+PICHIA_LOCUS_CONFIRMED_BY_RBH = "pichia_locus_confirmed_by_rbh"
 SEQUENCE_NAME_CONFLICT = "sequence_name_conflict"
 EXTERNAL_NAME_MISSING = "external_name_missing"
 INTERNAL_NAME_MISSING = "internal_name_missing"
@@ -93,6 +94,8 @@ def classify_name_consistency(
         return NAME_CONFIRMED_BY_RBH
     if internal in aliases:
         return ALIAS_CONFIRMED_BY_RBH
+    if any(_looks_like_stable_pichia_identifier(value) for value in (external_gene_name, *external_aliases)):
+        return PICHIA_LOCUS_CONFIRMED_BY_RBH
     return SEQUENCE_NAME_CONFLICT
 
 
@@ -147,12 +150,12 @@ def classify_external_name_crosscheck(
         return EXTERNAL_MATCH_CONFIRMED, ()
     if candidate_names & reference_alias_names:
         return EXTERNAL_ALIAS_CONFIRMED, ()
+    if candidate_locus and reference_locus and candidate_locus == reference_locus:
+        return EXTERNAL_LOCUS_CONFIRMED, ()
     if reference_name or reference_alias_names:
         return EXTERNAL_CONFLICT, (
             "external reference name or alias does not match current RBH-derived name fields",
         )
-    if candidate_locus and reference_locus and candidate_locus == reference_locus:
-        return EXTERNAL_LOCUS_CONFIRMED, ()
     return EXTERNAL_REFERENCE_INCOMPLETE, ("external reference lacks comparable name, alias, or locus data",)
 
 
@@ -163,6 +166,15 @@ def _normalize_name(value: str) -> str:
 def _split_name_tokens(value: str) -> set[str]:
     normalized = value.replace("/", " ").replace(",", " ").replace(";", " ")
     return {_normalize_name(token) for token in normalized.split() if token}
+
+
+def _looks_like_stable_pichia_identifier(value: object) -> bool:
+    text = str(value or "").strip().upper().replace(" ", "")
+    if not text:
+        return False
+    if text.startswith(("PAS_", "PAS-", "PASCHR", "AT250_GQ_")):
+        return True
+    return len(text) >= 6 and text.startswith("C4") and text[:6].isalnum()
 
 
 def _candidate_name_tokens(

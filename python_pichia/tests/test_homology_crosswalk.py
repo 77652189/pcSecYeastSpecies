@@ -34,6 +34,7 @@ from pcsec_pichia.homology.review_rules import (
     LOW_IDENTITY_REVIEW_REQUIRED,
     MODEL_READY_RBH_HIGH_CONFIDENCE,
     NO_RECIPROCAL_HIT,
+    PICHIA_LOCUS_CONFIRMED_BY_RBH,
     RBH_NOT_IN_MODEL,
     RULE_TRANSFER_LOW_CONFIDENCE,
     RULE_TRANSFER_NOT_SUPPORTED,
@@ -162,6 +163,37 @@ def test_build_name_audit_rows_flags_name_conflict() -> None:
     assert audit[0].name_consistency_status == "sequence_name_conflict"
 
 
+def test_build_name_audit_rows_treats_pichia_locus_as_stable_name() -> None:
+    rows = build_homology_crosswalk(
+        (CatalogHomologyQuery(internal_common_name="CDC48", query_symbol="CDC48"),),
+        (ProteinRecord(organism="sce", gene_id="YDL126C", symbol="CDC48", sequence="M"),),
+        (
+            ProteinRecord(
+                organism="pichia",
+                gene_id="PAS_FragD_0026",
+                symbol="PAS_FragD_0026",
+                aliases=("C4R9A6",),
+                sequence="M",
+            ),
+        ),
+        {"PAS_FragD_0026"},
+        (
+            ReciprocalBestHit(
+                "YDL126C",
+                "PAS_FragD_0026",
+                True,
+                _hit("YDL126C", "PAS_FragD_0026"),
+                _hit("PAS_FragD_0026", "YDL126C"),
+            ),
+        ),
+        BlastConfig(),
+    )
+
+    audit = build_name_audit_rows(rows)
+
+    assert audit[0].name_consistency_status == PICHIA_LOCUS_CONFIRMED_BY_RBH
+
+
 def test_external_reference_cache_loads_jsonl_and_tsv(tmp_path: Path) -> None:
     jsonl = tmp_path / "external_refs.jsonl"
     tsv = tmp_path / "external_refs.tsv"
@@ -209,12 +241,15 @@ def test_external_crosscheck_merges_status_without_overriding_rbh_facts() -> Non
         _name_row("DOA10", "YIL030C", "C4D", "DOA10", "PAS_chr3_0123"),
         _name_row("VPS1", "YOR069W", "", "", "PAS_chr1_0440"),
         _name_row("HRD1", "YOL013C", "C4H", "HRD1", "PAS_chr4_0156"),
+        _name_row("CDC48", "YDL126C", "C4R9A6", "PAS_FragD_0026", "PAS_FragD_0026"),
     )
     references = (
         ExternalNameReference("UniProt", "2026_01", "Komagataella phaffii", "C4R", "KAR2", "PAS_chr2-1_0140"),
         ExternalNameReference("UniProt", "2026_01", "Komagataella phaffii", "C4D", "SSM4", "PAS_chr3_0123", ("DOA10",)),
         ExternalNameReference("NCBI", "2026_01", "Komagataella phaffii", "", "", "PAS_chr1_0440"),
-        ExternalNameReference("UniProt", "2026_01", "Komagataella phaffii", "C4H", "PEP4", "PAS_chr4_0156"),
+        ExternalNameReference("UniProt", "2026_01", "Komagataella phaffii", "C4H", "PEP4", "PAS_chr4_9999"),
+        ExternalNameReference("NCBI", "gene", "Komagataella phaffii", "8200528", "PAS_FragD_0026", ""),
+        ExternalNameReference("UniProt", "2026_02", "Komagataella phaffii", "C4R9A6", "C4R9A6_KOMPG", "PAS_FragD_0026"),
     )
 
     crosschecks = build_external_database_crosschecks(name_rows, references)
@@ -225,6 +260,7 @@ def test_external_crosscheck_merges_status_without_overriding_rbh_facts() -> Non
     assert by_name["DOA10"].external_crosscheck_status == EXTERNAL_ALIAS_CONFIRMED
     assert by_name["VPS1"].external_crosscheck_status == EXTERNAL_LOCUS_CONFIRMED
     assert by_name["HRD1"].external_crosscheck_status == EXTERNAL_CONFLICT
+    assert by_name["CDC48"].external_crosscheck_status == EXTERNAL_MATCH_CONFIRMED
     assert by_name["HRD1"].review_status == MODEL_READY_RBH_HIGH_CONFIDENCE
     assert by_name["HRD1"].is_rbh is True
     assert by_name["HRD1"].in_model_gene_index is True

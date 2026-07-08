@@ -11,6 +11,7 @@ from pcsec_pichia.homology.review_rules import (
     MODEL_READY_RBH_HIGH_CONFIDENCE,
     NO_RECIPROCAL_HIT,
     PARALOG_RISK_REVIEW_REQUIRED,
+    PICHIA_LOCUS_CONFIRMED_BY_RBH,
     RBH_NOT_IN_MODEL,
     RULE_TRANSFER_LOW_CONFIDENCE,
     RULE_TRANSFER_NOT_SUPPORTED,
@@ -104,6 +105,15 @@ def test_name_consistency_flags_aliases_and_conflicts() -> None:
         )
         == SEQUENCE_NAME_CONFLICT
     )
+    assert (
+        classify_name_consistency(
+            internal_common_name="CDC48",
+            external_gene_name="PAS_FragD_0026",
+            external_aliases=("C4R9A6",),
+            is_rbh=True,
+        )
+        == PICHIA_LOCUS_CONFIRMED_BY_RBH
+    )
 
 
 def test_rule_transfer_statuses_preserve_model_and_confidence_boundaries() -> None:
@@ -175,7 +185,7 @@ def test_external_name_crosscheck_classifies_name_alias_locus_and_conflict() -> 
         external_locus_tag="PAS_chr4_0156",
         external_aliases=(),
         reference_gene_name="PEP4",
-        reference_locus_tag="PAS_chr4_0156",
+        reference_locus_tag="PAS_chr4_9999",
         reference_aliases=(),
     )
     incomplete_status, incomplete_warnings = classify_external_name_crosscheck(

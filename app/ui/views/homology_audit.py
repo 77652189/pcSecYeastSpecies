@@ -30,6 +30,7 @@ REVIEW_STATUS_OPTIONS = [
 NAME_STATUS_OPTIONS = [
     "name_confirmed_by_rbh",
     "alias_confirmed_by_rbh",
+    "pichia_locus_confirmed_by_rbh",
     "sequence_name_conflict",
     "external_name_missing",
     "internal_name_missing",
