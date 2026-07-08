@@ -314,6 +314,7 @@ def _render_cache_and_export(
         - row count: `{cache_status.get("row_count", 0)}`
         """
     )
+    _render_external_cache_status(cache_status, name_rows)
     st.caption("导出的是当前筛选结果；导出动作不会重新运行 BLAST，也不会写回任何模型或 catalog。")
     export_kind = st.selectbox("导出表", ["命名标准化", "同源规则迁移评估"], key="homology_export_kind")
     export_format = st.selectbox("导出格式", ["TSV", "CSV"], key="homology_export_format")
@@ -325,6 +326,47 @@ def _render_cache_and_export(
         file_name=f"pichia_homology_{'name_audit' if export_kind == '命名标准化' else 'rule_transfer_audit'}.{suffix}",
         mime="text/tab-separated-values" if suffix == "tsv" else "text/csv",
     )
+
+
+def _render_external_cache_status(cache_status: dict[str, Any], name_rows: list[dict[str, Any]]) -> None:
+    available = "available" if cache_status.get("external_cache_available") else "not_available"
+    source_counts = cache_status.get("external_source_counts")
+    source_text = _format_source_counts(source_counts if isinstance(source_counts, dict) else {})
+    st.markdown(
+        f"""
+        **External name reference cache**
+
+        - status: `{available}`
+        - cache path: `{cache_status.get("external_cache_path", "")}`
+        - generated at: `{cache_status.get("external_cache_generated_at", "")}`
+        - reference count: `{cache_status.get("external_reference_count", 0)}`
+        - sources: `{source_text}`
+        """
+    )
+    command = str(cache_status.get("recommended_external_build_command") or "")
+    if command:
+        st.code(command, language="powershell")
+    warnings = cache_status.get("external_cache_warnings") or []
+    if warnings:
+        st.info("external cache warnings: " + "; ".join(str(item) for item in warnings))
+
+    counts = _count_rows(name_rows, "external_crosscheck_status")
+    if counts:
+        count_lines = "\n".join(f"- {status}: {count}" for status, count in sorted(counts.items()))
+    else:
+        count_lines = "- not_available: 0"
+    st.markdown(
+        "**external_crosscheck_status counts**\n\n"
+        f"{count_lines}\n\n"
+        "External crosscheck is an offline naming reference only. It does not change RBH calls, "
+        "KO/OE recommendation tiers, phenotype evidence, or run live network lookups in Streamlit."
+    )
+
+
+def _format_source_counts(source_counts: dict[str, Any]) -> str:
+    if not source_counts:
+        return "none"
+    return ", ".join(f"{source}:{count}" for source, count in sorted(source_counts.items()))
 
 
 __all__ = [

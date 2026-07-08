@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import ast
 import json
+from dataclasses import asdict
 from pathlib import Path
 
-from pcsec_pichia.homology.cache_schema import NameAuditRow, RuleTransferAuditRow
+from pcsec_pichia.homology.cache_schema import ExternalNameReference, NameAuditRow, RuleTransferAuditRow
 from pcsec_pichia.homology.crosswalk import write_name_audit_cache, write_rule_transfer_audit_cache
 
 from app.services.pichia_homology_audit_service import (
@@ -25,6 +26,10 @@ def test_missing_cache_returns_empty_state(tmp_path: Path) -> None:
     assert payload["name_audit_rows"] == []
     assert payload["rule_transfer_audit_rows"] == []
     assert "build_pichia_homology_cache.py" in payload["cache_status"]["recommended_build_command"]
+    assert payload["cache_status"]["external_cache_available"] is False
+    assert "build_pichia_external_name_reference_cache.py" in payload["cache_status"][
+        "recommended_external_build_command"
+    ]
 
 
 def test_service_loads_and_filters_name_and_rule_transfer_audits(tmp_path: Path) -> None:
@@ -67,6 +72,19 @@ def test_service_selects_latest_valid_cache_run(tmp_path: Path) -> None:
     assert status["cache_root"] == str(new_run)
 
 
+def test_service_reports_external_reference_cache_status(tmp_path: Path) -> None:
+    run_dir = _write_cache_run(tmp_path / "run1", with_external=True)
+
+    status = homology_audit_cache_status(cache_root=run_dir)
+
+    assert status["external_cache_available"] is True
+    assert status["external_cache_path"] == str(run_dir / "external_name_references.jsonl")
+    assert status["external_reference_count"] == 2
+    assert status["external_sources"] == ["NCBI", "UniProt"]
+    assert status["external_source_counts"] == {"NCBI": 1, "UniProt": 1}
+    assert "build_pichia_external_name_reference_cache.py" in status["recommended_external_build_command"]
+
+
 def test_export_returns_utf8_with_header() -> None:
     rows = [
         {
@@ -100,10 +118,12 @@ def test_homology_audit_service_does_not_import_blast_runtime() -> None:
                 called_names.add(node.func.attr)
 
     assert "pcsec_pichia.homology.blast_runner" not in imports
+    assert "pcsec_pichia.homology.external_fetch" not in imports
     assert not {"run_blastp", "make_blast_db"} & called_names
+    assert not {"fetch_external_name_references", "fetch_uniprot_name_reference"} & called_names
 
 
-def _write_cache_run(path: Path) -> Path:
+def _write_cache_run(path: Path, *, with_external: bool = False) -> Path:
     path.mkdir(parents=True)
     name_rows = (
         NameAuditRow(
@@ -197,4 +217,38 @@ def _write_cache_run(path: Path) -> Path:
         ),
         encoding="utf-8",
     )
+    if with_external:
+        _write_external_reference_cache(path)
     return path
+
+
+def _write_external_reference_cache(path: Path) -> None:
+    references = (
+        ExternalNameReference(
+            source_database="UniProt",
+            source_version="2026_01",
+            taxon="Komagataella phaffii",
+            accession="C4R",
+            gene_name="KAR2",
+            locus_tag="PAS_chr2-1_0140",
+            aliases=("BiP",),
+            retrieved_at="2026-07-08T00:00:00+00:00",
+        ),
+        ExternalNameReference(
+            source_database="NCBI",
+            source_version="gene",
+            taxon="Komagataella phaffii",
+            accession="12345",
+            gene_name="PDI1",
+            locus_tag="PAS_chr4_0844",
+            aliases=(),
+            retrieved_at="2026-07-08T00:00:00+00:00",
+        ),
+    )
+    rows = []
+    for reference in references:
+        payload = asdict(reference)
+        payload["aliases"] = list(reference.aliases)
+        payload["warnings"] = list(reference.warnings)
+        rows.append(json.dumps(payload, sort_keys=True))
+    (path / "external_name_references.jsonl").write_text("\n".join(rows) + "\n", encoding="utf-8")

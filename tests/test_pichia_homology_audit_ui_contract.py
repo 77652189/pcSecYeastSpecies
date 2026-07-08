@@ -40,6 +40,8 @@ def test_homology_audit_view_uses_service_facade_not_engine_runtime() -> None:
     assert "app.services.pichia_homology_audit_service" in imported_modules
     assert not any(module.startswith(("pcsec_pichia", "python_pichia")) for module in imported_modules)
     assert not {"run_blastp", "make_blast_db", "makeblastdb"} & called_names
+    assert "pcsec_pichia.homology.external_fetch" not in imported_modules
+    assert not {"fetch_external_name_references", "fetch_uniprot_name_reference"} & called_names
 
 
 def test_homology_audit_name_table_includes_external_crosscheck_columns() -> None:
@@ -190,6 +192,26 @@ def test_homology_audit_export_button_uses_service_export(monkeypatch) -> None:
     assert fake_st.downloads[0]["data"] == b"exported-by-service"
 
 
+def test_homology_audit_cache_tab_shows_external_cache_status(monkeypatch) -> None:
+    import app.ui.views.homology_audit as view
+
+    payload = _payload()
+    fake_st = _FakeStreamlit()
+    monkeypatch.setattr(view, "st", fake_st)
+
+    view._render_cache_and_export(
+        payload["cache_status"],
+        payload["name_audit_rows"],
+        payload["rule_transfer_audit_rows"],
+    )
+
+    rendered_markdown = "\n".join(fake_st.markdown_calls)
+    assert "External name reference cache" in rendered_markdown
+    assert "UniProt:1" in rendered_markdown
+    assert "external_match_confirmed: 1" in rendered_markdown
+    assert any("build_pichia_external_name_reference_cache.py" in call for call in fake_st.code_calls)
+
+
 def _payload() -> dict[str, Any]:
     return {
         "cache_status": {
@@ -199,6 +221,18 @@ def _payload() -> dict[str, Any]:
             "row_count": 1,
             "missing_files": [],
             "recommended_build_command": "python scripts\\build_pichia_homology_cache.py --catalog-only",
+            "external_cache_available": True,
+            "external_cache_path": "local_runs/pichia_homology_cache/smoke/external_name_references.jsonl",
+            "external_cache_generated_at": "2026-07-08T12:00:00",
+            "external_reference_count": 1,
+            "external_sources": ["UniProt"],
+            "external_source_counts": {"UniProt": 1},
+            "external_cache_warnings": [],
+            "recommended_external_build_command": (
+                "python scripts\\build_pichia_external_name_reference_cache.py "
+                "--name-audit-jsonl local_runs\\pichia_homology_cache\\smoke\\sce_to_pichia_name_audit.jsonl "
+                "--output-path local_runs\\pichia_homology_cache\\smoke\\external_name_references.jsonl"
+            ),
         },
         "summary": {
             "rule_transfer_row_count": 1,
@@ -227,6 +261,9 @@ def _payload() -> dict[str, Any]:
                 "in_model_gene_index": True,
                 "name_consistency_status": "name_confirmed_by_rbh",
                 "review_status": "model_ready_rbh_high_confidence",
+                "external_crosscheck_status": "external_match_confirmed",
+                "external_crosscheck_sources": ["UniProt:2026_01:C4R"],
+                "external_crosscheck_warnings": [],
                 "warnings": [],
             }
         ],
@@ -291,6 +328,7 @@ class _FakeStreamlit:
         self.warning_calls: list[str] = []
         self.info_calls: list[str] = []
         self.code_calls: list[str] = []
+        self.markdown_calls: list[str] = []
         self.dataframes: list[pd.DataFrame] = []
         self.downloads: list[dict[str, Any]] = []
         self.metrics: list[tuple[str, Any]] = []
@@ -312,8 +350,8 @@ class _FakeStreamlit:
     def caption(self, *args, **kwargs) -> None:
         pass
 
-    def markdown(self, *args, **kwargs) -> None:
-        pass
+    def markdown(self, value: str, *args, **kwargs) -> None:
+        self.markdown_calls.append(value)
 
     def subheader(self, *args, **kwargs) -> None:
         pass

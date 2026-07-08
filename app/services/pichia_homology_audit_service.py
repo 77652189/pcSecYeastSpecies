@@ -13,13 +13,18 @@ from app import ensure_python_pichia_on_path
 ensure_python_pichia_on_path()
 
 from pcsec_pichia.core.paths import ProjectPaths
-from pcsec_pichia.homology.crosswalk import load_name_audit_cache, load_rule_transfer_audit_cache
+from pcsec_pichia.homology.crosswalk import (
+    load_external_name_reference_cache,
+    load_name_audit_cache,
+    load_rule_transfer_audit_cache,
+)
 
 
 HOMOLOGY_AUDIT_CACHE_DIR = Path("local_runs") / "pichia_homology_cache"
 NAME_AUDIT_JSONL = "sce_to_pichia_name_audit.jsonl"
 RULE_TRANSFER_JSONL = "sce_to_pichia_rule_transfer_audit.jsonl"
 SUMMARY_JSON = "homology_audit_summary.json"
+EXTERNAL_REFERENCE_JSONL = "external_name_references.jsonl"
 REQUIRED_CACHE_FILES: tuple[str, ...] = (
     NAME_AUDIT_JSONL,
     RULE_TRANSFER_JSONL,
@@ -99,6 +104,7 @@ def homology_audit_cache_status(
             "row_count": 0,
             "missing_files": missing,
             "recommended_build_command": _recommended_build_command(root),
+            **_external_cache_status(root),
         }
 
     missing_files = _missing_files(run_dir)
@@ -115,6 +121,7 @@ def homology_audit_cache_status(
         ),
         "missing_files": missing_files,
         "recommended_build_command": _recommended_build_command(root),
+        **_external_cache_status(run_dir),
     }
 
 
@@ -168,6 +175,45 @@ def _read_summary(path: Path) -> dict[str, Any]:
     except (FileNotFoundError, OSError, json.JSONDecodeError, UnicodeDecodeError):
         return {}
     return payload if isinstance(payload, dict) else {}
+
+
+def _external_cache_status(run_dir: Path) -> dict[str, Any]:
+    cache_path = run_dir / EXTERNAL_REFERENCE_JSONL
+    base = {
+        "external_cache_available": False,
+        "external_cache_root": str(run_dir),
+        "external_cache_path": str(cache_path),
+        "external_reference_count": 0,
+        "external_sources": [],
+        "external_source_counts": {},
+        "external_cache_generated_at": "",
+        "external_generated_at": "",
+        "external_cache_warnings": [],
+        "recommended_external_build_command": _recommended_external_build_command(run_dir),
+    }
+    if not cache_path.exists():
+        return base
+    try:
+        references = load_external_name_reference_cache(cache_path)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+        return {
+            **base,
+            "external_cache_warnings": [f"failed to read external cache: {type(exc).__name__}: {exc}"],
+        }
+    source_counts: dict[str, int] = {}
+    for reference in references:
+        source = str(reference.source_database or "unknown")
+        source_counts[source] = source_counts.get(source, 0) + 1
+    generated_at = datetime.fromtimestamp(cache_path.stat().st_mtime).isoformat(timespec="seconds")
+    return {
+        **base,
+        "external_cache_available": True,
+        "external_reference_count": len(references),
+        "external_sources": sorted(source_counts),
+        "external_source_counts": dict(sorted(source_counts.items())),
+        "external_cache_generated_at": generated_at,
+        "external_generated_at": generated_at,
+    }
 
 
 def _filter_rows(
@@ -259,8 +305,17 @@ def _recommended_build_command(root: Path) -> str:
     return f"python scripts\\build_pichia_homology_cache.py --catalog-only --output-dir {output_dir}"
 
 
+def _recommended_external_build_command(run_dir: Path) -> str:
+    return (
+        "python scripts\\build_pichia_external_name_reference_cache.py "
+        f"--name-audit-jsonl {run_dir / NAME_AUDIT_JSONL} "
+        f"--output-path {run_dir / EXTERNAL_REFERENCE_JSONL}"
+    )
+
+
 __all__ = [
     "HOMOLOGY_AUDIT_CACHE_DIR",
+    "EXTERNAL_REFERENCE_JSONL",
     "NAME_AUDIT_JSONL",
     "RULE_TRANSFER_JSONL",
     "SUMMARY_JSON",
