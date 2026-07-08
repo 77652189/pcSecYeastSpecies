@@ -50,6 +50,75 @@ def test_homology_audit_name_table_includes_external_crosscheck_columns() -> Non
     assert "external_crosscheck_warnings" in view.NAME_AUDIT_COLUMNS
 
 
+def test_ready_rule_transfer_rows_only_include_model_operable_ready_candidates() -> None:
+    import app.ui.views.homology_audit as view
+
+    rows = [
+        _rule_row("PAS_chr2-1_0140", "rule_transfer_ready", True),
+        _rule_row("PAS_chr4_0844", "rule_transfer_supported_not_model_operable", True),
+        _rule_row("PAS_chr4_0156", "rule_transfer_ready", False),
+        _rule_row("", "rule_transfer_ready", True),
+        _rule_row("PAS_chr2-1_0140", "rule_transfer_ready", True),
+    ]
+
+    ready = view._ready_rule_transfer_rows(rows)
+
+    assert [row["pichia_model_gene_id"] for row in ready] == ["PAS_chr2-1_0140"]
+
+
+def test_homology_rule_transfer_controls_add_ko_candidate_and_navigate(monkeypatch) -> None:
+    import app.ui.views.homology_audit as view
+
+    fake_st = _FakeStreamlit(
+        multiselect_values=["PAS_chr2-1_0140 — KAR2 / BiP"],
+        clicked_keys={"homology_add_ready_ko"},
+    )
+    fake_st.session_state["pichia_draft_ko_genes"] = "PAS_chr1-1_0001\nPAS_chr2-1_0140"
+    navigation: list[str] = []
+    monkeypatch.setattr(view, "st", fake_st)
+    monkeypatch.setattr(view, "request_navigation", navigation.append)
+
+    view._render_add_to_simulation_controls(
+        [
+            _rule_row("PAS_chr2-1_0140", "rule_transfer_ready", True, common_name="KAR2 / BiP"),
+            _rule_row("PAS_chr4_0844", "rule_transfer_supported_not_model_operable", True),
+        ]
+    )
+
+    assert fake_st.multiselect_calls[0]["options"] == ["PAS_chr2-1_0140 — KAR2 / BiP"]
+    assert fake_st.session_state["pichia_draft_ko_genes"] == "PAS_chr1-1_0001\nPAS_chr2-1_0140"
+    assert "pichia_draft_oe_genes" not in fake_st.session_state
+    assert navigation == ["仿真验证"]
+    assert fake_st.rerun_called is True
+    assert "已加入 KO 输入" in fake_st.toasts[0]
+
+
+def test_homology_rule_transfer_selection_adds_oe_candidate_with_dedupe(monkeypatch) -> None:
+    import app.ui.views.homology_audit as view
+
+    fake_st = _FakeStreamlit()
+    fake_st.session_state["pichia_draft_oe_genes"] = "PAS_chr3_0001"
+    navigation: list[str] = []
+    monkeypatch.setattr(view, "st", fake_st)
+    monkeypatch.setattr(view, "request_navigation", navigation.append)
+
+    view._apply_rule_transfer_selection(
+        [
+            _rule_row("PAS_chr3_0001", "rule_transfer_ready", True),
+            _rule_row("PAS_chr3_0001", "rule_transfer_ready", True),
+            _rule_row("PAS_chr4_0844", "rule_transfer_low_confidence", True),
+            _rule_row("PAS_chr5_0005", "rule_transfer_ready", True),
+        ],
+        action="oe",
+    )
+
+    assert fake_st.session_state["pichia_draft_oe_genes"] == "PAS_chr3_0001\nPAS_chr5_0005"
+    assert "pichia_draft_ko_genes" not in fake_st.session_state
+    assert navigation == ["仿真验证"]
+    assert fake_st.rerun_called is True
+    assert "已加入 OE 输入" in fake_st.toasts[0]
+
+
 def test_homology_audit_page_handles_missing_cache_without_crashing(monkeypatch) -> None:
     import app.ui.views.homology_audit as view
 
@@ -182,9 +251,43 @@ def _payload() -> dict[str, Any]:
     }
 
 
+def _rule_row(
+    model_gene_id: str,
+    rule_transfer_status: str,
+    in_model_gene_index: bool,
+    *,
+    common_name: str = "KAR2",
+) -> dict[str, Any]:
+    return {
+        "internal_common_name": common_name,
+        "query_symbol": common_name.split()[0],
+        "sce_orf": "YJL034W",
+        "pichia_gene_id": model_gene_id or "PAS_chr_unmodelled",
+        "pichia_model_gene_id": model_gene_id,
+        "identity_pct": 75.0,
+        "query_coverage": 95.0,
+        "subject_coverage": 95.0,
+        "evalue": 1e-100,
+        "is_rbh": True,
+        "in_model_gene_index": in_model_gene_index,
+        "homology_review_status": "model_ready_rbh_high_confidence",
+        "rule_transfer_status": rule_transfer_status,
+        "warnings": [],
+    }
+
+
 class _FakeStreamlit:
-    def __init__(self, *, text_input_value: str = "") -> None:
+    def __init__(
+        self,
+        *,
+        text_input_value: str = "",
+        multiselect_values: list[str] | None = None,
+        clicked_keys: set[str] | None = None,
+    ) -> None:
         self.text_input_value = text_input_value
+        self.multiselect_values = multiselect_values or []
+        self.clicked_keys = clicked_keys or set()
+        self.session_state: dict[str, Any] = {}
         self.warning_calls: list[str] = []
         self.info_calls: list[str] = []
         self.code_calls: list[str] = []
@@ -192,6 +295,10 @@ class _FakeStreamlit:
         self.downloads: list[dict[str, Any]] = []
         self.metrics: list[tuple[str, Any]] = []
         self.tab_labels: list[str] = []
+        self.multiselect_calls: list[dict[str, Any]] = []
+        self.button_calls: list[dict[str, Any]] = []
+        self.toasts: list[str] = []
+        self.rerun_called = False
 
     def __enter__(self):
         return self
@@ -226,6 +333,10 @@ class _FakeStreamlit:
     def selectbox(self, label: str, options, index: int = 0, *args, **kwargs):
         return list(options)[index]
 
+    def multiselect(self, label: str, options, *args, **kwargs):
+        self.multiselect_calls.append({"label": label, "options": list(options), **kwargs})
+        return self.multiselect_values
+
     def slider(self, *args, **kwargs) -> float:
         return float(kwargs.get("value", 0.0))
 
@@ -243,5 +354,15 @@ class _FakeStreamlit:
     def dataframe(self, frame: pd.DataFrame, *args, **kwargs) -> None:
         self.dataframes.append(frame)
 
+    def button(self, label: str, *args, **kwargs) -> bool:
+        self.button_calls.append({"label": label, **kwargs})
+        return bool(kwargs.get("key") in self.clicked_keys and not kwargs.get("disabled", False))
+
     def download_button(self, label: str, data: bytes, *args, **kwargs) -> None:
         self.downloads.append({"label": label, "data": data, **kwargs})
+
+    def toast(self, value: str, *args, **kwargs) -> None:
+        self.toasts.append(value)
+
+    def rerun(self) -> None:
+        self.rerun_called = True

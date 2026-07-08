@@ -9,10 +9,13 @@ from app.services.pichia_homology_audit_service import (
     export_homology_audit_rows,
     load_homology_audit_browser_data,
 )
-from app.ui.common import HOMOLOGY_AUDIT_PAGE
+from app.ui.common import HOMOLOGY_AUDIT_PAGE, request_navigation
+from app.ui.views.simulation_gene_text import merge_candidate_text
 
 
 ALL_OPTION = "全部"
+SIMULATION_PAGE = "仿真验证"
+READY_RULE_TRANSFER_STATUS = "rule_transfer_ready"
 
 REVIEW_STATUS_OPTIONS = [
     "model_ready_rbh_high_confidence",
@@ -110,6 +113,7 @@ def render_homology_audit() -> None:
         _render_rows_table("命名标准化", name_rows, NAME_AUDIT_COLUMNS)
     with rule_tab:
         _render_rows_table("同源规则迁移评估", rule_rows, RULE_TRANSFER_COLUMNS)
+        _render_add_to_simulation_controls(rule_rows)
     with cache_tab:
         _render_cache_and_export(cache_status, name_rows, rule_rows)
 
@@ -210,6 +214,72 @@ def _render_rows_table(title: str, rows: list[dict[str, Any]], columns: dict[str
         st.info("当前筛选条件下没有可显示的行。")
         return
     st.dataframe(_rows_to_frame(rows, columns), use_container_width=True, hide_index=True)
+
+
+def _render_add_to_simulation_controls(rule_rows: list[dict[str, Any]]) -> None:
+    st.markdown("**加入仿真验证输入**")
+    st.caption(
+        "这里只把已通过规则迁移评估、且存在 Pichia 模型 gene_id 的同源候选加入仿真输入；"
+        "这不等于推荐、不等于表型证据，也不会自动运行仿真。"
+    )
+    ready_rows = _ready_rule_transfer_rows(rule_rows)
+    if not ready_rows:
+        st.info("当前筛选结果中没有可加入仿真验证的模型可操作同源候选。")
+        return
+
+    options = [_rule_transfer_option_label(row) for row in ready_rows]
+    selected_labels = st.multiselect(
+        "选择要加入仿真验证的模型基因",
+        options,
+        key="homology_ready_rule_transfer_selection",
+    )
+    selected_rows = [row for row, label in zip(ready_rows, options) if label in selected_labels]
+    add_ko_col, add_oe_col = st.columns(2)
+    with add_ko_col:
+        if st.button("添加到 KO 输入并跳转仿真验证", key="homology_add_ready_ko", disabled=not selected_rows):
+            _apply_rule_transfer_selection(selected_rows, action="ko")
+    with add_oe_col:
+        if st.button("添加到 OE 输入并跳转仿真验证", key="homology_add_ready_oe", disabled=not selected_rows):
+            _apply_rule_transfer_selection(selected_rows, action="oe")
+
+
+def _ready_rule_transfer_rows(rule_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    ready: list[dict[str, Any]] = []
+    seen_gene_ids: set[str] = set()
+    for row in rule_rows:
+        model_gene_id = str(row.get("pichia_model_gene_id") or "").strip()
+        if (
+            row.get("rule_transfer_status") == READY_RULE_TRANSFER_STATUS
+            and bool(row.get("in_model_gene_index"))
+            and model_gene_id
+            and model_gene_id not in seen_gene_ids
+        ):
+            seen_gene_ids.add(model_gene_id)
+            ready.append(row)
+    return ready
+
+
+def _apply_rule_transfer_selection(rows: list[dict[str, Any]], *, action: str) -> None:
+    model_gene_ids = _selected_model_gene_ids(rows)
+    if not model_gene_ids:
+        st.info("所选候选没有可加入仿真验证的 Pichia 模型 gene_id。")
+        return
+    key = f"pichia_draft_{action}_genes"
+    st.session_state[key] = merge_candidate_text(str(st.session_state.get(key, "")), model_gene_ids)
+    action_label = "KO" if action == "ko" else "OE"
+    st.toast(f"已加入 {action_label} 输入：{', '.join(model_gene_ids)}；正在跳转到仿真验证。")
+    request_navigation(SIMULATION_PAGE)
+    st.rerun()
+
+
+def _selected_model_gene_ids(rows: list[dict[str, Any]]) -> list[str]:
+    return [str(row.get("pichia_model_gene_id") or "").strip() for row in _ready_rule_transfer_rows(rows)]
+
+
+def _rule_transfer_option_label(row: dict[str, Any]) -> str:
+    model_gene_id = str(row.get("pichia_model_gene_id") or "").strip()
+    name = str(row.get("internal_common_name") or row.get("query_symbol") or row.get("sce_orf") or "").strip()
+    return f"{model_gene_id} — {name}" if name else model_gene_id
 
 
 def _rows_to_frame(rows: list[dict[str, Any]], columns: dict[str, str]) -> pd.DataFrame:
