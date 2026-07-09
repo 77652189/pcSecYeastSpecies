@@ -5,6 +5,9 @@ from typing import Any
 import pandas as pd
 import streamlit as st
 
+from app.services.pichia_external_reference_service import (
+    export_external_reference_rows,
+)
 from app.services.pichia_homology_audit_service import (
     export_homology_audit_rows,
     load_homology_audit_browser_data,
@@ -82,6 +85,24 @@ RULE_TRANSFER_COLUMNS = {
     "rule_transfer_status": "规则迁移状态",
     "warnings": "警告",
 }
+EXTERNAL_REFERENCE_COLUMNS = {
+    "evidence_kind": "证据类型",
+    "source_database": "来源库",
+    "source_version": "来源版本",
+    "retrieved_at": "retrieved_at",
+    "gene_id": "gene_id",
+    "gene_name": "gene_name",
+    "pichia_gene_id": "Pichia gene",
+    "query_gene_id": "query gene",
+    "protein_name": "protein",
+    "function_description": "function",
+    "evidence_confidence": "confidence",
+    "source_reaction_id": "source reaction",
+    "source_gene_rule": "source gene rule",
+    "mapped_model_reaction_id": "mapped reaction",
+    "gpr_transfer_status": "GPR status",
+    "manual_review_reasons": "manual review",
+}
 
 
 def render_homology_audit() -> None:
@@ -107,6 +128,7 @@ def render_homology_audit() -> None:
     summary = payload.get("summary", {})
     name_rows = list(payload.get("name_audit_rows", []))
     rule_rows = list(payload.get("rule_transfer_audit_rows", []))
+    external_rows = list(payload.get("external_reference_rows", []))
 
     _render_summary_metrics(summary, name_rows, rule_rows)
     name_tab, rule_tab, cache_tab = st.tabs(["命名标准化", "同源规则迁移评估", "缓存状态与导出"])
@@ -116,7 +138,7 @@ def render_homology_audit() -> None:
         _render_rows_table("同源规则迁移评估", rule_rows, RULE_TRANSFER_COLUMNS)
         _render_add_to_simulation_controls(rule_rows)
     with cache_tab:
-        _render_cache_and_export(cache_status, name_rows, rule_rows)
+        _render_cache_and_export(cache_status, name_rows, rule_rows, external_rows)
 
 
 def _render_filters() -> dict[str, Any]:
@@ -306,6 +328,7 @@ def _render_cache_and_export(
     cache_status: dict[str, Any],
     name_rows: list[dict[str, Any]],
     rule_rows: list[dict[str, Any]],
+    external_rows: list[dict[str, Any]] | None = None,
 ) -> None:
     st.subheader("缓存状态")
     st.markdown(
@@ -315,21 +338,30 @@ def _render_cache_and_export(
         - row count: `{cache_status.get("row_count", 0)}`
         """
     )
-    _render_external_cache_status(cache_status, name_rows)
+    resolved_external_rows = external_rows or []
+    _render_external_cache_status(cache_status, name_rows, resolved_external_rows)
     st.caption("导出的是当前筛选结果；导出动作不会重新运行 BLAST，也不会写回任何模型或 catalog。")
-    export_kind = st.selectbox("导出表", ["命名标准化", "同源规则迁移评估"], key="homology_export_kind")
+    export_kind = st.selectbox("导出表", ["命名标准化", "同源规则迁移评估", "外部数据库证据"], key="homology_export_kind")
     export_format = st.selectbox("导出格式", ["TSV", "CSV"], key="homology_export_format")
     rows = name_rows if export_kind == "命名标准化" else rule_rows
+    exporter = export_homology_audit_rows
+    if export_kind == "外部数据库证据":
+        rows = resolved_external_rows
+        exporter = export_external_reference_rows
     suffix = export_format.lower()
     st.download_button(
         "下载当前筛选结果",
-        export_homology_audit_rows(rows, file_format=suffix),
-        file_name=f"pichia_homology_{'name_audit' if export_kind == '命名标准化' else 'rule_transfer_audit'}.{suffix}",
+        exporter(rows, file_format=suffix),
+        file_name=f"pichia_homology_{_export_slug(export_kind)}.{suffix}",
         mime="text/tab-separated-values" if suffix == "tsv" else "text/csv",
     )
 
 
-def _render_external_cache_status(cache_status: dict[str, Any], name_rows: list[dict[str, Any]]) -> None:
+def _render_external_cache_status(
+    cache_status: dict[str, Any],
+    name_rows: list[dict[str, Any]],
+    external_rows: list[dict[str, Any]],
+) -> None:
     available = "available" if cache_status.get("external_cache_available") else "not_available"
     source_counts = cache_status.get("external_source_counts")
     source_text = _format_source_counts(source_counts if isinstance(source_counts, dict) else {})
@@ -362,6 +394,49 @@ def _render_external_cache_status(cache_status: dict[str, Any], name_rows: list[
         "External crosscheck is an offline naming reference only. It does not change RBH calls, "
         "KO/OE recommendation tiers, phenotype evidence, or run live network lookups in Streamlit."
     )
+    _render_external_reference_cache_status(cache_status, external_rows)
+
+
+def _render_external_reference_cache_status(
+    cache_status: dict[str, Any],
+    external_rows: list[dict[str, Any]],
+) -> None:
+    status = cache_status.get("external_reference_cache")
+    if not isinstance(status, dict):
+        status = {}
+    source_counts = status.get("source_counts") if isinstance(status.get("source_counts"), dict) else {}
+    type_counts = status.get("record_type_counts") if isinstance(status.get("record_type_counts"), dict) else {}
+    retrieved = status.get("retrieved_at_range") if isinstance(status.get("retrieved_at_range"), dict) else {}
+    st.markdown(
+        f"""
+        **External reference cache**
+
+        - status: `{"available" if status.get("cache_available") else "not_available"}`
+        - records path: `{status.get("records_path", "")}`
+        - record count: `{status.get("record_count", 0)}`
+        - sources: `{_format_source_counts(source_counts)}`
+        - record types: `{_format_source_counts(type_counts)}`
+        - retrieved_at: `{retrieved.get("first", "")}` to `{retrieved.get("last", "")}`
+        """
+    )
+    command = str(status.get("recommended_refresh_command") or "")
+    if command:
+        st.code(command, language="powershell")
+    warnings = status.get("warnings") or []
+    if warnings:
+        st.info("external reference warnings: " + "; ".join(str(item) for item in warnings))
+    if external_rows:
+        st.dataframe(_rows_to_frame(external_rows, EXTERNAL_REFERENCE_COLUMNS), use_container_width=True, hide_index=True)
+    else:
+        st.info("当前 external reference cache 中没有可显示的 gene function 或 GPR candidate 行。")
+
+
+def _export_slug(export_kind: str) -> str:
+    if export_kind == "命名标准化":
+        return "name_audit"
+    if export_kind == "同源规则迁移评估":
+        return "rule_transfer_audit"
+    return "external_reference_evidence"
 
 
 def _format_source_counts(source_counts: dict[str, Any]) -> str:
@@ -374,5 +449,6 @@ __all__ = [
     "HOMOLOGY_AUDIT_PAGE",
     "NAME_AUDIT_COLUMNS",
     "RULE_TRANSFER_COLUMNS",
+    "EXTERNAL_REFERENCE_COLUMNS",
     "render_homology_audit",
 ]

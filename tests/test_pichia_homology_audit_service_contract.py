@@ -7,6 +7,12 @@ from pathlib import Path
 
 from pcsec_pichia.homology.cache_schema import ExternalNameReference, NameAuditRow, RuleTransferAuditRow
 from pcsec_pichia.homology.crosswalk import write_name_audit_cache, write_rule_transfer_audit_cache
+from pcsec_pichia.external_refs import (
+    ExternalGeneFunctionEvidence,
+    ExternalGprCandidateEvidence,
+    ExternalReferenceProvenance,
+    write_external_reference_cache_bundle,
+)
 
 from app.services.pichia_homology_audit_service import (
     export_homology_audit_rows,
@@ -73,9 +79,10 @@ def test_service_selects_latest_valid_cache_run(tmp_path: Path) -> None:
 
 
 def test_service_reports_external_reference_cache_status(tmp_path: Path) -> None:
-    run_dir = _write_cache_run(tmp_path / "run1", with_external=True)
+    run_dir = _write_cache_run(tmp_path / "run1", with_external=True, with_external_reference=True)
 
     status = homology_audit_cache_status(cache_root=run_dir)
+    payload = load_homology_audit_browser_data(cache_root=run_dir)
 
     assert status["external_cache_available"] is True
     assert status["external_cache_path"] == str(run_dir / "external_name_references.jsonl")
@@ -83,6 +90,10 @@ def test_service_reports_external_reference_cache_status(tmp_path: Path) -> None
     assert status["external_sources"] == ["NCBI", "UniProt"]
     assert status["external_source_counts"] == {"NCBI": 1, "UniProt": 1}
     assert "build_pichia_external_name_reference_cache.py" in status["recommended_external_build_command"]
+    assert status["external_reference_cache"]["cache_available"] is True
+    assert status["external_reference_cache"]["record_type_counts"] == {"gene_function": 1, "gpr_candidate": 1}
+    assert len(payload["external_reference_rows"]) == 2
+    assert {row["evidence_kind"] for row in payload["external_reference_rows"]} == {"gene_function", "gpr_candidate"}
 
 
 def test_export_returns_utf8_with_header() -> None:
@@ -123,7 +134,7 @@ def test_homology_audit_service_does_not_import_blast_runtime() -> None:
     assert not {"fetch_external_name_references", "fetch_uniprot_name_reference"} & called_names
 
 
-def _write_cache_run(path: Path, *, with_external: bool = False) -> Path:
+def _write_cache_run(path: Path, *, with_external: bool = False, with_external_reference: bool = False) -> Path:
     path.mkdir(parents=True)
     name_rows = (
         NameAuditRow(
@@ -219,6 +230,8 @@ def _write_cache_run(path: Path, *, with_external: bool = False) -> Path:
     )
     if with_external:
         _write_external_reference_cache(path)
+    if with_external_reference:
+        _write_unified_external_reference_cache(path)
     return path
 
 
@@ -252,3 +265,39 @@ def _write_external_reference_cache(path: Path) -> None:
         payload["warnings"] = list(reference.warnings)
         rows.append(json.dumps(payload, sort_keys=True))
     (path / "external_name_references.jsonl").write_text("\n".join(rows) + "\n", encoding="utf-8")
+
+
+def _write_unified_external_reference_cache(path: Path) -> None:
+    records = (
+        ExternalGeneFunctionEvidence(
+            provenance=_external_ref_provenance("PAS_chr2-1_0140", source_database="uniprot"),
+            gene_id="PAS_chr2-1_0140",
+            protein_name="Kar2 protein",
+            function_description="Annotation-only folding function",
+            go_terms=("GO:0006457",),
+            evidence_scope="reviewed_structured_annotation",
+        ),
+        ExternalGprCandidateEvidence(
+            provenance=_external_ref_provenance("YJL034W", source_database="yeast-gem"),
+            external_model_id="yeast-GEM",
+            external_reaction_id="r_1234",
+            external_gene_rule="YJL034W",
+            candidate_status="gene_mapping_required",
+            pichia_gene_id="PAS_chr2-1_0140",
+            query_gene_id="YJL034W",
+            gpr_transfer_status="gene_mapping_required",
+            blocking_reasons=("external gene rule is not mapped to a current Pichia model gene",),
+        ),
+    )
+    write_external_reference_cache_bundle(records, path)
+
+
+def _external_ref_provenance(query: str, *, source_database: str) -> ExternalReferenceProvenance:
+    return ExternalReferenceProvenance(
+        source_database=source_database,
+        source_version="test",
+        source_url=f"https://example.test/{query}",
+        source_query=query,
+        retrieved_at="2026-07-09T00:00:00Z",
+        raw_record_sha256="f" * 64,
+    )

@@ -18,6 +18,10 @@ from pcsec_pichia.homology.crosswalk import (
     load_name_audit_cache,
     load_rule_transfer_audit_cache,
 )
+from app.services.pichia_external_reference_service import (
+    load_external_reference_browser_rows,
+    load_external_reference_status,
+)
 
 
 HOMOLOGY_AUDIT_CACHE_DIR = Path("local_runs") / "pichia_homology_cache"
@@ -57,6 +61,7 @@ def load_homology_audit_browser_data(
             "summary": {},
             "name_audit_rows": [],
             "rule_transfer_audit_rows": [],
+            "external_reference_rows": [],
         }
 
     run_dir = Path(str(status["cache_root"]))
@@ -85,6 +90,7 @@ def load_homology_audit_browser_data(
         "summary": _read_summary(run_dir / SUMMARY_JSON),
         "name_audit_rows": filtered_name_rows,
         "rule_transfer_audit_rows": filtered_rule_rows,
+        "external_reference_rows": load_external_reference_browser_rows(run_dir),
     }
 
 
@@ -179,6 +185,7 @@ def _read_summary(path: Path) -> dict[str, Any]:
 
 def _external_cache_status(run_dir: Path) -> dict[str, Any]:
     cache_path = run_dir / EXTERNAL_REFERENCE_JSONL
+    external_reference_status = load_external_reference_status(run_dir)
     base = {
         "external_cache_available": False,
         "external_cache_root": str(run_dir),
@@ -190,6 +197,7 @@ def _external_cache_status(run_dir: Path) -> dict[str, Any]:
         "external_generated_at": "",
         "external_cache_warnings": [],
         "recommended_external_build_command": _recommended_external_build_command(run_dir),
+        "external_reference_cache": external_reference_status,
     }
     if not cache_path.exists():
         return base

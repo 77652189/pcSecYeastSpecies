@@ -52,6 +52,15 @@ def test_homology_audit_name_table_includes_external_crosscheck_columns() -> Non
     assert "external_crosscheck_warnings" in view.NAME_AUDIT_COLUMNS
 
 
+def test_homology_audit_external_reference_columns_include_review_fields() -> None:
+    import app.ui.views.homology_audit as view
+
+    assert "evidence_kind" in view.EXTERNAL_REFERENCE_COLUMNS
+    assert "function_description" in view.EXTERNAL_REFERENCE_COLUMNS
+    assert "gpr_transfer_status" in view.EXTERNAL_REFERENCE_COLUMNS
+    assert "manual_review_reasons" in view.EXTERNAL_REFERENCE_COLUMNS
+
+
 def test_ready_rule_transfer_rows_only_include_model_operable_ready_candidates() -> None:
     import app.ui.views.homology_audit as view
 
@@ -164,10 +173,11 @@ def test_homology_audit_page_gets_rows_from_service_and_renders_tables(monkeypat
 
     assert calls[0]["query"] == "kar"
     assert calls[0]["min_identity"] is None
-    assert len(fake_st.dataframes) == 2
+    assert len(fake_st.dataframes) == 3
     rendered_text = "\n".join(frame.to_csv(index=False) for frame in fake_st.dataframes)
     assert "KAR2 / BiP" in rendered_text
     assert "rule_transfer_ready" in rendered_text
+    assert "gpr_candidate" in rendered_text
 
 
 def test_homology_audit_export_button_uses_service_export(monkeypatch) -> None:
@@ -192,6 +202,29 @@ def test_homology_audit_export_button_uses_service_export(monkeypatch) -> None:
     assert fake_st.downloads[0]["data"] == b"exported-by-service"
 
 
+def test_homology_audit_external_reference_export_uses_external_service(monkeypatch) -> None:
+    import app.ui.views.homology_audit as view
+
+    exported: dict[str, Any] = {}
+    fake_st = _FakeStreamlit(selectbox_values={"导出表": "外部数据库证据"})
+
+    def fake_export(rows: list[dict[str, Any]], *, file_format: str = "tsv") -> bytes:
+        exported["rows"] = rows
+        exported["file_format"] = file_format
+        return b"external-exported-by-service"
+
+    monkeypatch.setattr(view, "st", fake_st)
+    monkeypatch.setattr(view, "load_homology_audit_browser_data", lambda **filters: _payload())
+    monkeypatch.setattr(view, "export_external_reference_rows", fake_export)
+
+    view.render_homology_audit()
+
+    assert exported["rows"][0]["evidence_kind"] == "gpr_candidate"
+    assert exported["file_format"] == "tsv"
+    assert fake_st.downloads[0]["data"] == b"external-exported-by-service"
+    assert fake_st.downloads[0]["file_name"].endswith("external_reference_evidence.tsv")
+
+
 def test_homology_audit_cache_tab_shows_external_cache_status(monkeypatch) -> None:
     import app.ui.views.homology_audit as view
 
@@ -207,9 +240,12 @@ def test_homology_audit_cache_tab_shows_external_cache_status(monkeypatch) -> No
 
     rendered_markdown = "\n".join(fake_st.markdown_calls)
     assert "External name reference cache" in rendered_markdown
+    assert "External reference cache" in rendered_markdown
     assert "UniProt:1" in rendered_markdown
+    assert "gene_function:1" in rendered_markdown
     assert "external_match_confirmed: 1" in rendered_markdown
     assert any("build_pichia_external_name_reference_cache.py" in call for call in fake_st.code_calls)
+    assert any("build_pichia_external_reference_cache.py" in call for call in fake_st.code_calls)
 
 
 def _payload() -> dict[str, Any]:
@@ -233,6 +269,22 @@ def _payload() -> dict[str, Any]:
                 "--name-audit-jsonl local_runs\\pichia_homology_cache\\smoke\\sce_to_pichia_name_audit.jsonl "
                 "--output-path local_runs\\pichia_homology_cache\\smoke\\external_name_references.jsonl"
             ),
+            "external_reference_cache": {
+                "cache_available": True,
+                "records_path": "local_runs/pichia_homology_cache/smoke/external_reference_records.jsonl",
+                "record_count": 1,
+                "source_counts": {"yeast-gem": 1},
+                "record_type_counts": {"gene_function": 1, "gpr_candidate": 1},
+                "retrieved_at_range": {
+                    "first": "2026-07-09T00:00:00Z",
+                    "last": "2026-07-09T00:00:00Z",
+                },
+                "recommended_refresh_command": (
+                    "python scripts\\build_pichia_external_reference_cache.py "
+                    "--sources uniprot,sgd --output-dir local_runs\\pichia_external_reference_cache\\smoke"
+                ),
+                "warnings": [],
+            },
         },
         "summary": {
             "rule_transfer_row_count": 1,
@@ -285,6 +337,15 @@ def _payload() -> dict[str, Any]:
                 "warnings": [],
             }
         ],
+        "external_reference_rows": [
+            {
+                "evidence_kind": "gpr_candidate",
+                "source_database": "yeast-gem",
+                "query_gene_id": "YJL034W",
+                "gpr_transfer_status": "gene_mapping_required",
+                "manual_review_reasons": ["external gene rule is not mapped"],
+            }
+        ],
     }
 
 
@@ -320,10 +381,12 @@ class _FakeStreamlit:
         text_input_value: str = "",
         multiselect_values: list[str] | None = None,
         clicked_keys: set[str] | None = None,
+        selectbox_values: dict[str, Any] | None = None,
     ) -> None:
         self.text_input_value = text_input_value
         self.multiselect_values = multiselect_values or []
         self.clicked_keys = clicked_keys or set()
+        self.selectbox_values = selectbox_values or {}
         self.session_state: dict[str, Any] = {}
         self.warning_calls: list[str] = []
         self.info_calls: list[str] = []
@@ -369,6 +432,8 @@ class _FakeStreamlit:
         return self.text_input_value
 
     def selectbox(self, label: str, options, index: int = 0, *args, **kwargs):
+        if label in self.selectbox_values:
+            return self.selectbox_values[label]
         return list(options)[index]
 
     def multiselect(self, label: str, options, *args, **kwargs):
