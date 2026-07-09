@@ -422,7 +422,7 @@ def _render_llm_report_section(paths, selected_run: RunInfo, csv_path: Path) -> 
         mime="application/json",
     )
 
-    latest_report_dirs = screen_report_service.latest_report_runs(paths)
+    latest_report_dirs = screen_report_service.latest_report_runs(paths, run_name=selected_run.run_name)
     latest_final = next((path / "final_report.md" for path in latest_report_dirs if (path / "final_report.md").exists()), None)
     if latest_final:
         with st.expander(f"查看最近一次已通过审核的报告：{latest_final.parent.name}", expanded=False):

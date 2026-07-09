@@ -64,7 +64,7 @@ def write_screen_report_draft(
     feedback: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     payload = {
-        "fact_pack": fact_pack,
+        "fact_pack": _fact_pack_for_writer(fact_pack),
         "required_output_schema": _writer_schema_hint(),
         "feedback_to_fix": feedback or [],
     }
@@ -78,6 +78,7 @@ def judge_screen_report(
     validator_result: dict[str, Any],
 ) -> dict[str, Any]:
     payload = {
+        "fact_pack": _fact_pack_for_judge(fact_pack, report_json),
         "fact_pack_summary": _fact_pack_summary_for_judge(fact_pack),
         "report_json": report_json,
         "programmatic_validator_result": validator_result,
@@ -124,6 +125,53 @@ def _fact_pack_summary_for_judge(fact_pack: dict[str, Any]) -> dict[str, Any]:
         },
         "evidence_ids": [item.get("evidence_id") for item in fact_pack.get("evidence_items") or []],
     }
+
+
+def _fact_pack_for_writer(fact_pack: dict[str, Any]) -> dict[str, Any]:
+    """Keep LLM input focused on reportable evidence; validator still sees the full fact pack."""
+
+    return {
+        "schema_version": fact_pack.get("schema_version"),
+        "generated_at": fact_pack.get("generated_at"),
+        "source_runs": fact_pack.get("source_runs"),
+        "targets": fact_pack.get("targets"),
+        "warnings": fact_pack.get("warnings"),
+    }
+
+
+def _fact_pack_for_judge(fact_pack: dict[str, Any], report_json: dict[str, Any]) -> dict[str, Any]:
+    cited_ids = _cited_evidence_ids(report_json)
+    evidence_by_id = {
+        str(item.get("evidence_id")): item
+        for item in fact_pack.get("evidence_items") or []
+        if item.get("evidence_id")
+    }
+    return {
+        **_fact_pack_for_writer(fact_pack),
+        "cited_evidence_items": [
+            evidence_by_id[evidence_id]
+            for evidence_id in cited_ids
+            if evidence_id in evidence_by_id
+        ],
+    }
+
+
+def _cited_evidence_ids(report_json: dict[str, Any]) -> list[str]:
+    cited: list[str] = []
+    targets = report_json.get("targets")
+    if not isinstance(targets, dict):
+        return cited
+    for section in targets.values():
+        if not isinstance(section, dict):
+            continue
+        for bucket in ("recommended_ko", "recommended_oe", "manual_review", "not_recommended_or_risky"):
+            rows = section.get(bucket) or []
+            if not isinstance(rows, list):
+                continue
+            for row in rows:
+                if isinstance(row, dict) and row.get("evidence_id"):
+                    cited.append(str(row["evidence_id"]))
+    return list(dict.fromkeys(cited))
 
 
 __all__ = [

@@ -91,6 +91,7 @@ def generate_judged_screen_report(
                 draft_path=draft_path,
                 judge_path=judge_path,
                 final_path=final_path,
+                fact_pack=fact_pack,
                 validator_result=latest_validator,
                 judge_result=latest_judge,
             )
@@ -118,6 +119,7 @@ def generate_judged_screen_report(
         draft_path=failed_path if latest_draft is not None else None,
         judge_path=judge_path,
         final_path=None,
+        fact_pack=fact_pack,
         validator_result=latest_validator,
         judge_result=latest_judge,
     )
@@ -176,11 +178,14 @@ def render_screen_report_markdown(fact_pack: dict[str, Any], report_json: dict[s
     return "\n".join(lines)
 
 
-def latest_report_runs(paths: ProjectPaths) -> list[Path]:
+def latest_report_runs(paths: ProjectPaths, *, run_name: str | None = None) -> list[Path]:
     root = paths.local_runs_dir / REPORT_RUN_ROOT
     if not root.exists():
         return []
-    return sorted((path for path in root.iterdir() if path.is_dir()), key=lambda path: path.stat().st_mtime, reverse=True)
+    runs = sorted((path for path in root.iterdir() if path.is_dir()), key=lambda path: path.stat().st_mtime, reverse=True)
+    if run_name is None:
+        return runs
+    return [path for path in runs if _report_run_matches_source(path, run_name)]
 
 
 def _reference_table_lines(fact_pack: dict[str, Any]) -> list[str]:
@@ -222,7 +227,7 @@ def _md_cell(value: Any) -> str:
 
 
 def _new_output_dir(paths: ProjectPaths) -> Path:
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     return paths.local_runs_dir / REPORT_RUN_ROOT / stamp
 
 
@@ -238,6 +243,7 @@ def _write_manifest(
     draft_path: Path | None,
     judge_path: Path | None,
     final_path: Path | None,
+    fact_pack: dict[str, Any],
     validator_result: dict[str, Any],
     judge_result: dict[str, Any] | None,
 ) -> Path:
@@ -250,11 +256,41 @@ def _write_manifest(
             "draft_report_path": str(draft_path) if draft_path else None,
             "judge_report_path": str(judge_path) if judge_path else None,
             "final_report_path": str(final_path) if final_path else None,
+            "source_run_names": _fact_pack_source_run_names(fact_pack),
+            "source_files": _fact_pack_source_files(fact_pack),
             "validator_result": validator_result,
             "judge_result": judge_result,
         },
     )
     return manifest_path
+
+
+def _report_run_matches_source(report_dir: Path, run_name: str) -> bool:
+    manifest_path = report_dir / "report_manifest.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, json.JSONDecodeError, UnicodeDecodeError):
+        return False
+    source_run_names = {str(value) for value in manifest.get("source_run_names") or []}
+    return run_name in source_run_names
+
+
+def _fact_pack_source_run_names(fact_pack: dict[str, Any]) -> list[str]:
+    names = [
+        str(source.get("run_name"))
+        for source in fact_pack.get("source_runs") or []
+        if source.get("run_name")
+    ]
+    return sorted(dict.fromkeys(names))
+
+
+def _fact_pack_source_files(fact_pack: dict[str, Any]) -> list[str]:
+    files = [
+        str(source.get("source_file"))
+        for source in fact_pack.get("source_runs") or []
+        if source.get("source_file")
+    ]
+    return sorted(dict.fromkeys(files))
 
 
 __all__ = [

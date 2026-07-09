@@ -144,6 +144,8 @@ def _normalize_evidence_item(
     growth_retention = _optional_float(row.get("growth_retention_ratio"))
     max_feasible_mu = _optional_float(row.get("max_feasible_mu"))
     support_status = str(row.get("support_status") or row.get("ko_support_status") or row.get("oe_support_status") or "")
+    explicit_model_gpr = _optional_bool(row.get("model_gpr_executable"))
+    explicit_oe_proxy = _optional_bool(row.get("oe_reaction_proxy"))
     recommendation_tier = str(row.get("recommendation_tier") or "").strip() or _derive_recommendation_tier(
         row,
         intervention_type=intervention_type,
@@ -175,10 +177,28 @@ def _normalize_evidence_item(
         "secretion_ratio_vs_wildtype": secretion_ratio,
         "max_feasible_mu": max_feasible_mu,
         "support_status": support_status,
+        "database_annotation_sources": _json_list(row.get("database_annotation_sources") or row.get("external_gene_function_sources")),
+        "database_annotation_confidence": str(row.get("database_annotation_confidence") or ""),
         "model_operable": _model_operable(row, support_status),
-        "model_gpr_executable": "gpr" in support_status.lower() or support_status.endswith("gene_deletion"),
-        "oe_reaction_proxy": intervention_type == "OE" or "OE" in intervention_type,
-        "phenotype_evidence": str(row.get("phenotype_evidence") or row.get("phenotype_evidence_tier") or ""),
+        "model_gpr_executable": (
+            explicit_model_gpr
+            if explicit_model_gpr is not None
+            else ("gpr" in support_status.lower() or support_status.endswith("gene_deletion"))
+        ),
+        "oe_reaction_proxy": (
+            explicit_oe_proxy
+            if explicit_oe_proxy is not None
+            else (intervention_type == "OE" or "OE" in intervention_type)
+        ),
+        "phenotype_evidence": _json_value(row.get("phenotype_evidence") or row.get("phenotype_evidence_tier") or ""),
+        "external_gene_function_evidence": _json_list(row.get("external_gene_function_evidence")),
+        "external_gene_function_confidence": _json_list(row.get("external_gene_function_confidence")),
+        "external_gene_function_sources": _json_list(row.get("external_gene_function_sources")),
+        "external_gene_function_warnings": _json_list(row.get("external_gene_function_warnings")),
+        "external_gpr_candidate_evidence": _json_list(
+            row.get("external_gpr_candidate_evidence") or row.get("external_gpr_candidates")
+        ),
+        "ko_oe_external_gene_evidence": _json_object(row.get("ko_oe_external_gene_evidence")),
         "evidence_type": str(row.get("evidence_type") or row.get("recommendation_tier") or ""),
         "homology_review_status": str(row.get("homology_review_status") or row.get("standard_name_status") or ""),
         "rule_transfer_status": str(row.get("rule_transfer_status") or ""),
@@ -225,6 +245,16 @@ def _brief_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         "intervention_type",
         "effect_label",
         "recommendation_tier",
+        "database_annotation_sources",
+        "database_annotation_confidence",
+        "model_gpr_executable",
+        "oe_reaction_proxy",
+        "phenotype_evidence",
+        "external_gene_function_confidence",
+        "external_gene_function_sources",
+        "external_gene_function_evidence",
+        "external_gpr_candidate_evidence",
+        "ko_oe_external_gene_evidence",
         "secretion_ratio_vs_wildtype",
         "growth_retention_ratio",
         "max_feasible_mu",
@@ -390,6 +420,49 @@ def _numeric_fields(row: dict[str, str]) -> dict[str, float]:
         if parsed is not None:
             numeric[key] = parsed
     return numeric
+
+
+def _json_value(value: Any) -> Any:
+    if value is None:
+        return ""
+    if isinstance(value, (dict, list, tuple)):
+        return value
+    text = str(value).strip()
+    if not text:
+        return ""
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return text
+
+
+def _json_list(value: Any) -> list[Any]:
+    parsed = _json_value(value)
+    if parsed in ("", None):
+        return []
+    if isinstance(parsed, list):
+        return parsed
+    if isinstance(parsed, tuple):
+        return list(parsed)
+    return [parsed]
+
+
+def _json_object(value: Any) -> dict[str, Any]:
+    parsed = _json_value(value)
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _optional_bool(value: Any) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return None
+    text = str(value).strip().lower()
+    if text in {"true", "1", "yes", "y"}:
+        return True
+    if text in {"false", "0", "no", "n"}:
+        return False
+    return None
 
 
 def _optional_float(value: Any, default: float | None = None) -> float | None:
