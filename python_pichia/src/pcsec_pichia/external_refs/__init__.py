@@ -49,6 +49,16 @@ from pcsec_pichia.external_refs.merge import (
     attach_external_references_to_name_audit,
     merge_external_fetch_results,
 )
+from pcsec_pichia.external_refs.model_inventory import (
+    INVENTORY_JSONL_FILENAME,
+    INVENTORY_REPORT_FILENAME,
+    INVENTORY_TSV_FILENAME,
+    ExternalModelInventoryOutputs,
+    ExternalModelInventoryRecord,
+    default_external_model_inventory_records,
+    render_external_model_inventory_report,
+    write_external_model_inventory,
+)
 from pcsec_pichia.external_refs.name_resolution import (
     EXTERNAL_ALIAS_CONFIRMED,
     EXTERNAL_CONFLICT,
@@ -115,6 +125,8 @@ __all__ = [
     "ExternalGeneFunctionEvidence",
     "ExternalGprCandidateEvidence",
     "ExternalHttpResponse",
+    "ExternalModelInventoryOutputs",
+    "ExternalModelInventoryRecord",
     "ExternalReactionAssociation",
     "ExternalRecordType",
     "ExternalReferenceClient",
@@ -130,6 +142,9 @@ __all__ = [
     "EXTERNAL_MATCH_CONFIRMED",
     "EXTERNAL_REFERENCE_MISSING",
     "GENE_MAPPING_REQUIRED",
+    "INVENTORY_JSONL_FILENAME",
+    "INVENTORY_REPORT_FILENAME",
+    "INVENTORY_TSV_FILENAME",
     "KoOeExternalGeneEvidence",
     "MODEL_GENE_MAPPED",
     "MODEL_GPR_CONFIRMED",
@@ -153,6 +168,7 @@ __all__ = [
     "classify_external_name_consistency",
     "classify_gene_function_confidence",
     "classify_gpr_transfer_status",
+    "default_external_model_inventory_records",
     "default_external_reference_clients",
     "dedupe_external_reference_queries",
     "external_reference_query_fingerprint",
@@ -168,6 +184,7 @@ __all__ = [
     "record_from_dict",
     "record_to_dict",
     "records_fingerprint",
+    "render_external_model_inventory_report",
     "stable_cache_key",
     "select_external_records_for_name_audit_row",
     "utc_now_iso",
@@ -177,5 +194,6 @@ __all__ = [
     "write_external_reference_cache",
     "write_external_reference_cache_bundle",
     "write_external_reference_manifest",
+    "write_external_model_inventory",
     "write_failed_queries",
 ]
