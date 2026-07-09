@@ -5,7 +5,11 @@
 
 ## 实现状态
 
-Round 1-9 已完成并推送：external reference schema/cache、query builder、受控在线 clients、name resolution、KO/OE gene function evidence、external GPR candidate evidence、service/Streamlit 展示、screen/report/LLM fact pack 透传和端到端 smoke 均已落地。联网 smoke 与合并审计产物保留在 ignored `local_runs/`，不作为稳定科学资产提交。
+Round 1-9 已完成并推送：external reference schema/cache、query builder、受控在线 clients、name resolution、KO/OE gene function evidence、external GPR candidate evidence、service/Streamlit 展示、screen/report/LLM fact pack 透传和端到端 smoke 均已落地。
+
+外部 GEM/GPR 资源优先级审计与导入主线 Round A-G 也已完成并推送：已覆盖 external model inventory、受控 artifact cache/manual-required 记录、SBML reaction/GPR association parse、GPR source priority/conflict report、当前 Pichia GEM reaction/gene mapping status，以及 service/Streamlit/report/fact pack 透传。最近本地 smoke 写入 ignored `local_runs/external_model_gpr_inventory/round_g_smoke_20260709/`。
+
+联网 smoke、外部模型审计和映射产物仍保留在 ignored `local_runs/`，不作为稳定科学资产提交；需要人工复核后再决定是否提升 production cache。
 
 ## 目标
 
@@ -23,6 +27,7 @@ Round 1-9 已完成并推送：external reference schema/cache、query builder�
 - Streamlit 页面加载、筛选和导出只读 cache，不默认联网。
 - 核心仿真、KO/OE screen、report generation 不依赖实时网络。
 - 外部 GPR 规则只能先作为 `external_gpr_candidate`；只有映射到当前 Pichia GEM 的 gene/reaction 后，才可标记为 `model_gpr_executable`。
+- 外部 GEM/GPR source priority 是证据优先级，不是规则合并器；冲突来源必须进入 manual review，不自动写回当前 Pichia GEM。
 - 所有记录必须保留 `source_database`、`source_version`、`source_url`、`source_query`、`retrieved_at`、warning 和原始记录 hash。
 - 初始产物写入 ignored `local_runs/`；人工复核后再讨论是否提升为稳定科学资产。
 

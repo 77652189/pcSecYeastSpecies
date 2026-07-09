@@ -16,6 +16,7 @@
 - BLAST/RBH 本地同源审计已经形成可用链路：homology cache、name audit、rule-transfer audit、Streamlit 只读展示和 KO/OE 解释字段透传。
 - Shadow LP 已作为 reference constrained solve 的替代候选完成 compare/validation 路径；纯 COBRApy/optlang 不作为 full pcSec 默认后端。
 - 在线外部数据库证据层 Round 1-9 已完成：schema/cache IO、query builder、受控 clients、name resolution、KO/OE gene function evidence、external GPR candidate evidence、service/Streamlit、screen/report/LLM fact pack 透传和端到端 smoke 均已落地。
+- 外部 GEM/GPR 资源优先级审计与导入主线 Round A-G 已完成：external model inventory、artifact cache/manual-required manifest、SBML GPR parse、GPR source priority、当前 Pichia GEM 映射报告、service/Streamlit/report/fact pack 透传和本地 Round G smoke 均已落地。最近 smoke 产物在 ignored `local_runs/external_model_gpr_inventory/round_g_smoke_20260709/`，不作为稳定科学资产提交。
 - 当前剩余边界是人工复核 smoke / production cache、决定是否提升稳定科学资产，以及后续可选的 Shadow LP service/backend toggle。
 
 ## 已完成主线：在线外部数据库证据层
@@ -240,6 +241,10 @@ git diff --name-only -- Code Model Enzymedata Results requirements.txt python_pi
 ```
 
 ## 并行但非当前主线
+
+### External GEM/GPR cache curation
+
+当前外部 GEM/GPR 主线仍只把 iPichia、ecPichia、Kp.1.0、iAUKM、Yeast8/Yeast9、BioModels 和 GPRuler 作为可审计 evidence source。下一步如果要进入生产数据，应先人工复核 `local_runs/` 中的 inventory、manual download 记录、SBML parse、priority 和 mapping report，再决定是否提升为稳定 cache；不得把 external GPR candidate 当作当前 Pichia GEM 的 `model_gpr_executable`。
 
 ### Shadow LP service/backend toggle
 
