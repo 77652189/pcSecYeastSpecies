@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 from xml.etree import ElementTree
 
 from pcsec_pichia.external_refs.cache_io import DEFAULT_RECORDS_FILENAME, load_external_reference_cache
+from pcsec_pichia.external_refs.cache_io import write_external_reference_cache_bundle
 from pcsec_pichia.external_refs.clients import ExternalFetchConfig
 from pcsec_pichia.external_refs.schema import (
     ExternalReactionAssociation,
@@ -12,6 +14,28 @@ from pcsec_pichia.external_refs.schema import (
     sha256_text,
     utc_now_iso,
 )
+
+
+REACTION_ASSOCIATIONS_FILENAME = "external_reaction_associations.jsonl"
+GPR_PARSE_MANIFEST_FILENAME = "external_gpr_parse_manifest.json"
+GPR_PARSE_REPORT_FILENAME = "external_gpr_parse_report.md"
+
+
+@dataclass(frozen=True)
+class ExternalGprParseWarning:
+    artifact_path: str
+    status: str
+    reason: str
+
+
+@dataclass(frozen=True)
+class ExternalGprParseOutputs:
+    associations_path: Path
+    manifest_path: Path
+    report_path: Path
+    association_count: int
+    unsupported_count: int
+    warnings: tuple[ExternalGprParseWarning, ...]
 
 
 def fetch_external_model_reaction_associations(
@@ -52,7 +76,7 @@ def parse_sbml_gpr_associations(
 ) -> tuple[ExternalReactionAssociation, ...]:
     """Parse reaction-level GPR associations from a local SBML file."""
 
-    text = sbml_path.read_text(encoding="utf-8")
+    text, parser_warning = _sbml_text_for_parser(sbml_path)
     root = ElementTree.fromstring(text)
     gene_labels = _gene_product_labels(root)
     retrieved_at = utc_now_iso()
@@ -76,6 +100,7 @@ def parse_sbml_gpr_associations(
             source_query=source_model_id,
             retrieved_at=retrieved_at,
             raw_record_sha256=raw_hash,
+            warnings=parser_warning,
         )
         associations.append(
             ExternalReactionAssociation(
@@ -89,6 +114,99 @@ def parse_sbml_gpr_associations(
             )
         )
     return tuple(sorted(associations, key=lambda record: record.cache_key))
+
+
+def parse_external_gpr_artifacts(
+    artifact_paths: Iterable[Path],
+    output_dir: Path,
+    *,
+    source_database: str,
+    source_model_id: str,
+) -> ExternalGprParseOutputs:
+    """Parse supported external GEM artifacts into reaction association cache files."""
+
+    paths = tuple(artifact_paths)
+    associations: list[ExternalReactionAssociation] = []
+    warnings: list[ExternalGprParseWarning] = []
+    for artifact_path in paths:
+        if _is_sbml_path(artifact_path):
+            try:
+                associations.extend(
+                    parse_sbml_gpr_associations(
+                        artifact_path,
+                        source_database=source_database,
+                        source_model_id=source_model_id,
+                    )
+                )
+            except (OSError, ElementTree.ParseError, ValueError) as exc:
+                warnings.append(
+                    ExternalGprParseWarning(
+                        artifact_path=str(artifact_path),
+                        status="parse_failed",
+                        reason=f"{type(exc).__name__}: {exc}",
+                    )
+                )
+            continue
+        warnings.append(
+            ExternalGprParseWarning(
+                artifact_path=str(artifact_path),
+                status="unsupported_format",
+                reason="manual_conversion_required",
+            )
+        )
+    manifest = write_external_reference_cache_bundle(
+        tuple(associations),
+        output_dir,
+        query_count=len(paths),
+        failed_query_count=len(warnings),
+        warnings=tuple(f"{warning.status}: {warning.artifact_path}" for warning in warnings),
+        records_filename=REACTION_ASSOCIATIONS_FILENAME,
+        manifest_filename=GPR_PARSE_MANIFEST_FILENAME,
+    )
+    associations_path = output_dir / REACTION_ASSOCIATIONS_FILENAME
+    manifest_path = output_dir / GPR_PARSE_MANIFEST_FILENAME
+    report_path = output_dir / GPR_PARSE_REPORT_FILENAME
+    report_path.write_text(
+        render_external_gpr_parse_report(
+            association_count=manifest.record_count,
+            warnings=tuple(warnings),
+        ),
+        encoding="utf-8",
+    )
+    return ExternalGprParseOutputs(
+        associations_path=associations_path,
+        manifest_path=manifest_path,
+        report_path=report_path,
+        association_count=manifest.record_count,
+        unsupported_count=sum(1 for warning in warnings if warning.status == "unsupported_format"),
+        warnings=tuple(warnings),
+    )
+
+
+def render_external_gpr_parse_report(
+    *,
+    association_count: int,
+    warnings: tuple[ExternalGprParseWarning, ...],
+) -> str:
+    lines = [
+        "# External GPR Parse Report",
+        "",
+        "Parsed associations are candidate-only external evidence and are not written into the current Pichia GEM.",
+        "",
+        "## Summary",
+        "",
+        f"- association_count: {association_count}",
+        f"- warning_count: {len(warnings)}",
+        "",
+        "## Warnings",
+        "",
+    ]
+    if warnings:
+        for warning in warnings:
+            lines.append(f"- {warning.status}: {warning.artifact_path} ({warning.reason})")
+    else:
+        lines.append("- None.")
+    return "\n".join(lines) + "\n"
 
 
 def _load_association_cache_records(cache_path: Path) -> tuple[ExternalReactionAssociation, ...]:
@@ -112,6 +230,21 @@ def _load_association_cache_records(cache_path: Path) -> tuple[ExternalReactionA
             if isinstance(record, ExternalReactionAssociation)
         )
     return tuple(records)
+
+
+def _is_sbml_path(path: Path) -> bool:
+    return path.suffix.lower() in {".xml", ".sbml"}
+
+
+def _sbml_text_for_parser(path: Path) -> tuple[str, tuple[str, ...]]:
+    try:
+        import libsbml
+    except Exception:
+        return path.read_text(encoding="utf-8"), ("libsbml_unavailable_fallback_elementtree",)
+    document = libsbml.readSBML(str(path))
+    if document is None or document.getNumErrors() > 0:
+        return path.read_text(encoding="utf-8"), ("libsbml_read_warning_fallback_elementtree",)
+    return document.toSBML(), ()
 
 
 def _gene_product_labels(root: ElementTree.Element) -> dict[str, str]:
@@ -211,6 +344,13 @@ def _local_name(value: str) -> str:
 
 
 __all__ = [
+    "GPR_PARSE_MANIFEST_FILENAME",
+    "GPR_PARSE_REPORT_FILENAME",
+    "REACTION_ASSOCIATIONS_FILENAME",
+    "ExternalGprParseOutputs",
+    "ExternalGprParseWarning",
     "fetch_external_model_reaction_associations",
+    "parse_external_gpr_artifacts",
     "parse_sbml_gpr_associations",
+    "render_external_gpr_parse_report",
 ]
