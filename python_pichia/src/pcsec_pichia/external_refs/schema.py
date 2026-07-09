@@ -62,6 +62,11 @@ class ExternalReferenceRecord:
     locus_tag: str | None = None
     aliases: tuple[str, ...] = ()
     protein_name: str | None = None
+    function_description: str | None = None
+    ec_numbers: tuple[str, ...] = ()
+    go_terms: tuple[str, ...] = ()
+    pathways: tuple[str, ...] = ()
+    orthology: tuple[str, ...] = ()
     reviewed: bool | None = None
     sequence_accession: str | None = None
     protein_sequence_sha256: str | None = None

@@ -22,6 +22,13 @@ from pcsec_pichia.external_refs.clients import (
     default_external_reference_clients,
     fetch_external_references,
 )
+from pcsec_pichia.external_refs.gene_function import (
+    KoOeExternalGeneEvidence,
+    attach_ko_oe_external_gene_evidence,
+    build_gene_function_evidence,
+    build_ko_oe_external_gene_evidence,
+    classify_gene_function_confidence,
+)
 from pcsec_pichia.external_refs.merge import (
     attach_external_references_to_name_audit,
     merge_external_fetch_results,
@@ -104,8 +111,12 @@ __all__ = [
     "EXTERNAL_LOCUS_CONFIRMED",
     "EXTERNAL_MATCH_CONFIRMED",
     "EXTERNAL_REFERENCE_MISSING",
+    "KoOeExternalGeneEvidence",
     "NameResolutionCandidate",
+    "attach_ko_oe_external_gene_evidence",
     "attach_external_references_to_name_audit",
+    "build_gene_function_evidence",
+    "build_ko_oe_external_gene_evidence",
     "build_external_reference_manifest",
     "build_external_reference_cache",
     "build_external_reference_queries",
@@ -115,6 +126,7 @@ __all__ = [
     "build_external_reference_queries_from_name_audit",
     "cache_file_fingerprint",
     "classify_external_name_consistency",
+    "classify_gene_function_confidence",
     "default_external_reference_clients",
     "dedupe_external_reference_queries",
     "external_reference_query_fingerprint",
