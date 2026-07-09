@@ -10,12 +10,17 @@ from app.services.pichia_external_reference_service import (
     submit_external_reference_refresh,
 )
 from pcsec_pichia.external_refs import (
+    EXTERNAL_GPR_MAPPING_CANDIDATES_FILENAME,
     ExternalGeneFunctionEvidence,
     ExternalGprCandidateEvidence,
+    ExternalModelInventoryRecord,
     ExternalReactionAssociation,
     ExternalReferenceProvenance,
     ExternalReferenceRecord,
+    GprSourcePriorityRecord,
     write_external_reference_cache_bundle,
+    write_external_model_inventory,
+    write_gpr_source_priority_outputs,
 )
 
 
@@ -65,6 +70,30 @@ def test_service_loads_external_reference_status_and_browser_rows(tmp_path: Path
     assert gpr_row["manual_review_reasons"] == [
         "external gene rule is not mapped to a current Pichia model gene"
     ]
+
+
+def test_service_surfaces_external_model_gpr_summary_from_mapping_cache(tmp_path: Path) -> None:
+    cache_dir = _write_external_model_gpr_cache(tmp_path / "external_model_gpr")
+
+    status = load_external_reference_status(cache_dir)
+    rows = load_external_reference_browser_rows(cache_dir)
+
+    assert status["cache_available"] is True
+    assert status["external_model_sources"] == ["Kp.1.0"]
+    assert status["external_gpr_candidate_count"] == 1
+    assert status["best_external_gpr_source"] == "biomodels:Kp.1.0"
+    assert status["gpr_source_priority"]["best_priority_tier"] == "pichia_literature_model_gpr"
+    assert status["external_gpr_mapping_status"] == {"gene_mapping_required": 1}
+    assert status["external_model_inventory"]["record_count"] == 1
+    assert "conflicting external GPR rules" in status["external_gpr_conflict_warnings"]
+
+    gpr_row = rows[0]
+    assert gpr_row["evidence_kind"] == "gpr_candidate"
+    assert gpr_row["external_model_sources"] == ["Kp.1.0"]
+    assert gpr_row["gpr_source_priority"] == "pichia_literature_model_gpr"
+    assert gpr_row["external_gpr_candidate_count"] == 1
+    assert gpr_row["external_gpr_mapping_status"] == "gene_mapping_required"
+    assert "conflicting external GPR rules" in gpr_row["external_gpr_conflict_warnings"]
 
 
 def test_service_filters_external_rows_by_query_and_kind(tmp_path: Path) -> None:
@@ -178,6 +207,72 @@ def _write_external_cache(path: Path) -> Path:
         ),
     )
     write_external_reference_cache_bundle(records, path)
+    return path
+
+
+def _write_external_model_gpr_cache(path: Path) -> Path:
+    candidate = ExternalGprCandidateEvidence(
+        provenance=_provenance("PAS_chr1-1_0001", source_database="biomodels"),
+        external_model_id="Kp.1.0",
+        external_reaction_id="R_KP_SEC",
+        external_gene_rule="KP_GENE",
+        candidate_status="gene_mapping_required",
+        pichia_gene_id="PAS_chr1-1_0001",
+        query_gene_id="KP_GENE",
+        mapped_pichia_reaction_id="R_PIC_SEC",
+        gene_mapping_status="external_gene_rule_only",
+        reaction_mapping_status="model_reaction_mapped",
+        gpr_transfer_status="gene_mapping_required",
+        confidence="manual_review_required",
+        blocking_reasons=("external gene rule is not mapped to a current Pichia model gene",),
+        mapping_warnings=("conflicting external GPR rules",),
+    )
+    write_external_reference_cache_bundle(
+        (candidate,),
+        path,
+        records_filename=EXTERNAL_GPR_MAPPING_CANDIDATES_FILENAME,
+    )
+    write_external_model_inventory(
+        (
+            ExternalModelInventoryRecord(
+                model_id="Kp.1.0",
+                model_name="Kp.1.0 genome-scale model",
+                organism="Komagataella phaffii",
+                source_database_or_repository="BioModels",
+                source_url="https://example.test/kp10",
+                publication_url="https://doi.org/10.1002/bit.26380",
+                license="CC BY 4.0",
+                available_artifact_types=("SBML",),
+                download_status="downloadable",
+                local_path="",
+                checksum_sha256="",
+                has_gpr=True,
+                has_gene_ids=True,
+                has_reaction_ids=True,
+                has_sbml=True,
+                notes="fixture",
+            ),
+        ),
+        path,
+    )
+    write_gpr_source_priority_outputs(
+        (
+            GprSourcePriorityRecord(
+                candidate_cache_key=candidate.cache_key,
+                source_database="biomodels",
+                external_model_id="Kp.1.0",
+                external_reaction_id="R_KP_SEC",
+                mapped_pichia_reaction_id="R_PIC_SEC",
+                external_gene_rule="KP_GENE",
+                priority_rank=2,
+                priority_tier="pichia_literature_model_gpr",
+                conflict_status="conflicting_gpr_sources",
+                manual_review_required=True,
+                warnings=("conflicting external GPR rules",),
+            ),
+        ),
+        path,
+    )
     return path
 
 

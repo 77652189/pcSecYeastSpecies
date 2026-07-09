@@ -158,6 +158,44 @@ def test_formal_screen_row_normalization_adds_mapping_explanation_fields() -> No
     assert row["complex_id"] == "sec_Kar2p_complex"
     assert row["complex_subunit_ids"] == ["Kar2p", "Sil1p"]
     assert row["secretory_process"] == "ER 折叠 / 分子伴侣"
+    assert row["external_model_sources"] == []
+    assert row["gpr_source_priority"] == {}
+    assert row["external_gpr_candidate_count"] == 0
+    assert row["external_gpr_mapping_status"] == {}
+
+
+def test_formal_screen_row_normalization_preserves_external_gpr_summary_fields() -> None:
+    import pcsec_pichia.screens as screens_module
+
+    row = screens_module._normalize_screen_row(
+        {
+            "gene": "PAS_chr1-1_0001",
+            "success": True,
+            "status": "0",
+            "objective_value": 0.002,
+            "delta_vs_baseline": 0.0001,
+            "external_model_sources": ["Kp.1.0"],
+            "gpr_source_priority": {"best_priority_tier": "pichia_literature_model_gpr"},
+            "external_gpr_candidate_count": 1,
+            "best_external_gpr_source": "biomodels:Kp.1.0",
+            "external_gpr_mapping_status": {"gene_mapping_required": 1},
+            "external_gpr_conflict_warnings": ["conflicting external GPR rules"],
+            "manual_review_reasons": ["external GPR candidate requires mapped current model gene"],
+            "recommendation_tier": "model_executable",
+        },
+        target_id="hLF",
+        screen_type="knockout",
+        intervention_type="KO",
+        baseline_objective_value=0.0019,
+        complex_subunits={},
+    )
+
+    assert row["external_model_sources"] == ["Kp.1.0"]
+    assert row["gpr_source_priority"] == {"best_priority_tier": "pichia_literature_model_gpr"}
+    assert row["external_gpr_candidate_count"] == 1
+    assert row["external_gpr_mapping_status"] == {"gene_mapping_required": 1}
+    assert row["manual_review_reasons"] == ["external GPR candidate requires mapped current model gene"]
+    assert row["recommendation_tier"] == "model_executable"
 
 
 def test_gene_intervention_plans_respect_gpr_and_or_rules() -> None:

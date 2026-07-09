@@ -84,3 +84,36 @@ def test_fact_pack_keeps_homology_auxiliary_out_of_executable_recommendations(tm
     assert fact_pack["targets"]["hLF"]["manual_review_candidates"][0]["gene_id"] == "PAS_MODEL_EXTERNAL"
     assert fact_pack["evidence_items"][0]["numeric_fields"]["secretion_ratio_vs_wildtype"] == 1.5
     assert any("Results/" in warning for warning in fact_pack["warnings"])
+
+
+def test_fact_pack_preserves_external_model_gpr_fields_without_tier_upgrade(tmp_path: Path) -> None:
+    paths = _paths(tmp_path)
+    row = _row("hLF", "PAS_EXTERNAL_GPR", "KO", 1.4)
+    row.update(
+        {
+            "recommendation_tier": "model_executable",
+            "database_annotation_sources": json.dumps(["UniProt"]),
+            "external_model_sources": json.dumps(["Kp.1.0"]),
+            "gpr_source_priority": json.dumps({"best_priority_tier": "pichia_literature_model_gpr"}),
+            "external_gpr_candidate_count": 2,
+            "best_external_gpr_source": "biomodels:Kp.1.0",
+            "external_gpr_mapping_status": json.dumps({"gene_mapping_required": 2}),
+            "external_gpr_conflict_warnings": json.dumps(["conflicting external GPR rules"]),
+            "manual_review_reasons": json.dumps(["external GPR candidate requires mapped current model gene"]),
+        }
+    )
+    csv_path = _write_run(tmp_path, "fixture_run", [row])
+
+    fact_pack = build_screen_report_fact_pack(paths, csv_paths=(csv_path,))
+
+    item = fact_pack["evidence_items"][0]
+    brief = fact_pack["targets"]["hLF"]["manual_review_candidates"][0]
+    assert item["recommendation_tier"] == "model_executable"
+    assert item["recommendation_tier"] != "experiment_calibrated"
+    assert item["external_model_sources"] == ["Kp.1.0"]
+    assert item["gpr_source_priority"]["best_priority_tier"] == "pichia_literature_model_gpr"
+    assert item["external_gpr_candidate_count"] == 2
+    assert item["external_gpr_mapping_status"] == {"gene_mapping_required": 2}
+    assert item["external_gpr_conflict_warnings"] == ["conflicting external GPR rules"]
+    assert brief["best_external_gpr_source"] == "biomodels:Kp.1.0"
+    assert brief["manual_review_reasons"] == ["external GPR candidate requires mapped current model gene"]

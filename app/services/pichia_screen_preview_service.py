@@ -247,6 +247,7 @@ def _reaction_row(reaction_id: str, intervention_type: str, resolved: bool) -> d
         "annotation_sources": [],
         "annotation_confidence": "",
         "standard_name_status": "not_gene_candidate",
+        **_external_gpr_preview_fields({}),
     }
 
 
@@ -318,6 +319,19 @@ def _capability_evidence_preview_fields(
         "rule_transfer_status": data.get("rule_transfer_status", ""),
         "name_consistency_status": data.get("name_consistency_status", ""),
         "homology_warnings": list(data.get("homology_warnings") or []),
+        **_external_gpr_preview_fields(data),
+    }
+
+
+def _external_gpr_preview_fields(data: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "external_model_sources": list(data.get("external_model_sources") or []),
+        "gpr_source_priority": data.get("gpr_source_priority") or {},
+        "external_gpr_candidate_count": int(data.get("external_gpr_candidate_count") or 0),
+        "best_external_gpr_source": data.get("best_external_gpr_source", ""),
+        "external_gpr_mapping_status": data.get("external_gpr_mapping_status") or {},
+        "external_gpr_conflict_warnings": list(data.get("external_gpr_conflict_warnings") or []),
+        "manual_review_reasons": list(data.get("manual_review_reasons") or []),
     }
 
 

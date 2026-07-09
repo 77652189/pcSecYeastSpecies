@@ -10,8 +10,12 @@ from pcsec_pichia.homology.crosswalk import write_name_audit_cache, write_rule_t
 from pcsec_pichia.external_refs import (
     ExternalGeneFunctionEvidence,
     ExternalGprCandidateEvidence,
+    ExternalModelInventoryRecord,
     ExternalReferenceProvenance,
+    GprSourcePriorityRecord,
     write_external_reference_cache_bundle,
+    write_external_model_inventory,
+    write_gpr_source_priority_outputs,
 )
 
 from app.services.pichia_homology_audit_service import (
@@ -92,8 +96,16 @@ def test_service_reports_external_reference_cache_status(tmp_path: Path) -> None
     assert "build_pichia_external_name_reference_cache.py" in status["recommended_external_build_command"]
     assert status["external_reference_cache"]["cache_available"] is True
     assert status["external_reference_cache"]["record_type_counts"] == {"gene_function": 1, "gpr_candidate": 1}
+    assert status["external_reference_cache"]["external_model_sources"] == ["yeast-GEM"]
+    assert status["external_reference_cache"]["external_gpr_candidate_count"] == 1
+    assert status["external_reference_cache"]["gpr_source_priority"]["best_priority_tier"] == "homology_supported_yeast_gpr"
+    assert status["external_reference_cache"]["external_model_inventory"]["record_count"] == 1
     assert len(payload["external_reference_rows"]) == 2
     assert {row["evidence_kind"] for row in payload["external_reference_rows"]} == {"gene_function", "gpr_candidate"}
+    gpr_row = next(row for row in payload["external_reference_rows"] if row["evidence_kind"] == "gpr_candidate")
+    assert gpr_row["external_model_sources"] == ["yeast-GEM"]
+    assert gpr_row["external_gpr_candidate_count"] == 1
+    assert gpr_row["gpr_source_priority"] == "homology_supported_yeast_gpr"
 
 
 def test_export_returns_utf8_with_header() -> None:
@@ -268,6 +280,17 @@ def _write_external_reference_cache(path: Path) -> None:
 
 
 def _write_unified_external_reference_cache(path: Path) -> None:
+    candidate = ExternalGprCandidateEvidence(
+        provenance=_external_ref_provenance("YJL034W", source_database="yeast-gem"),
+        external_model_id="yeast-GEM",
+        external_reaction_id="r_1234",
+        external_gene_rule="YJL034W",
+        candidate_status="gene_mapping_required",
+        pichia_gene_id="PAS_chr2-1_0140",
+        query_gene_id="YJL034W",
+        gpr_transfer_status="gene_mapping_required",
+        blocking_reasons=("external gene rule is not mapped to a current Pichia model gene",),
+    )
     records = (
         ExternalGeneFunctionEvidence(
             provenance=_external_ref_provenance("PAS_chr2-1_0140", source_database="uniprot"),
@@ -277,19 +300,50 @@ def _write_unified_external_reference_cache(path: Path) -> None:
             go_terms=("GO:0006457",),
             evidence_scope="reviewed_structured_annotation",
         ),
-        ExternalGprCandidateEvidence(
-            provenance=_external_ref_provenance("YJL034W", source_database="yeast-gem"),
-            external_model_id="yeast-GEM",
-            external_reaction_id="r_1234",
-            external_gene_rule="YJL034W",
-            candidate_status="gene_mapping_required",
-            pichia_gene_id="PAS_chr2-1_0140",
-            query_gene_id="YJL034W",
-            gpr_transfer_status="gene_mapping_required",
-            blocking_reasons=("external gene rule is not mapped to a current Pichia model gene",),
-        ),
+        candidate,
     )
     write_external_reference_cache_bundle(records, path)
+    write_external_model_inventory(
+        (
+            ExternalModelInventoryRecord(
+                model_id="yeast-GEM",
+                model_name="Yeast8 / Yeast9 yeast-GEM",
+                organism="Saccharomyces cerevisiae",
+                source_database_or_repository="GitHub SysBioChalmers/yeast-GEM",
+                source_url="https://example.test/yeast-gem",
+                publication_url="https://doi.org/10.1038/s41467-019-11581-3",
+                license="MIT",
+                available_artifact_types=("SBML",),
+                download_status="repository_available",
+                local_path="",
+                checksum_sha256="",
+                has_gpr=True,
+                has_gene_ids=True,
+                has_reaction_ids=True,
+                has_sbml=True,
+                notes="fixture",
+            ),
+        ),
+        path,
+    )
+    write_gpr_source_priority_outputs(
+        (
+            GprSourcePriorityRecord(
+                candidate_cache_key=candidate.cache_key,
+                source_database="yeast-gem",
+                external_model_id="yeast-GEM",
+                external_reaction_id="r_1234",
+                mapped_pichia_reaction_id=None,
+                external_gene_rule="YJL034W",
+                priority_rank=3,
+                priority_tier="homology_supported_yeast_gpr",
+                conflict_status="none",
+                manual_review_required=True,
+                warnings=("cross_species_mapping_required",),
+            ),
+        ),
+        path,
+    )
 
 
 def _external_ref_provenance(query: str, *, source_database: str) -> ExternalReferenceProvenance:

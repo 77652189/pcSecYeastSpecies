@@ -627,6 +627,13 @@ def test_screen_input_preview_resolves_manual_ko_oe_candidates() -> None:
     assert preview["ko_genes"][0]["recommendation_tier"] == "model_executable"
     assert preview["oe_genes"][0]["recommendation_tier"] == "model_executable"
     assert preview["oe_genes"][0]["oe_reaction_proxy"] is True
+    assert preview["ko_genes"][0]["external_model_sources"] == []
+    assert preview["ko_genes"][0]["gpr_source_priority"] == {}
+    assert preview["ko_genes"][0]["external_gpr_candidate_count"] == 0
+    assert preview["ko_genes"][0]["external_gpr_mapping_status"] == {}
+    assert preview["ko_genes"][0]["external_gpr_conflict_warnings"] == []
+    assert preview["ko_genes"][0]["manual_review_reasons"] == []
+    assert preview["ko_reactions"][0]["external_model_sources"] == []
     assert "phenotype_evidence" in preview["ko_genes"][0]
     assert "database_annotation_sources" in preview["gene_capabilities"][0]
     assert preview["oe_genes"][0]["support_reason"]

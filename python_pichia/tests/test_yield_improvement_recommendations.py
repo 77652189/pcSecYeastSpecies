@@ -296,6 +296,43 @@ def test_yield_recommendation_annotation_only_is_not_experiment_calibrated() -> 
     assert row["database_annotation_sources"] == ("UniProt", "KEGG")
 
 
+def test_yield_recommendation_preserves_external_gpr_summary_without_tier_upgrade() -> None:
+    result = analyze_yield_improvement_candidates(
+        [
+            {
+                "target_id": "OPN_ALPHA_FULL_PROJECT",
+                "candidate_id": "EXTERNAL_GPR_ONLY",
+                "gene_id": "EXTERNAL_GPR_ONLY",
+                "input_gene_id": "EXTERNAL_GPR_ONLY",
+                "intervention_type": "KO",
+                "ko_support_status": "ko_runnable_gpr_gene_deletion",
+                "success": True,
+                "status": "optimal",
+                "delta_objective": 0.0001,
+                "recommendation_tier": "model_executable",
+                "external_model_sources": ["Kp.1.0"],
+                "gpr_source_priority": {"best_priority_tier": "pichia_literature_model_gpr"},
+                "external_gpr_candidate_count": 1,
+                "best_external_gpr_source": "biomodels:Kp.1.0",
+                "external_gpr_mapping_status": {"gene_mapping_required": 1},
+                "external_gpr_conflict_warnings": ["conflicting external GPR rules"],
+                "manual_review_reasons": ["external GPR candidate requires mapped current model gene"],
+            }
+        ],
+        target_id="OPN_ALPHA_FULL_PROJECT",
+    )
+    row = summarize_yield_improvement_recommendations(result)["recommended_candidates"][0]
+
+    assert row["recommendation_tier"] == "model_executable"
+    assert row["recommendation_tier"] != "experiment_calibrated"
+    assert row["external_model_sources"] == ("Kp.1.0",)
+    assert row["gpr_source_priority"] == {"best_priority_tier": "pichia_literature_model_gpr"}
+    assert row["external_gpr_candidate_count"] == 1
+    assert row["external_gpr_mapping_status"] == {"gene_mapping_required": 1}
+    assert row["external_gpr_conflict_warnings"] == ("conflicting external GPR rules",)
+    assert row["manual_review_reasons"] == ("external GPR candidate requires mapped current model gene",)
+
+
 def test_yield_recommendation_homology_only_is_not_experiment_calibrated() -> None:
     result = analyze_yield_improvement_candidates(
         [

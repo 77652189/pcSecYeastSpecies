@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import Any, Iterable, Mapping
@@ -13,6 +14,9 @@ ensure_python_pichia_on_path()
 from pcsec_pichia.external_refs import (
     DEFAULT_MANIFEST_FILENAME,
     DEFAULT_RECORDS_FILENAME,
+    EXTERNAL_GPR_MAPPING_CANDIDATES_FILENAME,
+    GPR_SOURCE_PRIORITY_FILENAME,
+    INVENTORY_JSONL_FILENAME,
     ExternalGeneFunctionEvidence,
     ExternalGprCandidateEvidence,
     ExternalReactionAssociation,
@@ -44,11 +48,13 @@ def load_external_reference_status(cache_root: Path) -> dict[str, Any]:
         "missing_files": _missing_files(root),
         "warnings": [],
         "recommended_refresh_command": _recommended_refresh_command(root),
+        **_external_model_gpr_summary(root, ()),
     }
-    if not records_path.exists():
+    candidate_records_path = _candidate_records_path(root)
+    if not records_path.exists() and not candidate_records_path.exists():
         return base
     try:
-        records = load_external_reference_cache(records_path)
+        records = _load_external_cache_records(root)
     except (OSError, UnicodeDecodeError, ValueError) as exc:
         return {**base, "warnings": [f"failed to read external reference cache: {type(exc).__name__}: {exc}"]}
     manifest_payload: dict[str, Any] = {}
@@ -79,6 +85,7 @@ def load_external_reference_status(cache_root: Path) -> dict[str, Any]:
         "failed_query_count": int(manifest_payload.get("failed_query_count", 0)),
         "missing_files": [],
         "warnings": list(manifest_payload.get("warnings", [])),
+        **_external_model_gpr_summary(root, records),
     }
 
 
@@ -93,10 +100,12 @@ def load_external_reference_browser_rows(
     """Flatten local external reference records for service/UI display."""
 
     records_path = _records_path(Path(cache_root))
-    if not records_path.exists():
+    candidate_records_path = _candidate_records_path(Path(cache_root))
+    if not records_path.exists() and not candidate_records_path.exists():
         return []
-    records = load_external_reference_cache(records_path)
-    rows = [_browser_row(record) for record in records]
+    records = _load_external_cache_records(Path(cache_root))
+    priority_by_cache_key = _gpr_priority_by_cache_key(Path(cache_root))
+    rows = [_browser_row(record, priority_by_cache_key=priority_by_cache_key) for record in records]
     return _filter_rows(
         rows,
         query=query,
@@ -160,6 +169,12 @@ def _manifest_path(cache_root: Path) -> Path:
     return cache_root / DEFAULT_MANIFEST_FILENAME
 
 
+def _candidate_records_path(cache_root: Path) -> Path:
+    if _looks_like_records_file(cache_root):
+        return cache_root
+    return cache_root / EXTERNAL_GPR_MAPPING_CANDIDATES_FILENAME
+
+
 def _looks_like_records_file(cache_root: Path) -> bool:
     return cache_root.name == DEFAULT_RECORDS_FILENAME or cache_root.suffix.lower() == ".jsonl"
 
@@ -171,7 +186,7 @@ def _missing_files(cache_root: Path) -> list[str]:
     return missing
 
 
-def _browser_row(record: Any) -> dict[str, Any]:
+def _browser_row(record: Any, *, priority_by_cache_key: Mapping[str, Mapping[str, Any]] | None = None) -> dict[str, Any]:
     row = _record_common_fields(record)
     if isinstance(record, ExternalReferenceRecord):
         row.update(
@@ -202,20 +217,28 @@ def _browser_row(record: Any) -> dict[str, Any]:
     elif isinstance(record, ExternalReactionAssociation):
         row.update(
             {
+                "external_model_sources": [record.external_model_id],
                 "source_model_id": record.external_model_id,
                 "source_reaction_id": record.external_reaction_id,
                 "source_reaction_name": record.external_reaction_name or "",
                 "source_gene_rule": record.gene_rule or "",
                 "source_gene_ids": list(record.external_gene_ids),
                 "gpr_transfer_status": record.association_status,
+                "external_gpr_candidate_count": 0,
+                "best_external_gpr_source": _source_label(record.provenance.source_database, record.external_model_id),
+                "external_gpr_mapping_status": record.association_status,
+                "external_gpr_conflict_warnings": _conflict_warnings(record.provenance.warnings),
                 "manual_review_reasons": _manual_review_reasons_from_warnings(record.provenance.warnings),
             }
         )
     elif isinstance(record, ExternalGprCandidateEvidence):
+        priority = (priority_by_cache_key or {}).get(record.cache_key, {})
+        conflict_warnings = _conflict_warnings((*record.mapping_warnings, *record.blocking_reasons))
         row.update(
             {
                 "pichia_gene_id": record.pichia_gene_id or "",
                 "query_gene_id": record.query_gene_id or "",
+                "external_model_sources": [record.external_model_id],
                 "source_model_id": record.external_model_id,
                 "source_reaction_id": record.external_reaction_id,
                 "source_gene_rule": record.external_gene_rule or "",
@@ -224,9 +247,14 @@ def _browser_row(record: Any) -> dict[str, Any]:
                 "gene_mapping_status": record.gene_mapping_status,
                 "reaction_mapping_status": record.reaction_mapping_status,
                 "gpr_transfer_status": record.gpr_transfer_status,
+                "gpr_source_priority": priority.get("priority_tier", ""),
                 "evidence_confidence": record.confidence,
                 "supporting_gene_evidence": list(record.supporting_gene_evidence),
-                "manual_review_reasons": list(record.blocking_reasons),
+                "external_gpr_candidate_count": 1,
+                "best_external_gpr_source": _source_label(record.provenance.source_database, record.external_model_id),
+                "external_gpr_mapping_status": record.candidate_status or record.gpr_transfer_status,
+                "external_gpr_conflict_warnings": conflict_warnings,
+                "manual_review_reasons": list(dict.fromkeys((*record.blocking_reasons, *conflict_warnings))),
             }
         )
     return row
@@ -290,6 +318,132 @@ def _record_type_counts(records: Iterable[Any]) -> dict[str, int]:
     return dict(sorted(counts.items()))
 
 
+def _load_external_cache_records(cache_root: Path) -> tuple[Any, ...]:
+    paths = []
+    records_path = _records_path(cache_root)
+    candidate_path = _candidate_records_path(cache_root)
+    if records_path.exists():
+        paths.append(records_path)
+    if candidate_path.exists() and candidate_path not in paths:
+        paths.append(candidate_path)
+    records: list[Any] = []
+    seen_cache_keys: set[str] = set()
+    for path in paths:
+        for record in load_external_reference_cache(path):
+            cache_key = str(getattr(record, "cache_key", ""))
+            if cache_key and cache_key in seen_cache_keys:
+                continue
+            if cache_key:
+                seen_cache_keys.add(cache_key)
+            records.append(record)
+    return tuple(records)
+
+
+def _external_model_gpr_summary(cache_root: Path, records: Iterable[Any]) -> dict[str, Any]:
+    resolved = tuple(records)
+    candidates = tuple(record for record in resolved if isinstance(record, ExternalGprCandidateEvidence))
+    associations = tuple(record for record in resolved if isinstance(record, ExternalReactionAssociation))
+    priority_records = _load_gpr_priority_records(cache_root)
+    inventory_records = _load_inventory_records(cache_root)
+    model_sources = sorted(
+        {
+            str(value)
+            for value in (
+                *(record.external_model_id for record in candidates),
+                *(record.external_model_id for record in associations),
+                *(record.get("model_id", "") for record in inventory_records if record.get("has_gpr", False)),
+            )
+            if str(value).strip()
+        }
+    )
+    mapping_counts: dict[str, int] = {}
+    manual_reasons: list[str] = []
+    conflict_warnings: list[str] = []
+    for candidate in candidates:
+        status = str(candidate.candidate_status or candidate.gpr_transfer_status or "external_gpr_candidate")
+        mapping_counts[status] = mapping_counts.get(status, 0) + 1
+        manual_reasons.extend(str(item) for item in candidate.blocking_reasons if str(item).strip())
+        conflict_warnings.extend(_conflict_warnings((*candidate.mapping_warnings, *candidate.blocking_reasons)))
+    for record in priority_records:
+        if str(record.get("conflict_status") or "") == "conflicting_gpr_sources":
+            conflict_warnings.extend(str(item) for item in record.get("warnings") or () if str(item).strip())
+    priority_tier_counts: dict[str, int] = {}
+    for record in priority_records:
+        tier = str(record.get("priority_tier") or "")
+        if tier:
+            priority_tier_counts[tier] = priority_tier_counts.get(tier, 0) + 1
+    best_priority = _best_priority_record(priority_records)
+    inventory_status_counts: dict[str, int] = {}
+    for record in inventory_records:
+        status = str(record.get("download_status") or "unknown")
+        inventory_status_counts[status] = inventory_status_counts.get(status, 0) + 1
+    best_source = ""
+    if best_priority:
+        best_source = _source_label(best_priority.get("source_database"), best_priority.get("external_model_id"))
+    elif candidates:
+        best_source = _source_label(candidates[0].provenance.source_database, candidates[0].external_model_id)
+    return {
+        "external_model_sources": model_sources,
+        "gpr_source_priority": {
+            "best_priority_tier": str(best_priority.get("priority_tier") or "") if best_priority else "",
+            "tier_counts": dict(sorted(priority_tier_counts.items())),
+        },
+        "external_gpr_candidate_count": len(candidates),
+        "best_external_gpr_source": best_source,
+        "external_gpr_mapping_status": dict(sorted(mapping_counts.items())),
+        "external_gpr_conflict_warnings": sorted(set(conflict_warnings)),
+        "manual_review_reasons": sorted(set(manual_reasons)),
+        "external_model_inventory": {
+            "available": bool(inventory_records),
+            "record_count": len(inventory_records),
+            "download_status_counts": dict(sorted(inventory_status_counts.items())),
+        },
+    }
+
+
+def _load_inventory_records(cache_root: Path) -> tuple[dict[str, Any], ...]:
+    path = cache_root / INVENTORY_JSONL_FILENAME
+    if not path.exists():
+        return ()
+    rows: list[dict[str, Any]] = []
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            payload = json.loads(line)
+            if isinstance(payload, dict):
+                rows.append(payload)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return ()
+    return tuple(rows)
+
+
+def _load_gpr_priority_records(cache_root: Path) -> tuple[dict[str, Any], ...]:
+    path = cache_root / GPR_SOURCE_PRIORITY_FILENAME
+    if not path.exists():
+        return ()
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return ()
+    records = payload.get("records") if isinstance(payload, dict) else None
+    return tuple(dict(record) for record in records or () if isinstance(record, Mapping))
+
+
+def _gpr_priority_by_cache_key(cache_root: Path) -> Mapping[str, Mapping[str, Any]]:
+    return {
+        str(record.get("candidate_cache_key")): record
+        for record in _load_gpr_priority_records(cache_root)
+        if str(record.get("candidate_cache_key") or "").strip()
+    }
+
+
+def _best_priority_record(records: tuple[dict[str, Any], ...]) -> dict[str, Any]:
+    if not records:
+        return {}
+    return sorted(records, key=lambda row: (int(row.get("priority_rank") or 999), str(row.get("source_database") or "")))[0]
+
+
 def _name_conflict_status(record: ExternalReferenceRecord) -> str:
     warnings = " ".join(str(item).lower() for item in record.provenance.warnings)
     return "external_conflict" if "conflict" in warnings else "not_classified"
@@ -303,6 +457,18 @@ def _manual_review_reasons_for_gene_function(record: ExternalGeneFunctionEvidenc
 
 def _manual_review_reasons_from_warnings(warnings: Iterable[str]) -> list[str]:
     return [str(item) for item in warnings if str(item).strip()]
+
+
+def _conflict_warnings(warnings: Iterable[str]) -> list[str]:
+    return [str(item) for item in warnings if "conflict" in str(item).lower()]
+
+
+def _source_label(source_database: object, model_id: object) -> str:
+    source = str(source_database or "").strip()
+    model = str(model_id or "").strip()
+    if source and model:
+        return f"{source}:{model}"
+    return model or source
 
 
 def _export_fieldnames(rows: list[dict[str, Any]]) -> list[str]:

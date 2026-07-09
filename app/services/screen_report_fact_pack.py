@@ -198,6 +198,13 @@ def _normalize_evidence_item(
         "external_gpr_candidate_evidence": _json_list(
             row.get("external_gpr_candidate_evidence") or row.get("external_gpr_candidates")
         ),
+        "external_model_sources": _json_list(row.get("external_model_sources")),
+        "gpr_source_priority": _json_value(row.get("gpr_source_priority")),
+        "external_gpr_candidate_count": _optional_int(row.get("external_gpr_candidate_count"), default=0),
+        "best_external_gpr_source": str(row.get("best_external_gpr_source") or ""),
+        "external_gpr_mapping_status": _json_value(row.get("external_gpr_mapping_status")),
+        "external_gpr_conflict_warnings": _json_list(row.get("external_gpr_conflict_warnings")),
+        "manual_review_reasons": _json_list(row.get("manual_review_reasons")),
         "ko_oe_external_gene_evidence": _json_object(row.get("ko_oe_external_gene_evidence")),
         "evidence_type": str(row.get("evidence_type") or row.get("recommendation_tier") or ""),
         "homology_review_status": str(row.get("homology_review_status") or row.get("standard_name_status") or ""),
@@ -254,6 +261,13 @@ def _brief_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         "external_gene_function_sources",
         "external_gene_function_evidence",
         "external_gpr_candidate_evidence",
+        "external_model_sources",
+        "gpr_source_priority",
+        "external_gpr_candidate_count",
+        "best_external_gpr_source",
+        "external_gpr_mapping_status",
+        "external_gpr_conflict_warnings",
+        "manual_review_reasons",
         "ko_oe_external_gene_evidence",
         "secretion_ratio_vs_wildtype",
         "growth_retention_ratio",
@@ -327,6 +341,7 @@ def _row_warnings(row: dict[str, str], recommendation_tier: str, intervention_ty
         warnings.append("Solver timeout evidence present; interpret cautiously.")
     if str(row.get("skipped_reason") or "").strip():
         warnings.append(f"Skipped row: {row.get('skipped_reason')}")
+    warnings.extend(str(item) for item in _json_list(row.get("external_gpr_conflict_warnings")) if str(item).strip())
     return warnings
 
 
@@ -364,7 +379,13 @@ def _is_growth_risk(item: dict[str, Any]) -> bool:
 
 def _is_manual_review(item: dict[str, Any]) -> bool:
     tier = str(item.get("recommendation_tier") or "").lower()
-    return "manual" in tier or "review" in tier or _is_model_external_or_homology(item)
+    return (
+        "manual" in tier
+        or "review" in tier
+        or bool(item.get("manual_review_reasons"))
+        or bool(item.get("external_gpr_conflict_warnings"))
+        or _is_model_external_or_homology(item)
+    )
 
 
 def _is_model_external_or_homology(item: dict[str, Any]) -> bool:
@@ -475,6 +496,11 @@ def _optional_float(value: Any, default: float | None = None) -> float | None:
         return float(text)
     except ValueError:
         return default
+
+
+def _optional_int(value: Any, default: int = 0) -> int:
+    parsed = _optional_float(value)
+    return default if parsed is None else int(parsed)
 
 
 def _target_key(target_id: str) -> str | None:

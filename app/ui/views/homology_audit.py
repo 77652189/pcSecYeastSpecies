@@ -97,9 +97,15 @@ EXTERNAL_REFERENCE_COLUMNS = {
     "protein_name": "protein",
     "function_description": "function",
     "evidence_confidence": "confidence",
+    "external_model_sources": "external model sources",
+    "gpr_source_priority": "GPR source priority",
+    "external_gpr_candidate_count": "GPR candidate count",
+    "best_external_gpr_source": "best external GPR source",
     "source_reaction_id": "source reaction",
     "source_gene_rule": "source gene rule",
     "mapped_model_reaction_id": "mapped reaction",
+    "external_gpr_mapping_status": "external GPR mapping",
+    "external_gpr_conflict_warnings": "GPR conflicts",
     "gpr_transfer_status": "GPR status",
     "manual_review_reasons": "manual review",
 }
@@ -319,6 +325,8 @@ def _display_value(value: Any) -> Any:
         return "是" if value else "否"
     if isinstance(value, list):
         return "; ".join(str(item) for item in value)
+    if isinstance(value, dict):
+        return "; ".join(f"{key}:{item}" for key, item in sorted(value.items()))
     if value is None:
         return ""
     return value
@@ -407,6 +415,7 @@ def _render_external_reference_cache_status(
     source_counts = status.get("source_counts") if isinstance(status.get("source_counts"), dict) else {}
     type_counts = status.get("record_type_counts") if isinstance(status.get("record_type_counts"), dict) else {}
     retrieved = status.get("retrieved_at_range") if isinstance(status.get("retrieved_at_range"), dict) else {}
+    gpr_priority = status.get("gpr_source_priority") if isinstance(status.get("gpr_source_priority"), dict) else {}
     st.markdown(
         f"""
         **External reference cache**
@@ -417,6 +426,10 @@ def _render_external_reference_cache_status(
         - sources: `{_format_source_counts(source_counts)}`
         - record types: `{_format_source_counts(type_counts)}`
         - retrieved_at: `{retrieved.get("first", "")}` to `{retrieved.get("last", "")}`
+        - external model sources: `{_display_value(status.get("external_model_sources") or [])}`
+        - external GPR candidates: `{status.get("external_gpr_candidate_count", 0)}`
+        - best external GPR source: `{status.get("best_external_gpr_source", "")}`
+        - best GPR priority tier: `{gpr_priority.get("best_priority_tier", "")}`
         """
     )
     command = str(status.get("recommended_refresh_command") or "")

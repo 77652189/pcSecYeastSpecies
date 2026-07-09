@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -83,6 +84,13 @@ class YieldImprovementCandidateRecommendation:
     recommendation_tier_reason: str
     recommendation_label: str
     recommendation_score: float
+    external_model_sources: tuple[str, ...]
+    gpr_source_priority: dict[str, object]
+    external_gpr_candidate_count: int
+    best_external_gpr_source: str
+    external_gpr_mapping_status: dict[str, object]
+    external_gpr_conflict_warnings: tuple[str, ...]
+    manual_review_reasons: tuple[str, ...]
     rationale: str
     warnings: tuple[str, ...]
 
@@ -446,6 +454,13 @@ def _yield_candidate_recommendation(
         recommendation_tier_reason=tier_reason,
         recommendation_label=label,
         recommendation_score=score,
+        external_model_sources=_tuple_text_values(row.get("external_model_sources")),
+        gpr_source_priority=_mapping_value(row.get("gpr_source_priority")),
+        external_gpr_candidate_count=_optional_int(row.get("external_gpr_candidate_count")),
+        best_external_gpr_source=str(row.get("best_external_gpr_source") or ""),
+        external_gpr_mapping_status=_mapping_value(row.get("external_gpr_mapping_status")),
+        external_gpr_conflict_warnings=_tuple_text_values(row.get("external_gpr_conflict_warnings")),
+        manual_review_reasons=_tuple_text_values(row.get("manual_review_reasons")),
         rationale=_yield_rationale(label, delta, execution_mode, evidence_tier, row),
         warnings=warnings,
     )
@@ -993,6 +1008,42 @@ def _optional_float(value: object) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _optional_int(value: object) -> int:
+    parsed = _optional_float(value)
+    return int(parsed) if parsed is not None else 0
+
+
+def _tuple_text_values(value: object) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    parsed = _json_payload(value)
+    if isinstance(parsed, dict):
+        return tuple(str(key) for key in parsed)
+    if isinstance(parsed, (list, tuple, set)):
+        return tuple(str(item) for item in parsed if str(item).strip())
+    text = str(parsed).strip()
+    return (text,) if text else ()
+
+
+def _mapping_value(value: object) -> dict[str, object]:
+    parsed = _json_payload(value)
+    return dict(parsed) if isinstance(parsed, dict) else {}
+
+
+def _json_payload(value: object) -> object:
+    if not isinstance(value, str):
+        return value
+    text = value.strip()
+    if not text:
+        return None
+    if text[0] not in "[{":
+        return value
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return value
 
 
 __all__ = [

@@ -439,6 +439,13 @@ def _normalize_screen_row(
         "oe_support_status": row.get("oe_support_status") or _default_oe_support_status(intervention_type, row.get("status")),
         "support_reason": row.get("support_reason") or _default_support_reason(intervention_type, row.get("status")),
         "missing_information": row.get("missing_information") or [],
+        "external_model_sources": row.get("external_model_sources") or [],
+        "gpr_source_priority": row.get("gpr_source_priority") or {},
+        "external_gpr_candidate_count": int(row.get("external_gpr_candidate_count") or 0),
+        "best_external_gpr_source": row.get("best_external_gpr_source") or "",
+        "external_gpr_mapping_status": row.get("external_gpr_mapping_status") or {},
+        "external_gpr_conflict_warnings": row.get("external_gpr_conflict_warnings") or [],
+        "manual_review_reasons": row.get("manual_review_reasons") or [],
         "warnings": row.get("warnings") or [],
     }
 

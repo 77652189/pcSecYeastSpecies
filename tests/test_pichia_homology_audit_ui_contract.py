@@ -58,6 +58,10 @@ def test_homology_audit_external_reference_columns_include_review_fields() -> No
     assert "evidence_kind" in view.EXTERNAL_REFERENCE_COLUMNS
     assert "function_description" in view.EXTERNAL_REFERENCE_COLUMNS
     assert "gpr_transfer_status" in view.EXTERNAL_REFERENCE_COLUMNS
+    assert "external_model_sources" in view.EXTERNAL_REFERENCE_COLUMNS
+    assert "gpr_source_priority" in view.EXTERNAL_REFERENCE_COLUMNS
+    assert "external_gpr_mapping_status" in view.EXTERNAL_REFERENCE_COLUMNS
+    assert "external_gpr_conflict_warnings" in view.EXTERNAL_REFERENCE_COLUMNS
     assert "manual_review_reasons" in view.EXTERNAL_REFERENCE_COLUMNS
 
 
@@ -243,6 +247,8 @@ def test_homology_audit_cache_tab_shows_external_cache_status(monkeypatch) -> No
     assert "External reference cache" in rendered_markdown
     assert "UniProt:1" in rendered_markdown
     assert "gene_function:1" in rendered_markdown
+    assert "yeast-GEM" in rendered_markdown
+    assert "homology_supported_yeast_gpr" in rendered_markdown
     assert "external_match_confirmed: 1" in rendered_markdown
     assert any("build_pichia_external_name_reference_cache.py" in call for call in fake_st.code_calls)
     assert any("build_pichia_external_reference_cache.py" in call for call in fake_st.code_calls)
@@ -275,6 +281,12 @@ def _payload() -> dict[str, Any]:
                 "record_count": 1,
                 "source_counts": {"yeast-gem": 1},
                 "record_type_counts": {"gene_function": 1, "gpr_candidate": 1},
+                "external_model_sources": ["yeast-GEM"],
+                "gpr_source_priority": {"best_priority_tier": "homology_supported_yeast_gpr"},
+                "external_gpr_candidate_count": 1,
+                "best_external_gpr_source": "yeast-gem:yeast-GEM",
+                "external_gpr_mapping_status": {"gene_mapping_required": 1},
+                "external_gpr_conflict_warnings": [],
                 "retrieved_at_range": {
                     "first": "2026-07-09T00:00:00Z",
                     "last": "2026-07-09T00:00:00Z",
@@ -342,6 +354,10 @@ def _payload() -> dict[str, Any]:
                 "evidence_kind": "gpr_candidate",
                 "source_database": "yeast-gem",
                 "query_gene_id": "YJL034W",
+                "external_model_sources": ["yeast-GEM"],
+                "gpr_source_priority": "homology_supported_yeast_gpr",
+                "external_gpr_mapping_status": "gene_mapping_required",
+                "external_gpr_conflict_warnings": [],
                 "gpr_transfer_status": "gene_mapping_required",
                 "manual_review_reasons": ["external gene rule is not mapped"],
             }
