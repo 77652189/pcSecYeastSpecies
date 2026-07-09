@@ -52,6 +52,15 @@ from pcsec_pichia.external_refs.gpr_sources import (
     parse_sbml_gpr_associations,
     render_external_gpr_parse_report,
 )
+from pcsec_pichia.external_refs.gpr_mapping import (
+    EXTERNAL_GPR_MAPPING_CANDIDATES_FILENAME,
+    EXTERNAL_GPR_MAPPING_MANIFEST_FILENAME,
+    EXTERNAL_GPR_MAPPING_REPORT_FILENAME,
+    ExternalGprMappingOutputs,
+    map_external_gpr_candidates_to_model,
+    render_external_gpr_mapping_report,
+    write_external_gpr_mapping_outputs,
+)
 from pcsec_pichia.external_refs.gpr_source_priority import (
     GPR_SOURCE_CONFLICTS_FILENAME,
     GPR_SOURCE_PRIORITY_FILENAME,
@@ -156,6 +165,7 @@ __all__ = [
     "ExternalGprCandidateEvidence",
     "ExternalGprParseOutputs",
     "ExternalGprParseWarning",
+    "ExternalGprMappingOutputs",
     "ExternalHttpResponse",
     "ExternalModelArtifactManifest",
     "ExternalModelArtifactOutputs",
@@ -180,6 +190,9 @@ __all__ = [
     "GENE_MAPPING_REQUIRED",
     "GPR_PARSE_MANIFEST_FILENAME",
     "GPR_PARSE_REPORT_FILENAME",
+    "EXTERNAL_GPR_MAPPING_CANDIDATES_FILENAME",
+    "EXTERNAL_GPR_MAPPING_MANIFEST_FILENAME",
+    "EXTERNAL_GPR_MAPPING_REPORT_FILENAME",
     "GPR_SOURCE_CONFLICTS_FILENAME",
     "GPR_SOURCE_PRIORITY_FILENAME",
     "GPR_SOURCE_PRIORITY_REPORT_FILENAME",
@@ -223,6 +236,7 @@ __all__ = [
     "fetch_external_model_reaction_associations",
     "load_external_reference_cache",
     "load_external_reference_manifest",
+    "map_external_gpr_candidates_to_model",
     "manifest_from_dict",
     "manifest_to_dict",
     "merge_external_fetch_results",
@@ -234,6 +248,7 @@ __all__ = [
     "record_to_dict",
     "records_fingerprint",
     "render_external_gpr_parse_report",
+    "render_external_gpr_mapping_report",
     "render_external_model_inventory_report",
     "render_gpr_source_priority_report",
     "stable_cache_key",
@@ -246,6 +261,7 @@ __all__ = [
     "write_external_reference_cache_bundle",
     "write_external_reference_manifest",
     "write_external_model_inventory",
+    "write_external_gpr_mapping_outputs",
     "write_failed_queries",
     "write_gpr_source_priority_outputs",
 ]
