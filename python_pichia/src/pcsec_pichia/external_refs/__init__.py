@@ -12,6 +12,16 @@ from pcsec_pichia.external_refs.cache_io import (
     write_external_reference_cache_bundle,
     write_external_reference_manifest,
 )
+from pcsec_pichia.external_refs.clients import (
+    DEFAULT_USER_AGENT,
+    ExternalFetchConfig,
+    ExternalFetchFailure,
+    ExternalFetchResult,
+    ExternalHttpResponse,
+    ExternalReferenceClient,
+    default_external_reference_clients,
+    fetch_external_references,
+)
 from pcsec_pichia.external_refs.queries import (
     ExternalReferenceQuery,
     ExternalReferenceQueryType,
@@ -23,6 +33,12 @@ from pcsec_pichia.external_refs.queries import (
     dedupe_external_reference_queries,
     external_reference_query_fingerprint,
     normalize_external_query_name,
+)
+from pcsec_pichia.external_refs.refresh import (
+    FAILED_QUERIES_FILENAME,
+    SUMMARY_FILENAME,
+    build_external_reference_cache,
+    write_failed_queries,
 )
 from pcsec_pichia.external_refs.schema import (
     CACHE_SCHEMA_VERSION,
@@ -48,13 +64,21 @@ from pcsec_pichia.external_refs.schema import (
 
 __all__ = [
     "CACHE_SCHEMA_VERSION",
+    "DEFAULT_USER_AGENT",
     "DEFAULT_MANIFEST_FILENAME",
     "DEFAULT_RECORDS_FILENAME",
+    "FAILED_QUERIES_FILENAME",
+    "SUMMARY_FILENAME",
     "ExternalCacheRecord",
+    "ExternalFetchConfig",
+    "ExternalFetchFailure",
+    "ExternalFetchResult",
     "ExternalGeneFunctionEvidence",
     "ExternalGprCandidateEvidence",
+    "ExternalHttpResponse",
     "ExternalReactionAssociation",
     "ExternalRecordType",
+    "ExternalReferenceClient",
     "ExternalReferenceQuery",
     "ExternalReferenceQueryType",
     "ExternalReferenceCacheManifest",
@@ -62,14 +86,17 @@ __all__ = [
     "ExternalReferenceRecord",
     "ExternalReferenceSchemaError",
     "build_external_reference_manifest",
+    "build_external_reference_cache",
     "build_external_reference_queries",
     "build_external_reference_queries_from_gene_catalog",
     "build_external_reference_queries_from_homology_cache",
     "build_external_reference_queries_from_ko_oe_candidate_rows",
     "build_external_reference_queries_from_name_audit",
     "cache_file_fingerprint",
+    "default_external_reference_clients",
     "dedupe_external_reference_queries",
     "external_reference_query_fingerprint",
+    "fetch_external_references",
     "load_external_reference_cache",
     "load_external_reference_manifest",
     "manifest_from_dict",
@@ -86,4 +113,5 @@ __all__ = [
     "write_external_reference_cache",
     "write_external_reference_cache_bundle",
     "write_external_reference_manifest",
+    "write_failed_queries",
 ]
