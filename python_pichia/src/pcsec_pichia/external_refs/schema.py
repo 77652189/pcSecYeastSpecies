@@ -129,6 +129,9 @@ class ExternalReactionAssociation:
     external_gene_ids: tuple[str, ...] = ()
     gene_rule: str | None = None
     ec_numbers: tuple[str, ...] = ()
+    cross_references: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
+    equation: str | None = None
+    compartment: str | None = None
     mapped_pichia_reaction_id: str | None = None
     mapped_pichia_gene_ids: tuple[str, ...] = ()
     association_status: str = "external_gpr_candidate"
@@ -158,10 +161,18 @@ class ExternalGprCandidateEvidence:
     provenance: ExternalReferenceProvenance
     external_model_id: str
     external_reaction_id: str
-    external_gene_rule: str
+    external_gene_rule: str | None = None
     candidate_status: str = "external_gpr_candidate"
+    pichia_gene_id: str | None = None
+    query_gene_id: str | None = None
     mapped_pichia_reaction_id: str | None = None
     mapped_pichia_gene_ids: tuple[str, ...] = ()
+    gene_mapping_status: str = "gene_mapping_required"
+    reaction_mapping_status: str = "reaction_mapping_required"
+    gpr_transfer_status: str = "external_gpr_candidate"
+    confidence: str = "manual_review_required"
+    supporting_gene_evidence: tuple[str, ...] = ()
+    blocking_reasons: tuple[str, ...] = ()
     mapping_warnings: tuple[str, ...] = ()
     record_type: ExternalRecordType = "gpr_candidate"
 
@@ -172,7 +183,9 @@ class ExternalGprCandidateEvidence:
             self.provenance.source_database,
             self.external_model_id,
             self.external_reaction_id,
-            self.external_gene_rule,
+            self.external_gene_rule or "",
+            self.pichia_gene_id or "",
+            self.query_gene_id or "",
         )
 
     def validate(self) -> None:
@@ -180,8 +193,12 @@ class ExternalGprCandidateEvidence:
         self.provenance.validate()
         _require_nonempty("external_model_id", self.external_model_id)
         _require_nonempty("external_reaction_id", self.external_reaction_id)
-        _require_nonempty("external_gene_rule", self.external_gene_rule)
-        if self.candidate_status == "model_gpr_executable" and (
+        if not str(self.external_gene_rule or "").strip() and self.candidate_status not in {
+            "source_rule_missing",
+            "manual_review_required",
+        }:
+            raise ExternalReferenceSchemaError("external_gene_rule is required unless the source rule is missing.")
+        if self.candidate_status in {"model_gpr_confirmed", "model_gpr_executable"} and (
             not self.mapped_pichia_reaction_id or not self.mapped_pichia_gene_ids
         ):
             raise ExternalReferenceSchemaError(
@@ -371,9 +388,16 @@ def _tuple_normalized_dict(payload: Mapping[str, Any]) -> dict[str, Any]:
         "external_gene_ids",
         "mapped_pichia_gene_ids",
         "mapping_warnings",
+        "supporting_gene_evidence",
+        "blocking_reasons",
     }
     for key, value in payload.items():
-        if key in tuple_fields and isinstance(value, list):
+        if key == "cross_references" and isinstance(value, Mapping):
+            normalized[key] = {
+                str(map_key): tuple(map_value) if isinstance(map_value, list) else map_value
+                for map_key, map_value in value.items()
+            }
+        elif key in tuple_fields and isinstance(value, list):
             normalized[key] = tuple(value)
         else:
             normalized[key] = value
