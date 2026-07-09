@@ -91,5 +91,5 @@ rule-transfer audit 同步给出：
 备选路径：
 
 - 将本次 `local_runs/sce_pichia_homology_feasibility_20260708/` 产物提升为一次审计样本，但不要作为稳定生产 cache。
-- 追加离线 external-name reference cache，用 UniProt/SGD/NCBI 只做名称交叉复核，不覆盖 RBH 事实。
+- 追加 external-name reference cache，用 UniProt/SGD/NCBI 只做名称交叉复核，不覆盖 RBH 事实；后续在线证据层负责受控联网刷新和 provenance。
 - 针对 `rbh_not_in_model` 的 53 个候选，单独做模型 gene/reaction/GPR 可操作性复核，避免把同源证据误当成仿真可执行证据。

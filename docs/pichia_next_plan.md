@@ -1,130 +1,260 @@
 # pcSecPichia 下一步计划
 
 状态：active  
-最后更新：2026-07-08
+最后更新：2026-07-09
 
 ## 工作原则
 
-- 一次只做一个任务分支，完成后 review、测试、commit、合并回 `main`，再开始下一项。
+- 一次只推进一个可验证轮次；每轮完成实现、focused tests、review、commit/push 后再进入下一轮。
 - Python 核心逻辑放在 `python_pichia`，`app/services` 只做 facade，`app/ui` 只做展示。
 - 不修改 `Code/`、`Model/`、`Enzymedata/`、`Results/`，除非明确声明为科学资产变更。
 - 新运行产物、cache、报告和验证证据默认写入 ignored `local_runs/`。
-- 输出必须保留模型边界，不声明 mg/L 绝对产量或实验成功率。
+- 输出只作为模型内相对解释、候选排序和研发复核依据，不声明 mg/L 绝对产量或实验成功率。
 
-## 数据治理 checkpoint
+## 当前完成状态
 
-本轮已固定数据与结果目录职责：当前运行产物统一进入 ignored `local_runs/`，`Results/` 仅作为 legacy MATLAB results 只读参考。历史 `Results/` 迁移、Git LFS 改造或仓库历史瘦身不在当前开发轮次中处理，后续如需推进应单独立项和 checkpoint。
+- BLAST/RBH 本地同源审计已经形成可用链路：homology cache、name audit、rule-transfer audit、Streamlit 只读展示和 KO/OE 解释字段透传。
+- Shadow LP 已作为 reference constrained solve 的替代候选完成 compare/validation 路径；纯 COBRApy/optlang 不作为 full pcSec 默认后端。
+- 在线外部数据库证据层 Round 1-9 已完成：schema/cache IO、query builder、受控 clients、name resolution、KO/OE gene function evidence、external GPR candidate evidence、service/Streamlit、screen/report/LLM fact pack 透传和端到端 smoke 均已落地。
+- 当前剩余边界是人工复核 smoke / production cache、决定是否提升稳定科学资产，以及后续可选的 Shadow LP service/backend toggle。
 
-## 当前推荐优先级
+## 已完成主线：在线外部数据库证据层
 
-### 1. BLAST/RBH Streamlit 同源审计（已完成可用切片）
+设计规格：[在线外部数据库证据层架构](pichia_online_external_reference_architecture.md)
 
-目标：把酿酒酵母的分泌工程知识安全迁移到 Pichia 模型前，建立可审计的同源证据层，并让研发用户能在 Streamlit 中查看“基因命名标准化 + 同源规则迁移评估”结果。
+目标：受控联网获取 UniProt / NCBI / SGD 以及外部 GEM/SBML/API 证据，用于命名标准化、KO/OE gene function 补充和 external GPR candidate 评估；页面加载、核心仿真和 KO/OE screen 不依赖实时网络。KEGG 保留为后续可选扩展来源。
 
-已完成范围：
+状态：已按 Round 1-9 完成并通过 focused tests、compileall、保护目录检查和小批量联网 smoke。当前 smoke 产物保留在 ignored `local_runs/`，不作为稳定科学资产提交。
 
-- 从本地 pcSecYeast / pcSecPichia protein sequence 资产导出 FASTA。
-- 用本地 BLAST+ 运行 SCE -> Pichia 和 Pichia -> SCE 双向 blastp。
-- 计算 reciprocal best hit、identity、evalue、query coverage、subject coverage。
-- 合并当前 Pichia GEM `gene_index`，明确候选是否是模型可操作 gene。
-- 输出 homology cache、name audit、rule-transfer audit 和 summary。
-- 通过 `app/services` 只读 cache，通过 `app/ui` 展示、筛选、导出和解释结果。
-- 先覆盖 `SECRETION_GENE_CATALOG` 相关 query，但不自动写回 catalog，也不把同源命中直接当作 KO/OE 模型 gene。
-- CLI / scripts 只作为离线 cache builder，不是最终产品入口；Streamlit runtime 默认不跑 BLAST。
-- KO/OE 预览和 yield recommendation 行已透传 homology evidence / review status / rule-transfer status / warnings，但 recommendation tier 不因 RBH 或 annotation 自动升级。
-- 已实现离线 external name crosscheck 契约、官方 UniProt / NCBI / SGD fetch clients、external reference cache builder，以及 Streamlit external cache 状态显示；Streamlit runtime 仍只读 cache，不做实时联网查询。
+### Dependency bundle
 
-设计文档：[BLAST/RBH 同源映射架构](pichia_homology_crosswalk_architecture.md)
+这条主线允许在 Round 1 一次性新增完整依赖，避免后续轮次反复修改依赖文件：
 
-固定执行轮次：
-
-1. Round 0：目标契约和现状审计，只更新 active 文档，明确 Streamlit 产品目标。
-2. Round 1：核心 schema 和 audit 输出落地，生成 homology / name / rule-transfer 三类 cache。
-3. Round 2：新增 app service facade，只读 cache、过滤、summary、导出，不运行 BLAST。
-4. Round 3：新增 Streamlit 页面“基因命名与同源规则审计”。
-5. Round 4：把 homology evidence 作为并行解释层接入 KO/OE 预览和 evidence summary，不改变 recommendation tier 边界。
-6. Round 5：离线外部数据库名称校对契约、官方 API fetch clients、external reference cache builder 和 Streamlit 状态显示。
-7. Round 6：端到端 smoke 与最终文档收束，说明已实现内容、边界和使用方式。
-
-Round 0 到 Round 6 已完成并按轮次 commit / push 到功能分支；每轮均保留 focused tests / compileall / 保护目录检查记录。
-
-当前使用方式：
-
-```powershell
-# 生成离线 cache；页面不会自动运行 BLAST
-python scripts\build_pichia_homology_cache.py --catalog-only --output-dir local_runs\pichia_homology_cache\manual_review
-
-# 小批量生成外部名称 reference cache；只在脚本中联网，Streamlit 不会实时联网
-python scripts\build_pichia_external_name_reference_cache.py --homology-cache-dir local_runs\pichia_homology_cache\manual_review --output-path local_runs\pichia_homology_cache\manual_review\external_name_references.jsonl --sources uniprot,ncbi,sgd --limit 5
-
-# 将外部名称 reference cache 显式合并到 name audit
-python scripts\build_pichia_homology_cache.py --catalog-only --parse-existing --external-name-reference-cache local_runs\pichia_homology_cache\manual_review\external_name_references.jsonl --output-dir local_runs\pichia_homology_cache\manual_review_with_external
+```text
+httpx
+tenacity
+biopython
+python-libsbml
+pydantic
 ```
 
-Streamlit 入口：启动 `app/ui/streamlit_app.py` 后打开导航项“基因命名与同源规则审计”。页面只读 `local_runs/pichia_homology_cache` 下最新有效 cache run，支持搜索、状态筛选、RBH / model gene 筛选、identity 阈值筛选、external cache 状态查看和 TSV/CSV 导出。
+用途：
 
-最终验收：
+- `httpx`：统一官方数据库 HTTP client、timeout、headers、sync/async 扩展。
+- `tenacity`：retry/backoff，处理数据库限流、瞬时网络失败和 5xx。
+- `biopython`：NCBI Entrez、GenBank/FASTA/sequence record 解析。
+- `python-libsbml`：外部 SBML/GEM 的 reaction、geneProduct、GPR 解析。
+- `pydantic`：cache manifest、service payload、外部记录 schema validation；root `requirements.txt` 已有，但 `python_pichia/pyproject.toml` 需要同步声明。
+
+不纳入本主线：
+
+- `highspy`：属于 Shadow LP backend，不属于 external evidence 主线。
+- `memote`：属于 GEM QA，可后续离线质量审计。
+- `pyhmmer`：属于远缘同源/结构域增强，等 BLAST/RBH 和外部命名稳定后再评估。
+- `bioservices`：多数据库封装依赖和许可边界复杂，先不用。
+- `requests-cache`：本项目使用显式 JSONL/manifest cache，不用隐式 HTTP cache。
+
+### Round 0：文档冻结和现状审计
+
+改动范围：
+
+- 只允许整理 active docs 和测试白名单。
+- 确认 dirty worktree 中 unrelated AI report/env 改动不混入本主线。
+- 确认当前 homology cache、gene catalog、KO/OE 输出字段和 Streamlit 页面入口。
+
+验收：
 
 ```powershell
-python -m pytest -q python_pichia\tests\test_homology_blast_parser.py python_pichia\tests\test_homology_rbh.py python_pichia\tests\test_homology_review_rules.py python_pichia\tests\test_homology_crosswalk.py python_pichia\tests\test_homology_sequence_sources.py
+python -m pytest -q tests\test_docs_active_boundary.py
+git diff --name-only -- Code Model Enzymedata Results requirements.txt python_pichia\pyproject.toml
+```
+
+### Round 1：schema 和 cache IO
+
+改动范围：
+
+- 允许修改 `requirements.txt` 和 `python_pichia/pyproject.toml`，一次性加入 dependency bundle 中缺失的依赖；本主线后续轮次原则上不再追加新库。
+- 新增 `python_pichia/src/pcsec_pichia/external_refs/schema.py`。
+- 新增 `python_pichia/src/pcsec_pichia/external_refs/cache_io.py`。
+- 定义 external reference、gene function、reaction association、GPR candidate、manifest 等 dataclass。
+- 实现 JSONL/manifest 读写、schema validation、重复键和 provenance 检查。
+- 不联网，不接 UI，不改 KO/OE 输出。
+
+验收：
+
+```powershell
+python -m pytest -q python_pichia\tests\test_external_refs_schema.py
+python -m compileall -q python_pichia\src
+git diff --name-only -- Code Model Enzymedata Results
+```
+
+### Round 2：query builder
+
+改动范围：
+
+- 新增 `external_refs/queries.py`。
+- 从 homology cache、name audit、gene catalog、KO/OE candidate rows 生成 `ExternalReferenceQuery`。
+- 区分 Pichia gene、SCE homolog、model gene、external accession 四类查询来源。
+- 实现稳定去重、query fingerprint、source_context 和 warning。
+- 不联网。
+
+验收：
+
+```powershell
+python -m pytest -q python_pichia\tests\test_external_refs_schema.py python_pichia\tests\test_external_refs_queries.py
+python -m compileall -q python_pichia\src
+git diff --name-only -- Code Model Enzymedata Results requirements.txt python_pichia\pyproject.toml
+```
+
+### Round 3：受控在线 clients
+
+改动范围：
+
+- 新增 `external_refs/clients.py`、`uniprot.py`、`sgd.py`，可选 `ncbi.py`。
+- 实现 timeout、retry、rate limit、user agent、API key env、source URL、retrieved_at、raw hash、失败记录。
+- 默认单元测试使用 mock/fake HTTP，不依赖实时网络。
+- 新增脚本 `scripts/build_pichia_external_reference_cache.py` 或改造已有脚本到新 schema。
+
+验收：
+
+```powershell
+python -m pytest -q python_pichia\tests\test_external_refs_clients.py python_pichia\tests\test_external_refs_schema.py
+python -m compileall -q python_pichia\src scripts
+git diff --name-only -- Code Model Enzymedata Results requirements.txt python_pichia\pyproject.toml
+```
+
+联网 smoke 单独运行：
+
+```powershell
+python scripts\build_pichia_external_reference_cache.py --sources uniprot,sgd --limit 10 --output-dir local_runs\pichia_external_reference_cache\smoke
+```
+
+### Round 4：name resolution 和外部命名合并
+
+改动范围：
+
+- 新增 `external_refs/name_resolution.py` 和 `merge.py`。
+- 把 external reference 合并到 name audit，输出 `external_match_confirmed`、`external_alias_confirmed`、`external_locus_confirmed`、`external_conflict`、`external_reference_missing`。
+- 不覆盖内部 `gene_id`、RBH 事实、model gene_index 事实。
+- 不改变 KO/OE `recommendation_tier`。
+
+验收：
+
+```powershell
+python -m pytest -q python_pichia\tests\test_external_refs_merge.py python_pichia\tests\test_external_refs_name_resolution.py
+python -m pytest -q python_pichia\tests\test_homology_crosswalk.py
+python -m compileall -q python_pichia\src scripts
+git diff --name-only -- Code Model Enzymedata Results requirements.txt python_pichia\pyproject.toml
+```
+
+### Round 5：KO/OE gene function evidence
+
+改动范围：
+
+- 新增 `external_refs/gene_function.py`。
+- 从 external records 中抽取 protein name、function、EC、GO、pathway、orthology、reviewed status。
+- 生成 `ExternalGeneFunctionEvidence` 和 `KoOeExternalGeneEvidence`。
+- 接入 KO/OE candidate explanation fields，但不改变 recommendation tier。
+
+验收：
+
+```powershell
+python -m pytest -q python_pichia\tests\test_external_refs_gene_function.py
 python -m pytest -q python_pichia\tests\test_screens_entrypoints.py python_pichia\tests\test_yield_improvement_recommendations.py
-python -m pytest -q tests\test_pichia_homology_audit_service_contract.py tests\test_pichia_homology_audit_ui_contract.py tests\test_pichia_secretion_service_contract.py
+python -m compileall -q python_pichia\src
+git diff --name-only -- Code Model Enzymedata Results requirements.txt python_pichia\pyproject.toml
+```
+
+### Round 6：external GPR candidate evidence
+
+改动范围：
+
+- 新增 `external_refs/gpr_sources.py` 和 `external_refs/gpr_candidates.py`。
+- 从外部 GEM/SBML/API 或缓存中读取 reaction association 和 gene rule。
+- 将外部 reaction/gene rule 尝试映射到当前 Pichia GEM reaction/gene。
+- 区分 `external_gpr_candidate`、`model_gpr_confirmed`、`reaction_mapping_required`、`gene_mapping_required`、`conflicting_gpr_sources`。
+- 不把外部 GPR 原样写入当前模型。
+
+验收：
+
+```powershell
+python -m pytest -q python_pichia\tests\test_external_refs_gpr_candidates.py
+python -m pytest -q python_pichia\tests\test_screens_entrypoints.py
+python -m compileall -q python_pichia\src scripts
+git diff --name-only -- Code Model Enzymedata Results requirements.txt python_pichia\pyproject.toml
+```
+
+### Round 7：service 和 Streamlit
+
+改动范围：
+
+- 新增 `app/services/pichia_external_reference_service.py`。
+- Streamlit 同源审计页面显示 external cache 状态、source counts、retrieved_at、name conflicts、gene function、GPR candidate、manual review reasons。
+- 页面加载、筛选、导出不自动联网。
+- 可提供手动刷新按钮或生成明确脚本命令。
+- 更新 service/UI contract tests。
+
+验收：
+
+```powershell
+python -m pytest -q tests\test_pichia_external_reference_service_contract.py tests\test_pichia_homology_audit_service_contract.py tests\test_pichia_homology_audit_ui_contract.py
 python -m compileall -q app python_pichia\src scripts
 git diff --name-only -- Code Model Enzymedata Results requirements.txt python_pichia\pyproject.toml
 ```
 
-保留下一步：
+### Round 8：KO/OE screen、report 和 LLM fact pack 集成
 
-- 人工复核 smoke / production cache 后，决定是否把某个 crosswalk 版本提升为稳定科学资产。
-- 如要扩展 UniProt / NCBI / SGD 字段或加入 KEGG，只改离线 builder 或手工导入流程；Streamlit runtime 仍保持不联网。
-- 对 external conflict、paralog risk 和 `rbh_not_in_model` 逐条做人工复核，再决定是否调整 curated catalog 或模型 GPR 映射。
+改动范围：
 
-### 2. Shadow LP service/backend toggle
+- KO/OE preview rows、screen rows、yield recommendation rows、report fact pack 透传 external evidence fields。
+- 历史结果缺字段时保持兼容。
+- LLM summary 只能读取 fact pack，不直接读取任意运行目录；Judge 继续校验原始输入和总结一致性。
+- 不把 external evidence 升级为 `experiment_calibrated`。
 
-目标：把 `solve_shadow_secretion_capacity(...)` 接入 service / pipeline 的 opt-in 后端选择，让 reference 和 shadow 能双轨对比。
-
-范围：
-
-- 新增 `solver_mode="reference" | "shadow"` 或等价配置。
-- 默认仍为 reference，避免立刻改变用户工作流。
-- 仅在 opt-in 时调用 shadow path。
-- 报告中显示 `solver_mode`、backend、validation status 和 non-mg/L warning。
-- reference solver 继续保留为 validation boundary。
-
-建议验收：
-
-```powershell
-python -m pytest -q python_pichia\tests\test_shadow_lp_secretion_capacity_wrapper.py python_pichia\tests\test_shadow_lp_compare_mode.py
-python -m pytest -q tests\test_pichia_secretion_service_contract.py
-python -m compileall -q app python_pichia\src
-git diff --name-only -- Code Model Enzymedata Results requirements.txt python_pichia\pyproject.toml
-```
-
-### 3. KO/OE evidence integration
-
-目标：把同源证据、模型 GPR 可执行性、OE reaction proxy 和 phenotype evidence 合成一张解释表，而不是让 UI 或 service 自行判断。
-
-范围：
-
-- 输入：homology cache、gene capability profile、phenotype evidence、screen rows。
-- 输出：candidate evidence summary。
-- 明确区分 `homology_supported`、`model_executable`、`phenotype_supported`、`experiment_calibrated`。
-- 不能仅靠 RBH 或 annotation 升级为 experiment calibrated。
-- 保留 proxy warning 和 manual review reason。
-
-建议验收：
+验收：
 
 ```powershell
 python -m pytest -q python_pichia\tests\test_screens_entrypoints.py python_pichia\tests\test_yield_improvement_recommendations.py
-python -m pytest -q tests\test_pichia_secretion_service_contract.py
-git diff --name-only -- Code Model Enzymedata Results
+python -m pytest -q tests\test_pichia_secretion_service_contract.py tests\test_screen_report_llm_contract.py
+python -m compileall -q app python_pichia\src scripts
+git diff --name-only -- Code Model Enzymedata Results requirements.txt python_pichia\pyproject.toml
 ```
+
+### Round 9：端到端验收和收束
+
+改动范围：
+
+- 运行小批量联网 smoke，生成 `local_runs/pichia_external_reference_cache/<run_name>/`。
+- 将 external cache 合并到 homology/name/rule-transfer audit。
+- 在 Streamlit 中确认可查看、筛选、导出。
+- 更新当前文档的“已完成/剩余边界”，不再新增大段设计。
+
+验收：
+
+```powershell
+python scripts\build_pichia_external_reference_cache.py --sources uniprot,sgd --limit 10 --output-dir local_runs\pichia_external_reference_cache\smoke
+python -m pytest -q python_pichia\tests\test_external_refs_schema.py python_pichia\tests\test_external_refs_clients.py python_pichia\tests\test_external_refs_merge.py python_pichia\tests\test_external_refs_name_resolution.py python_pichia\tests\test_external_refs_gene_function.py python_pichia\tests\test_external_refs_gpr_candidates.py
+python -m pytest -q tests\test_pichia_external_reference_service_contract.py tests\test_pichia_homology_audit_service_contract.py tests\test_pichia_homology_audit_ui_contract.py tests\test_screen_report_llm_contract.py
+python -m compileall -q app python_pichia\src scripts
+git diff --name-only -- Code Model Enzymedata Results requirements.txt python_pichia\pyproject.toml
+```
+
+## 并行但非当前主线
+
+### Shadow LP service/backend toggle
+
+把 `solve_shadow_secretion_capacity(...)` 接入 service / pipeline 的 opt-in 后端选择，让 reference 和 shadow 可双轨对比。默认仍为 reference，不立刻切换生产默认路径。
+
+### KO/OE evidence summary consolidation
+
+把 homology evidence、external evidence、model GPR executability、OE reaction proxy、phenotype evidence 合成同一张解释表，但所有核心判断仍放在 `python_pichia`，service/UI 只透传。
 
 ## 暂不做
 
 - 不把 BLAST/RBH 命中自动写入 curated catalog。
 - 不把同源命中直接当作 Pichia 模型 gene_id。
-- 不联网做实时数据库查询。
+- 不把外部 GPR 原样写入当前 Pichia GEM。
+- 不让页面加载、核心仿真或 KO/OE screen 自动联网；联网只允许在明确 builder/manual refresh 中发生。
+- 不把外部 annotation、EC、GO、pathway 或 GPR candidate 当作 phenotype evidence。
 - 不把 COBRApy / optlang 设为 full pcSec 默认后端。
-- 不做三物种全量迁移或论文 figure pipeline 重建。
 - 不迁移历史 `Results/`、不改 Git LFS 或仓库历史。

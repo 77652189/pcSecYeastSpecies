@@ -8,6 +8,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 ACTIVE_DOCS = {
     "data_and_results_policy.md",
     "pichia_homology_crosswalk_architecture.md",
+    "pichia_online_external_reference_architecture.md",
     "pichia_current_architecture_and_requirements.md",
     "pichia_next_plan.md",
     "pichia_sce_homology_feasibility_20260708.md",

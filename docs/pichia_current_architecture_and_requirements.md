@@ -1,7 +1,7 @@
 # pcSecPichia 当前架构与需求
 
 状态：active  
-最后更新：2026-07-07
+最后更新：2026-07-09
 
 ## 目标
 
@@ -15,7 +15,8 @@
 - 上游输入：密码子优化、信号肽筛选、目标蛋白序列和构建设计。
 - 核心问题：在现有 pcSecPichia 模型中比较分泌负担、生长权衡、KO/OE 改造方向和证据等级。
 - 当前重点：把模型可执行性、外部同源证据、表型证据和实验复核边界分开表达。
-- 当前 BLAST/RBH 产品目标：把离线同源 cache 提升为 Streamlit 中可查看、筛选、导出和解释的“基因命名标准化 + 同源规则迁移评估”功能；CLI / scripts 只作为离线证据生成层，不是最终用户入口。
+- 当前 BLAST/RBH 产品目标：把本地同源 cache 提升为 Streamlit 中可查看、筛选、导出和解释的“基因命名标准化 + 同源规则迁移评估”功能；CLI / scripts 只作为证据生成层，不是最终用户入口。
+- 当前外部数据库目标：通过受控联网 fetcher 拉取 UniProt / NCBI / SGD external reference cache，并从 yeast-GEM / BiGG / BioModels / ModelSEED 等外部模型资源提取候选 reaction/GPR evidence，用于命名标准化、KO/OE gene function 补充和同源规则迁移校对；页面加载、核心仿真和 KO/OE screen 不依赖实时网络状态。该主线已完成 Round 1-9，小批量 smoke 产物仍保留在 ignored `local_runs/`，后续需要人工复核后再决定是否提升为稳定科学资产。
 
 ## 架构分层
 
@@ -49,8 +50,9 @@ Streamlit UI / API facade
 - 支持 gene evidence、gene catalog、phenotype evidence 和 recommendation tier。
 - 支持 genome-wide / catalog-level KO/OE screen 工具。
 - 支持 Shadow LP constrained solve 路径，用于承载 pcSec 语义约束的可替代求解后端。
-- 已有 BLAST/RBH 离线 homology cache builder，可生成 homology cache、name audit、rule-transfer audit、summary 和离线 external name crosscheck 字段。
+- 已有 BLAST/RBH 本地 homology cache builder，可生成 homology cache、name audit、rule-transfer audit、summary，并可合并 external name crosscheck 字段。
 - 已有 Streamlit 页面“基因命名与同源规则审计”，通过 `app/services` 只读 cache，支持查看、筛选、导出和解释同源命名/规则迁移结果。
+- 在线外部数据库证据层已完成受控 fetcher、cache schema、命名校对、gene function evidence、external GPR candidate evidence、Streamlit 手动刷新/状态展示，以及 KO/OE screen/report/LLM fact pack 透传。
 
 ## COBRApy / Shadow LP 状态
 
@@ -67,12 +69,14 @@ Streamlit UI / API facade
 
 ## 证据边界
 
-- 数据库注释可信：UniProt / KEGG / annotation 字段只说明注释来源，不能单独证明表型效果。
+- 数据库注释可信：UniProt / NCBI / SGD / annotation 字段只说明注释来源和命名一致性，不能单独证明表型效果。
 - 模型 GPR 可执行：说明 KO 或 reaction proxy 能在模型中运行，不等于实验可行。
 - OE reaction proxy：只是 reaction-level capacity proxy，不是完整 gene-level expression simulation。
 - 表型证据：只由明确 curated phenotype evidence 决定，且 KO / OE 必须按 intervention 分开。
 - 同源证据：BLAST/RBH 只能说明跨物种候选关系，不能直接变成模型可操作 gene。
 - 命名标准化和同源规则迁移评估必须同时区分 sequence-level homology evidence、external/database name evidence、current model gene_index operability 和 manual review status。
+- 联网证据必须保留 provenance、retrieved_at、source_version、query 和 warning；外部名称匹配不得覆盖内部 `gene_id` 或直接改变 `recommendation_tier`。
+- 外部 GPR 规则和 reaction association 只能作为候选证据；只有映射到当前 Pichia GEM 的 reaction/gene 后，才可标记为 `model_gpr_executable`。
 - `experiment_calibrated` 只用于 host、target/context、intervention 严格匹配的高置信表型证据。
 
 ## 非目标
@@ -88,4 +92,5 @@ Streamlit UI / API facade
 - [文档索引](README.md)
 - [下一步计划](pichia_next_plan.md)
 - [BLAST/RBH 同源映射架构](pichia_homology_crosswalk_architecture.md)
+- [在线外部数据库证据层架构](pichia_online_external_reference_architecture.md)
 - [数据与结果治理策略](data_and_results_policy.md)

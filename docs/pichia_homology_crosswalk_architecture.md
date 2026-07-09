@@ -1,11 +1,11 @@
 # BLAST/RBH 同源映射架构
 
 状态：active  
-最后更新：2026-07-08
+最后更新：2026-07-09
 
 ## 目标
 
-建立一个离线、可审计的同源映射证据层，把酿酒酵母分泌工程知识迁移到 Pichia 模型前先转化为结构化 crosswalk/cache，并把这些结果作为 Streamlit 中“基因命名标准化 + 同源规则迁移评估”的只读产品入口。
+建立一个本地、可审计的同源映射证据层，把酿酒酵母分泌工程知识迁移到 Pichia 模型前先转化为结构化 crosswalk/cache，并把这些结果作为 Streamlit 中“基因命名标准化 + 同源规则迁移评估”的只读产品入口。
 
 该层只回答：
 
@@ -27,12 +27,12 @@
 
 ## 设计边界
 
-- 不联网运行，不把数据库查询放入 app runtime。
+- BLAST/RBH 计算默认本地运行；外部数据库联网查询交给受控 external reference fetcher，不放入页面加载路径。
 - 不修改 `Code/`、`Model/`、`Enzymedata/`、`Results/`。
 - 不自动修改 `SECRETION_GENE_CATALOG`。
 - 不把 BLAST/RBH 命中直接当作模型可操作 gene。
 - 不把 RBH、identity 或 annotation 单独升级为 phenotype evidence。
-- Streamlit runtime 默认只读 cache，不默认联网、不默认运行 BLAST。
+- Streamlit runtime 默认只读 cache，不默认联网、不默认运行 BLAST；可以通过明确的手动刷新或后台任务更新 external reference cache。
 - `app/services` 只做 cache 读取、过滤、summary 和导出 facade，不承载核心科学判断。
 - `app/ui` 只展示 python_pichia / service 产出的结构化结果，不实现同源或表型判断。
 - 首轮 cache 输出到 `local_runs/`，验证稳定后再讨论是否升级为稳定资产。
@@ -69,6 +69,21 @@ python_pichia/src/pcsec_pichia/homology/
   catalog_inputs.py
   external_fetch.py
 
+python_pichia/src/pcsec_pichia/external_refs/
+  schema.py
+  queries.py
+  clients.py
+  uniprot.py
+  ncbi.py
+  sgd.py
+  cache_io.py
+  merge.py
+  name_resolution.py
+  gene_function.py
+  gpr_sources.py
+  gpr_candidates.py
+  refresh.py
+
 python_pichia/src/pcsec_pichia/services/
   homology_evidence.py
 
@@ -85,6 +100,7 @@ app/ui/
 scripts/
   build_pichia_homology_cache.py
   build_pichia_external_name_reference_cache.py
+  build_pichia_external_reference_cache.py
 
 python_pichia/tests/
   test_homology_sequence_sources.py
@@ -364,7 +380,7 @@ def build_rule_transfer_audit_rows(crosswalk: tuple[HomologyCrosswalkRow, ...]) 
 
 ```python
 def load_external_name_reference_cache(path: Path) -> tuple[ExternalNameReference, ...]:
-    """Load offline external name references from JSONL or TSV without network access."""
+    """Load cached external name references from JSONL or TSV without network access."""
 ```
 
 ```python
@@ -433,7 +449,7 @@ Optional input for future external database review:
 --external-name-reference-cache <offline-jsonl-or-tsv>
 ```
 
-The expected reference fields are `source_database`, `source_version`, `taxon`, `accession`, `gene_name`, `locus_tag`, `aliases`, `retrieved_at`, and `warnings`. This is an offline cache contract only. UniProt / NCBI / SGD fetch clients are available through `scripts/build_pichia_external_name_reference_cache.py`, but the Streamlit runtime only reads the generated cache and does not perform live network lookups.
+The expected reference fields are `source_database`, `source_version`, `taxon`, `accession`, `gene_name`, `locus_tag`, `aliases`, `retrieved_at`, and `warnings`. The external reference cache may be produced by controlled online fetchers, but the Streamlit page load path still reads cache rather than performing implicit live lookups. The detailed online architecture and function contracts live in [在线外部数据库证据层架构](pichia_online_external_reference_architecture.md).
 
 To build a small external reference cache for review:
 
@@ -442,7 +458,7 @@ python scripts\build_pichia_external_name_reference_cache.py --homology-cache-di
 python scripts\build_pichia_homology_cache.py --catalog-only --parse-existing --output-dir local_runs\pichia_homology_cache\manual_review_with_external --external-name-reference-cache local_runs\pichia_homology_cache\manual_review\external_name_references.jsonl
 ```
 
-The Streamlit cache/export tab reports whether `external_name_references.jsonl` is present, the reference count/source counts, the recommended external build command, and the current `external_crosscheck_status` counts. These status fields do not change RBH calls, rule-transfer status, KO/OE recommendation tiers, or phenotype evidence.
+The Streamlit cache/export tab reports whether `external_name_references.jsonl` is present, the reference count/source counts, the recommended external build/refresh command, and the current `external_crosscheck_status` counts. These status fields do not change RBH calls, rule-transfer status, KO/OE recommendation tiers, or phenotype evidence.
 
 ## Integration path
 
@@ -451,7 +467,7 @@ The Streamlit cache/export tab reports whether `external_name_references.jsonl` 
 - Round 2: app service facade completed.
 - Round 3: Streamlit audit browser completed.
 - Round 4: homology evidence joined into KO/OE explanations without changing recommendation-tier science boundaries.
-- Round 5: offline external database crosscheck contract completed.
+- Round 5: external database crosscheck contract completed.
 - Round 6: external fetch clients, external reference cache builder, Streamlit external cache status, and final smoke/docs completed.
 
 At every phase, homology evidence remains separate from phenotype evidence and model executability.
