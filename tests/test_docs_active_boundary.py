@@ -10,6 +10,7 @@ ACTIVE_DOCS = {
     "pichia_homology_crosswalk_architecture.md",
     "pichia_online_external_reference_architecture.md",
     "pichia_current_architecture_and_requirements.md",
+    "pichia_cobrapy_import_qa_shadow_plan.md",
     "pichia_next_plan.md",
     "pichia_sce_homology_feasibility_20260708.md",
     "README.md",

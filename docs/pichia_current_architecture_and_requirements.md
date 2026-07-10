@@ -1,7 +1,7 @@
 # pcSecPichia 当前架构与需求
 
 状态：active  
-最后更新：2026-07-09
+最后更新：2026-07-10
 
 ## 目标
 
@@ -91,6 +91,7 @@ Streamlit UI / API facade
 
 - [文档索引](README.md)
 - [下一步计划](pichia_next_plan.md)
+- [COBRApy 导入、GEM QA 与 Shadow LP 产品化计划](pichia_cobrapy_import_qa_shadow_plan.md)
 - [BLAST/RBH 同源映射架构](pichia_homology_crosswalk_architecture.md)
 - [在线外部数据库证据层架构](pichia_online_external_reference_architecture.md)
 - [数据与结果治理策略](data_and_results_policy.md)
