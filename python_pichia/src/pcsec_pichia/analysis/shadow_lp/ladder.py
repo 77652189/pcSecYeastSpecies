@@ -172,7 +172,7 @@ def _solve_layer(
         model,
         prep.exchange_reaction_id,
         blocks,
-        key_reaction_ids=("BIOMASS", "Ex_glc_D", "Ex_o2"),
+        key_reaction_ids=("BIOMASS", "Ex_glc_D", "Ex_o2", prep.exchange_reaction_id),
         metadata={
             "target_id": prep.target_id,
             "layer_id": layer_id,

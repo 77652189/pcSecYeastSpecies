@@ -32,6 +32,8 @@ def test_shadow_ladder_layer_order_and_skipped_layers(validated_ladders: Mapping
             "Ex_o2",
             ladder.exchange_reaction_id,
         }
+        for layer in ladder.layers:
+            assert ladder.exchange_reaction_id in layer.key_fluxes
 
         skipped = {layer.layer_id: layer for layer in ladder.layers if layer.status == "skipped"}
         assert set(skipped) == {"ribosome_translation", "misfolding"}
