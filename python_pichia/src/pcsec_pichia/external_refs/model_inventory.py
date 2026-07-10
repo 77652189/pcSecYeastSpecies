@@ -259,6 +259,27 @@ def write_external_model_inventory(
     )
 
 
+def load_external_model_inventory(path: Path) -> tuple[ExternalModelInventoryRecord, ...]:
+    """Load inventory records from a JSONL file or an inventory output directory."""
+
+    resolved_path = path / INVENTORY_JSONL_FILENAME if path.is_dir() else path
+    records: list[ExternalModelInventoryRecord] = []
+    with resolved_path.open("r", encoding="utf-8") as handle:
+        for row_number, line in enumerate(handle, start=1):
+            if not line.strip():
+                continue
+            try:
+                payload = json.loads(line)
+                record = _record_from_json_payload(payload)
+                record.validate()
+            except Exception as exc:
+                raise ValueError(
+                    f"Invalid external model inventory record at {resolved_path}:{row_number}: {exc}"
+                ) from exc
+            records.append(record)
+    return tuple(records)
+
+
 def render_external_model_inventory_report(records: Iterable[ExternalModelInventoryRecord]) -> str:
     resolved = tuple(records)
     counts: dict[str, int] = {}
@@ -325,6 +346,30 @@ def _tsv_value(value: object) -> str:
     return str(value)
 
 
+def _record_from_json_payload(payload: object) -> ExternalModelInventoryRecord:
+    if not isinstance(payload, dict):
+        raise ValueError("record must be a JSON object.")
+    field_names = set(ExternalModelInventoryRecord.__dataclass_fields__)
+    unknown_fields = sorted(str(key) for key in payload if key not in field_names)
+    if unknown_fields:
+        raise ValueError(f"unexpected fields: {', '.join(unknown_fields)}")
+    values = dict(payload)
+    values["available_artifact_types"] = _tuple_from_json_list(values.get("available_artifact_types", ()))
+    values["warnings"] = _tuple_from_json_list(values.get("warnings", ()))
+    try:
+        return ExternalModelInventoryRecord(**values)
+    except TypeError as exc:
+        raise ValueError(str(exc)) from exc
+
+
+def _tuple_from_json_list(value: object) -> tuple[str, ...]:
+    if isinstance(value, tuple):
+        return tuple(str(item) for item in value)
+    if isinstance(value, list):
+        return tuple(str(item) for item in value)
+    raise ValueError("tuple fields must be encoded as JSON lists.")
+
+
 def _json_ready(value: object) -> object:
     if isinstance(value, tuple):
         return [_json_ready(item) for item in value]
@@ -342,6 +387,7 @@ __all__ = [
     "ExternalModelInventoryOutputs",
     "ExternalModelInventoryRecord",
     "default_external_model_inventory_records",
+    "load_external_model_inventory",
     "render_external_model_inventory_report",
     "write_external_model_inventory",
 ]

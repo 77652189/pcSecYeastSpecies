@@ -17,13 +17,15 @@ from pcsec_pichia.external_refs import (
     build_artifact_requests_from_inventory,
     cache_external_model_artifacts,
     default_external_model_inventory_records,
+    load_external_model_inventory,
 )
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     output_dir = _resolve_output_dir(args.output_dir)
-    requests = list(build_artifact_requests_from_inventory(default_external_model_inventory_records()))
+    records = _load_inventory_records(args)
+    requests = list(build_artifact_requests_from_inventory(records))
     requests.extend(_explicit_download_requests(args.download))
     outputs = cache_external_model_artifacts(
         tuple(requests),
@@ -56,6 +58,17 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         default="",
         help="Output directory. Defaults to local_runs/external_model_gpr_inventory/<timestamp>/artifacts_cache.",
     )
+    inventory_group = parser.add_mutually_exclusive_group()
+    inventory_group.add_argument(
+        "--inventory-dir",
+        default="",
+        help="Directory created by build_external_model_gpr_inventory.py.",
+    )
+    inventory_group.add_argument(
+        "--inventory-jsonl",
+        default="",
+        help="Path to external_model_inventory.jsonl.",
+    )
     parser.add_argument("--timeout", type=float, default=30.0)
     parser.add_argument(
         "--download",
@@ -65,6 +78,14 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         help="Explicit direct artifact download. Repository or publication landing pages should not be passed here.",
     )
     return parser.parse_args(argv)
+
+
+def _load_inventory_records(args: argparse.Namespace) -> tuple:
+    if args.inventory_jsonl:
+        return load_external_model_inventory(_resolve_path(args.inventory_jsonl))
+    if args.inventory_dir:
+        return load_external_model_inventory(_resolve_path(args.inventory_dir))
+    return default_external_model_inventory_records()
 
 
 def _explicit_download_requests(values: list[str]) -> tuple[ExternalModelArtifactRequest, ...]:
@@ -89,10 +110,14 @@ def _explicit_download_requests(values: list[str]) -> tuple[ExternalModelArtifac
 
 def _resolve_output_dir(value: str) -> Path:
     if value:
-        path = Path(value)
-        return path if path.is_absolute() else REPO_ROOT / path
+        return _resolve_path(value)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     return REPO_ROOT / "local_runs" / "external_model_gpr_inventory" / stamp / "artifacts_cache"
+
+
+def _resolve_path(value: str) -> Path:
+    path = Path(value)
+    return path if path.is_absolute() else REPO_ROOT / path
 
 
 if __name__ == "__main__":

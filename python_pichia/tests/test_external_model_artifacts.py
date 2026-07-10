@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
+import sys
+from pathlib import Path
 
 from pcsec_pichia.external_refs import (
     ExternalModelArtifactRequest,
     ExternalModelInventoryRecord,
     build_artifact_requests_from_inventory,
     cache_external_model_artifacts,
+    write_external_model_inventory,
 )
 
 
@@ -122,3 +126,51 @@ def test_build_artifact_requests_from_inventory_needs_direct_artifact_url(tmp_pa
     outputs = cache_external_model_artifacts(requests, tmp_path)
     manifest_payload = json.loads(outputs.manifest_path.read_text(encoding="utf-8"))
     assert manifest_payload["manual_required_count"] == 1
+
+
+def test_cache_external_model_artifacts_cli_accepts_inventory_dir(tmp_path) -> None:
+    inventory_dir = tmp_path / "inventory"
+    output_dir = tmp_path / "artifacts"
+    records = (
+        ExternalModelInventoryRecord(
+            model_id="toy_model",
+            model_name="Toy GEM",
+            organism="Komagataella phaffii",
+            source_database_or_repository="test repository",
+            source_url="https://example.test/toy",
+            publication_url="https://example.test/paper",
+            license="unknown",
+            available_artifact_types=("SBML",),
+            download_status="downloadable",
+            local_path="",
+            checksum_sha256="",
+            has_gpr=True,
+            has_gene_ids=True,
+            has_reaction_ids=True,
+            has_sbml=True,
+            notes="toy inventory record",
+            warnings=("not_downloaded_in_round_a",),
+        ),
+    )
+    write_external_model_inventory(records, inventory_dir)
+
+    repo_root = Path(__file__).resolve().parents[2]
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(repo_root / "scripts" / "cache_external_model_artifacts.py"),
+            "--inventory-dir",
+            str(inventory_dir),
+            "--output-dir",
+            str(output_dir),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["request_count"] == 1
+    assert payload["manual_required_count"] == 1
+    assert (output_dir / "external_model_artifact_manifest.json").exists()

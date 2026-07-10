@@ -5,6 +5,7 @@ import json
 from pcsec_pichia.external_refs import (
     ExternalModelInventoryRecord,
     default_external_model_inventory_records,
+    load_external_model_inventory,
     write_external_model_inventory,
 )
 
@@ -71,6 +72,8 @@ def test_write_external_model_inventory_outputs_jsonl_tsv_and_report(tmp_path) -
     payload = json.loads(outputs.jsonl_path.read_text(encoding="utf-8").splitlines()[0])
     assert payload["model_id"] == "toy_model"
     assert payload["has_gpr"] is True
+    assert load_external_model_inventory(tmp_path) == records
+    assert load_external_model_inventory(outputs.jsonl_path) == records
     assert "toy_model" in outputs.tsv_path.read_text(encoding="utf-8")
     report = outputs.report_path.read_text(encoding="utf-8")
     assert "External GEM / GPR Resource Inventory" in report
