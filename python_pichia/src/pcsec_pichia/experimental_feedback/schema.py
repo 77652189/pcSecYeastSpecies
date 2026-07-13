@@ -108,6 +108,7 @@ class ExperimentRecord:
     batch_id: str
     condition: ConditionContext
     target_name: str = ""
+    context_id: str = ""
     biological_replicate_id: str = ""
     operator_id: str = ""
     quality_status: QualityStatus = QualityStatus.VALID
@@ -178,6 +179,8 @@ class InterventionRecord:
     promoter: str = ""
     induction_mode: str = ""
     copy_number: float | None = None
+    prediction_run_id: str = ""
+    evidence_id: str = ""
     warnings: tuple[str, ...] = ()
     schema_version: int = SCHEMA_VERSION
 

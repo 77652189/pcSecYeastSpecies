@@ -12,6 +12,11 @@ from pcsec_pichia.experimental_feedback.quality import (
     validate_experiment_bundle,
 )
 from pcsec_pichia.experimental_feedback.io import ExperimentFeedbackOutputs
+from pcsec_pichia.experimental_feedback.linkage import (
+    PredictionIndex,
+    PredictionLinkageResult,
+    PredictionRecord,
+)
 from pcsec_pichia.experimental_feedback.schema import (
     SCHEMA_VERSION,
     CANONICAL_UNITS,
@@ -55,6 +60,9 @@ __all__ = [
     "MeasurementStatus",
     "PredictionLinkRecord",
     "PredictionLinkStatus",
+    "PredictionIndex",
+    "PredictionLinkageResult",
+    "PredictionRecord",
     "QualityStatus",
     "SchemaValidationError",
     "UnitValidationError",

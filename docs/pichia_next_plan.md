@@ -7,7 +7,7 @@
 
 ```yaml
 current_phase: phase_1_experiment_feedback
-current_round: round_2_linkage
+current_round: round_3_calibration
 round_status: ready
 ```
 
