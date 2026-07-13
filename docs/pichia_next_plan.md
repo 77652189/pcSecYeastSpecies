@@ -3,6 +3,26 @@
 状态：active  
 最后更新：2026-07-13
 
+## 当前执行位置
+
+```yaml
+current_phase: phase_1_experiment_feedback
+current_round: round_1_io
+round_status: ready
+```
+
+执行会话必须从这里记录的阶段和轮次继续。完成一轮后，只更新到下一轮；不得在新会话中自动重置为 Phase 1 Round 0。
+
+Phase 1 Round 0-5 全部完成并验收后，将状态更新为：
+
+```yaml
+current_phase: phase_2_gene_level_oe
+current_round: round_0_architecture
+round_status: ready
+```
+
+进入 Phase 2 前必须先完成 Phase 1 的端到端验收和 checkpoint，不能在同一轮中越过阶段边界。
+
 ## 总目标
 
 把现有 KO/OE 候选生成系统逐步升级为能够利用实验反馈、提高候选命中率的研发系统。
@@ -42,6 +62,57 @@
 7. review、自动修复、复验，最多 3 轮。
 8. 更新当前状态；不得重写已完成阶段的大段设计。
 9. 检查 `Code/Model/Enzymedata/Results` 和依赖声明没有非预期 diff。
+
+## 子 agent 协作策略
+
+Phase 1 可以使用内置子 agent 提高速度，但所有子任务仍属于同一个目标和同一个主分支。不要再创建多个用户会话并手动切换共享工作区分支。
+
+### 主 agent 职责
+
+- 持有唯一 active goal、架构决策、当前 Round 顺序和验收标准。
+- 处理当前关键路径和会阻塞其他工作的接口定义。
+- 冻结子任务之间的 API 和文件所有权后再并行派发。
+- 审阅、整合所有子 agent 结果，解决跨模块冲突。
+- 独占 stage、commit、push、文档状态更新和目标完成判定。
+
+### 子 agent 规则
+
+- 优先使用 1-3 个子 agent；没有真正并行工作时不为“形式上并行”创建 agent。
+- explorer 只做具体、可回答的代码发现或影响分析，不修改文件。
+- worker 必须获得明确的文件所有权、输入契约、输出契约和 focused test。
+- 两个 worker 不得编辑同一个文件、同一 fixture 或同一测试模块。
+- worker 在自己的 forked workspace 中工作，不切换主工作区分支，不 commit、不 push。
+- worker 必须说明修改文件、验证命令、已知限制和未解决问题。
+- 主 agent 不重复实现已经委派的任务；等待期间处理不重叠的关键路径工作。
+- 子 agent 产物整合后必须由主 agent 重新 review 和运行测试，不能直接视为完成。
+- smoke 输出使用独立的 tmp_path 或唯一 `local_runs/experiment_feedback/<round>/<agent>/`，避免相互覆盖。
+
+### 适合并行的任务
+
+- 多个互不依赖的现有代码路径审计。
+- 核心接口冻结后的独立实现与独立测试/fixture。
+- service 和 UI 在 facade contract 已冻结后的并行开发。
+- hLF、OPN 独立 smoke 和只读安全审计。
+
+### 不适合并行的任务
+
+- Phase 1 canonical schema 和 public API 的最终决定。
+- 会影响所有后续模块的 ID、单位、control matching 和 calibration eligibility。
+- 同一个文件或同一个测试 fixture 的修改。
+- stage、commit、push、迁移稳定科学资产或修改保护目录。
+
+### 各 Round 推荐分工
+
+| Round | 主 agent 关键路径 | 可委派子任务 |
+| --- | --- | --- |
+| 0 | 冻结 schema、public API、status 和文件边界 | explorer 审计现有 schema/cache 模式；worker 在 API 冻结后补独立 contract tests/fixtures |
+| 1 | 确认 bundle/manifest 语义并整合 | worker A 实现 IO；worker B 实现独立坏输入 fixtures/tests，文件互斥 |
+| 2 | 冻结 PredictionIndex 和 linkage status | explorer 追踪 screen/report 字段；worker 实现 linkage tests 或 prediction adapter |
+| 3 | 决定 control matching 和 calibration 公式 | worker 分别实现统计测试与报告序列化；不得并行设计两套公式 |
+| 4 | 冻结 service contract 和页面工作流 | worker A 负责 service+service tests；worker B 负责 UI+UI tests，不能修改对方文件 |
+| 5 | 汇总验收和最终决策 | worker A 跑 hLF smoke；worker B 跑 OPN smoke；explorer/worker C 做只读数据泄漏和保护目录审计 |
+
+每轮最多进行一次主并行波次。若子任务结果暴露接口问题，先由主 agent 收束接口，再决定是否进行第二波；不能无限创建 agent 掩盖架构不清。
 
 ## Phase 1：实验反馈闭环
 

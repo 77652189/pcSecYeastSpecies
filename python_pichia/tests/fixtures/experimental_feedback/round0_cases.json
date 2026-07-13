@@ -1,0 +1,84 @@
+{
+  "schema_version": 1,
+  "case_labels": [
+    "hLF",
+    "OPN",
+    "control",
+    "KO",
+    "OE",
+    "combination_components",
+    "technical_replicates",
+    "bad_unit",
+    "missing_control",
+    "ambiguous_link"
+  ],
+  "experiments": [
+    {
+      "experiment_id": "HLF-B01-R1",
+      "target_id": "hLF",
+      "operator_id": "operator-001",
+      "batch_id": "B01",
+      "control_experiment_id": "HLF-B01-CONTROL"
+    },
+    {
+      "experiment_id": "OPN-B02-R1",
+      "target_id": "OPN",
+      "operator_id": "operator-002",
+      "batch_id": "B02",
+      "control_experiment_id": ""
+    }
+  ],
+  "interventions": [
+    {
+      "experiment_id": "HLF-B01-CONTROL",
+      "intervention_id": "CONTROL-1",
+      "component_index": 1,
+      "intervention_type": "control"
+    },
+    {
+      "experiment_id": "HLF-B01-R1",
+      "intervention_id": "KO-1",
+      "component_index": 1,
+      "intervention_type": "KO",
+      "gene_id": "PAS_chr1-1_0001"
+    },
+    {
+      "experiment_id": "HLF-B01-R1",
+      "intervention_id": "OE-1",
+      "component_index": 2,
+      "intervention_type": "OE",
+      "gene_id": "PAS_chr2-1_0140",
+      "construct_id": "pGAP-KAR2"
+    }
+  ],
+  "technical_replicates": [
+    {
+      "experiment_id": "HLF-B01-R1",
+      "measurement_id": "TITER-T1",
+      "technical_replicate_id": "T1",
+      "raw_value": 12.4,
+      "raw_unit": "mg/L"
+    },
+    {
+      "experiment_id": "HLF-B01-R1",
+      "measurement_id": "TITER-T2",
+      "technical_replicate_id": "T2",
+      "raw_value": null,
+      "raw_unit": "mg/L",
+      "status": "assay_failed"
+    }
+  ],
+  "bad_unit": {
+    "measurement_id": "BAD-UNIT-1",
+    "assay_type": "titer",
+    "raw_value": 0.012,
+    "raw_unit": "g/L"
+  },
+  "ambiguous_link": {
+    "experiment_id": "OPN-B02-R1",
+    "intervention_id": "OE-COMMON-NAME",
+    "common_name": "KAR2",
+    "gene_id": "",
+    "status": "ambiguous"
+  }
+}
