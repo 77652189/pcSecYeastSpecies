@@ -65,13 +65,14 @@ def test_obsolete_migration_plans_are_deleted_not_kept_as_active_debt() -> None:
     assert all_doc_names.isdisjoint(DELETED_OBSOLETE_MIGRATION_DOCS)
 
 
-def test_next_plan_records_the_current_phase_2_round() -> None:
+def test_next_plan_advances_to_phase_3_after_phase_2_acceptance() -> None:
     text = (REPO_ROOT / "docs" / "pichia_next_plan.md").read_text(encoding="utf-8")
     current_state = text.split("```yaml", 1)[1].split("```", 1)[0]
 
-    assert "current_phase: phase_2_gene_level_oe" in current_state
-    assert "current_round: round_6_hlf_opn_acceptance" in current_state
+    assert "current_phase: phase_3_secretory_resources" in current_state
+    assert "current_round: round_0_architecture" in current_state
     assert "round_status: ready" in current_state
     assert "从 Phase 1 Round 0 开始" not in text
-    assert "从 Phase 2 Round 6 开始" in text
+    assert "Phase 2 Round 0-6 已完成并通过 hLF/OPN 验收" in text
+    assert "本轮不进入 Phase 3 实现" in text
     assert "本阶段已完成并通过端到端验收" in text

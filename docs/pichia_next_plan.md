@@ -6,8 +6,8 @@
 ## 当前执行位置
 
 ```yaml
-current_phase: phase_2_gene_level_oe
-current_round: round_6_hlf_opn_acceptance
+current_phase: phase_3_secretory_resources
+current_round: round_0_architecture
 round_status: ready
 ```
 
@@ -466,4 +466,4 @@ Phase 2 完成必须满足：
 
 ## 当前下一步
 
-从 Phase 2 Round 6 开始：分别完成 hLF、OPN 的 executable 与边界候选 smoke，生成 coverage、数值回归、性能、保护目录和数据泄漏验收证据；复核 feature-off、1x baseline 与旧 proxy 兼容路径。通过最终 review 后把状态推进到 Phase 3 Round 0，并停止，不进入 Phase 3 实现。
+Phase 2 Round 0-6 已完成并通过 hLF/OPN 验收。下一执行位置为 Phase 3 Round 0：先定义分泌资源与蛋白稳态约束的架构、单位、来源、开关和基线回归；本轮不进入 Phase 3 实现。

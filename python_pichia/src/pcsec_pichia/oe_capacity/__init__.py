@@ -1,5 +1,12 @@
 """Auditable gene-level overexpression capacity contracts and workflows."""
 
+from pcsec_pichia.oe_capacity.acceptance import (
+    EXPECTED_TARGET_IDS,
+    OECapacityAcceptanceObservation,
+    OECapacityRegressionCheck,
+    build_oe_capacity_acceptance_summary,
+    write_oe_capacity_acceptance_outputs,
+)
 from pcsec_pichia.oe_capacity._api import (
     OECapacityPhaseError,
     build_gene_capacity_specs,
@@ -53,6 +60,7 @@ from pcsec_pichia.oe_capacity.schema import (
 )
 
 __all__ = [
+    "EXPECTED_TARGET_IDS",
     "ConfidenceLevel",
     "ConstraintChangeKind",
     "CapacityConstraintChange",
@@ -79,6 +87,8 @@ __all__ = [
     "OECapacityScreenResult",
     "OECapacityScreenRow",
     "OECapacityValidationError",
+    "OECapacityAcceptanceObservation",
+    "OECapacityRegressionCheck",
     "OEExecutionMode",
     "OEExecutionStatus",
     "ParameterScenario",
@@ -87,6 +97,7 @@ __all__ = [
     "ResourceCostMode",
     "SolverSnapshot",
     "build_gene_capacity_specs",
+    "build_oe_capacity_acceptance_summary",
     "build_current_model_parameter_policy",
     "build_gene_enzyme_reaction_catalog",
     "build_oe_capacity_constraints",
@@ -98,4 +109,5 @@ __all__ = [
     "summarize_gene_capacity_catalog",
     "validate_gene_capacity_catalog",
     "write_oe_capacity_outputs",
+    "write_oe_capacity_acceptance_outputs",
 ]
