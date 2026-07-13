@@ -6,8 +6,8 @@
 ## 当前执行位置
 
 ```yaml
-current_phase: phase_1_experiment_feedback
-current_round: round_5_replay_acceptance
+current_phase: phase_2_gene_level_oe
+current_round: round_0_architecture
 round_status: ready
 ```
 

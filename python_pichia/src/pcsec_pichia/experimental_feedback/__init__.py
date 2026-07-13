@@ -27,6 +27,13 @@ from pcsec_pichia.experimental_feedback.calibration import (
     TopKCalibrationMetric,
     write_calibration_outputs,
 )
+from pcsec_pichia.experimental_feedback.replay import (
+    ExperimentReplayOutputs,
+    ExperimentReplayResult,
+    PredictionExperimentReportOutputs,
+    run_experiment_feedback_replay,
+    write_prediction_experiment_report_outputs,
+)
 from pcsec_pichia.experimental_feedback.schema import (
     SCHEMA_VERSION,
     CANONICAL_UNITS,
@@ -64,6 +71,9 @@ __all__ = [
     "ExperimentImportManifest",
     "ExperimentRecord",
     "ExperimentFeedbackOutputs",
+    "ExperimentReplayOutputs",
+    "ExperimentReplayResult",
+    "PredictionExperimentReportOutputs",
     "ExperimentValidationIssue",
     "ExperimentValidationResult",
     "ExperimentalFeedbackError",
@@ -90,4 +100,6 @@ __all__ = [
     "validate_experiment_bundle",
     "write_experiment_feedback_cache",
     "write_calibration_outputs",
+    "run_experiment_feedback_replay",
+    "write_prediction_experiment_report_outputs",
 ]

@@ -1,0 +1,71 @@
+{
+  "prediction_run_id": "round5-sanitized-screen",
+  "evidence_items": [
+    {
+      "evidence_id": "HLF-E1",
+      "target_id": "hLF",
+      "gene_id": "G-H1",
+      "intervention_type": "KO",
+      "context_id": "ctx-hlf",
+      "rank": 1,
+      "predicted_direction": "increase",
+      "evidence_tier": "high",
+      "recommendation_tier": "prioritize"
+    },
+    {
+      "evidence_id": "HLF-E2",
+      "target_id": "hLF",
+      "gene_id": "G-H2",
+      "intervention_type": "OE",
+      "context_id": "ctx-hlf",
+      "rank": 2,
+      "predicted_direction": "increase",
+      "evidence_tier": "medium",
+      "recommendation_tier": "review"
+    },
+    {
+      "evidence_id": "HLF-E3",
+      "target_id": "hLF",
+      "gene_id": "G-H3",
+      "intervention_type": "KO",
+      "context_id": "ctx-hlf",
+      "rank": 3,
+      "predicted_direction": "increase",
+      "evidence_tier": "low",
+      "recommendation_tier": "review"
+    },
+    {
+      "evidence_id": "OPN-E1",
+      "target_id": "OPN",
+      "gene_id": "G-O1",
+      "intervention_type": "OE",
+      "context_id": "ctx-opn",
+      "rank": 1,
+      "predicted_direction": "increase",
+      "evidence_tier": "high",
+      "recommendation_tier": "prioritize"
+    },
+    {
+      "evidence_id": "OPN-E2A",
+      "target_id": "OPN",
+      "gene_id": "G-O2",
+      "intervention_type": "KO",
+      "context_id": "ctx-opn",
+      "rank": 2,
+      "predicted_direction": "increase",
+      "evidence_tier": "medium",
+      "recommendation_tier": "review"
+    },
+    {
+      "evidence_id": "OPN-E2B",
+      "target_id": "OPN",
+      "gene_id": "G-O2",
+      "intervention_type": "KO",
+      "context_id": "ctx-opn",
+      "rank": 3,
+      "predicted_direction": "increase",
+      "evidence_tier": "low",
+      "recommendation_tier": "review"
+    }
+  ]
+}

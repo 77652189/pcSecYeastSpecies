@@ -9,6 +9,7 @@ import streamlit as st
 from app.services.pichia_experiment_feedback_service import (
     DEFAULT_EXPERIMENT_FEEDBACK_ROOT,
     export_experiment_feedback_issues,
+    export_experiment_feedback_report,
     list_experiment_feedback_runs,
     list_prediction_fact_packs,
     load_experiment_feedback_run,
@@ -212,6 +213,14 @@ def _render_calibration(payload: dict[str, Any] | None) -> None:
         st.warning(f"当前 run 不可校准：{calibration.get('reason') or 'unknown'}")
         return
     st.json(calibration.get("config") or {}, expanded=False)
+    report_bytes = export_experiment_feedback_report(str(payload.get("run_dir") or ""))
+    if report_bytes:
+        st.download_button(
+            "下载 prediction-vs-experiment 报告",
+            data=report_bytes,
+            file_name=f"{payload.get('run_name', 'run')}_prediction_experiment_report.md",
+            mime="text/markdown",
+        )
     records = list(calibration.get("records") or [])
     target_rows = {str(item.get("target_id")): item for item in calibration.get("targets") or []}
     for target_id in ("hLF", "OPN"):

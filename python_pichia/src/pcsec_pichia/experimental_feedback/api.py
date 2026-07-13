@@ -10,6 +10,10 @@ from pcsec_pichia.experimental_feedback.linkage import (
     link_experiments_to_predictions,
 )
 from pcsec_pichia.experimental_feedback.quality import validate_experiment_bundle
+from pcsec_pichia.experimental_feedback.replay import (
+    run_experiment_feedback_replay,
+    write_prediction_experiment_report_outputs,
+)
 from pcsec_pichia.experimental_feedback.schema import ExperimentalFeedbackError
 
 
@@ -25,4 +29,6 @@ __all__ = [
     "load_experiment_bundle",
     "validate_experiment_bundle",
     "write_experiment_feedback_cache",
+    "run_experiment_feedback_replay",
+    "write_prediction_experiment_report_outputs",
 ]

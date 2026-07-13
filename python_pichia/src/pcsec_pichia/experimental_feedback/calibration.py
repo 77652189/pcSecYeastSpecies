@@ -77,6 +77,8 @@ class CalibrationRecord:
     experiment_id: str
     intervention_id: str
     target_id: str
+    gene_id: str
+    intervention_type: str
     evidence_id: str
     prediction_run_id: str
     prediction_rank: int | None
@@ -361,6 +363,8 @@ def _record_base(
         "experiment_id": experiment.experiment_id,  # type: ignore[attr-defined]
         "intervention_id": intervention.intervention_id,  # type: ignore[attr-defined]
         "target_id": experiment.target_id,  # type: ignore[attr-defined]
+        "gene_id": intervention.gene_id,  # type: ignore[attr-defined]
+        "intervention_type": intervention.intervention_type.value,  # type: ignore[attr-defined]
         "evidence_id": link.evidence_id if link else "",
         "prediction_run_id": link.prediction_run_id if link else "",
         "prediction_rank": link.prediction_rank if link else None,

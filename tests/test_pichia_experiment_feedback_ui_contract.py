@@ -58,5 +58,8 @@ def test_experiment_feedback_view_exposes_all_required_states_and_exports() -> N
         "context_mismatch",
         "不可校准",
         "export_experiment_feedback_issues",
+        "export_experiment_feedback_report",
+        "下载 prediction-vs-experiment 报告",
     ):
         assert text in source
+    assert ".read_bytes()" not in source

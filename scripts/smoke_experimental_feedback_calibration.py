@@ -1,24 +1,23 @@
 from __future__ import annotations
 
 import argparse
+import json
+import sys
 from pathlib import Path
 
-from pcsec_pichia.experimental_feedback import (
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+PYTHON_PICHIA_SRC = REPO_ROOT / "python_pichia" / "src"
+if str(PYTHON_PICHIA_SRC) not in sys.path:
+    sys.path.insert(0, str(PYTHON_PICHIA_SRC))
+
+from pcsec_pichia.experimental_feedback import (  # noqa: E402
     CalibrationConfig,
-    ConditionContext,
-    ExperimentBundle,
-    ExperimentRecord,
-    HostContext,
-    InterventionRecord,
-    InterventionType,
-    MeasurementRecord,
-    MeasurementStatus,
-    build_calibration_summary,
-    build_prediction_index,
-    link_experiments_to_predictions,
-    validate_experiment_bundle,
-    write_calibration_outputs,
+    run_experiment_feedback_replay,
 )
+
+
+FIXTURE_ROOT = REPO_ROOT / "python_pichia" / "tests" / "fixtures" / "experimental_feedback"
 
 
 def main() -> int:
@@ -26,129 +25,63 @@ def main() -> int:
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=Path("local_runs/experiment_feedback/round3_calibration"),
+        default=Path("local_runs/experiment_feedback/round5_replay"),
     )
     args = parser.parse_args()
-    bundle = _bundle()
-    index = build_prediction_index(
-        (
-            {
-                "prediction_run_id": "sanitized-calibration-run",
-                "evidence_items": [
-                    _prediction("HLF-E1", "hLF", "G1", 1, "high", "ctx-hlf"),
-                    _prediction("HLF-E2", "hLF", "G2", 2, "medium", "ctx-hlf"),
-                    _prediction("OPN-E1", "OPN", "G3", 1, "high", "ctx-opn"),
-                ],
-            },
-        )
+    prediction_path = FIXTURE_ROOT / "round5_replay_predictions.json"
+    prediction_run = json.loads(prediction_path.read_text(encoding="utf-8"))
+    result = run_experiment_feedback_replay(
+        experiment_path=FIXTURE_ROOT / "round5_replay_experiments.jsonl",
+        prediction_runs=(prediction_run,),
+        prediction_sources=(prediction_path,),
+        output_dir=args.output_dir,
+        source_classification="sanitized_fixture",
+        config=CalibrationConfig(
+            increase_threshold_ratio=1.10,
+            decrease_threshold_ratio=0.90,
+            top_k=(1, 2, 3),
+            baseline_hit_rate=0.25,
+            minimum_rank_pairs=2,
+        ),
     )
-    linkage = link_experiments_to_predictions(bundle, index)
-    config = CalibrationConfig(
-        increase_threshold_ratio=1.10,
-        decrease_threshold_ratio=0.90,
-        top_k=(1, 2),
-        baseline_hit_rate=0.25,
-        minimum_rank_pairs=2,
-    )
-    summary = build_calibration_summary(validate_experiment_bundle(bundle), linkage, config)
-    outputs = write_calibration_outputs(summary, args.output_dir)
-    by_target = {target.target_id: target for target in summary.targets}
+    by_target = {target.target_id: target for target in result.calibration.targets}
+    preserved_reasons = {
+        reason
+        for record in result.calibration.records
+        for reason in record.ineligibility_reasons
+    }
     if set(by_target) != {"hLF", "OPN"}:
         return 1
-    if not any(record.measurement_statuses == ("assay_failed",) for record in summary.records):
+    if result.linkage.ambiguous_count != 1:
         return 1
-    print(outputs.manifest_path)
-    return 0
-
-
-def _bundle() -> ExperimentBundle:
-    host = HostContext("Komagataella phaffii", "sanitized-strain", "sanitized-parent")
-    condition = ConditionContext("sanitized-medium", "methanol", "shake_flask", 30.0, 6.0, "sanitized", 72.0)
-    experiments = tuple(
-        ExperimentRecord(experiment_id, target_id, host, batch, condition, context_id=context_id)
-        for experiment_id, target_id, batch, context_id in (
-            ("CAL-H-C", "hLF", "B1", "ctx-hlf"),
-            ("CAL-H-HIT", "hLF", "B1", "ctx-hlf"),
-            ("CAL-H-FAIL", "hLF", "B1", "ctx-hlf"),
-            ("CAL-O-C", "OPN", "B2", "ctx-opn"),
-            ("CAL-O-NEG", "OPN", "B2", "ctx-opn"),
+    if not any(record.hit is False for record in result.calibration.records):
+        return 1
+    if not any("assay_failed" in record.measurement_statuses for record in result.calibration.records):
+        return 1
+    if "control_match_missing" not in preserved_reasons:
+        return 1
+    print(
+        json.dumps(
+            {
+                "source_classification": "sanitized_fixture",
+                "manifest_path": str(result.outputs.manifest_path),
+                "summary_path": str(result.outputs.summary_path),
+                "report_path": str(result.outputs.report_path),
+                "hLF": {
+                    "eligible": by_target["hLF"].eligible_count,
+                    "ineligible": by_target["hLF"].ineligible_count,
+                },
+                "OPN": {
+                    "eligible": by_target["OPN"].eligible_count,
+                    "ineligible": by_target["OPN"].ineligible_count,
+                },
+                "ambiguous_linkage": result.linkage.ambiguous_count,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
         )
     )
-    interventions = (
-        InterventionRecord("CAL-H-C", "CONTROL", 1, InterventionType.CONTROL),
-        _ko("CAL-H-HIT", "G1", "HLF-E1"),
-        _ko("CAL-H-FAIL", "G2", "HLF-E2"),
-        InterventionRecord("CAL-O-C", "CONTROL", 1, InterventionType.CONTROL),
-        _ko("CAL-O-NEG", "G3", "OPN-E1"),
-    )
-    measurements = (
-        _measurement("CAL-H-C", "H-C", 10.0),
-        _measurement("CAL-H-HIT", "H-HIT", 15.0),
-        MeasurementRecord(
-            "CAL-H-FAIL",
-            "H-FAIL",
-            "titer",
-            "sanitized-assay",
-            "extracellular",
-            None,
-            "mg/L",
-            None,
-            "mg/L",
-            MeasurementStatus.ASSAY_FAILED,
-            status_reason="sanitized assay failure",
-        ),
-        _measurement("CAL-O-C", "O-C", 20.0),
-        _measurement("CAL-O-NEG", "O-NEG", 18.0),
-    )
-    return ExperimentBundle(experiments=experiments, interventions=interventions, measurements=measurements)
-
-
-def _ko(experiment_id: str, gene_id: str, evidence_id: str) -> InterventionRecord:
-    return InterventionRecord(
-        experiment_id,
-        "KO-1",
-        1,
-        InterventionType.KO,
-        gene_id=gene_id,
-        construction_method="CRISPR-Cas9",
-        prediction_run_id="sanitized-calibration-run",
-        evidence_id=evidence_id,
-    )
-
-
-def _measurement(experiment_id: str, measurement_id: str, value: float) -> MeasurementRecord:
-    return MeasurementRecord(
-        experiment_id,
-        measurement_id,
-        "titer",
-        "sanitized-assay",
-        "extracellular",
-        value,
-        "mg/L",
-        value,
-        "mg/L",
-        MeasurementStatus.VALID,
-    )
-
-
-def _prediction(
-    evidence_id: str,
-    target_id: str,
-    gene_id: str,
-    rank: int,
-    tier: str,
-    context_id: str,
-) -> dict[str, object]:
-    return {
-        "evidence_id": evidence_id,
-        "target_id": target_id,
-        "gene_id": gene_id,
-        "intervention_type": "KO",
-        "context_id": context_id,
-        "rank": rank,
-        "predicted_direction": "increase",
-        "evidence_tier": tier,
-    }
+    return 0
 
 
 if __name__ == "__main__":

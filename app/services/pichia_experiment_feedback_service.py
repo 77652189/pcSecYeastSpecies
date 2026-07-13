@@ -21,6 +21,7 @@ from pcsec_pichia.experimental_feedback import (
     validate_experiment_bundle,
     write_calibration_outputs,
     write_experiment_feedback_cache,
+    write_prediction_experiment_report_outputs,
 )
 
 
@@ -86,6 +87,31 @@ def submit_experiment_feedback_import(
             "summary_path": str(calibration_outputs.summary_path),
             "manifest_path": str(calibration_outputs.manifest_path),
         }
+        report_outputs = write_prediction_experiment_report_outputs(
+            calibration=calibration,
+            validation=validation,
+            linkage=linkage,
+            output_dir=run_dir / "report",
+            experiment_path=experiment_path,
+            prediction_runs=(prediction_payload,) if prediction_payload else (),
+            prediction_sources=(prediction_source,) if prediction_source else (),
+            source_classification="local_unreviewed_input",
+            supporting_files={
+                "validated_records": cache_outputs.validated_records_path.name,
+                "import_manifest": cache_outputs.manifest_path.name,
+                "linkage": linkage_path.name,
+                "calibration_records": calibration_outputs.records_path.name,
+                "calibration_summary": calibration_outputs.summary_path.name,
+                "calibration_manifest": calibration_outputs.manifest_path.name,
+            },
+        )
+        calibration_paths.update(
+            {
+                "report_manifest_path": str(report_outputs.manifest_path),
+                "report_summary_path": str(report_outputs.summary_path),
+                "report_path": str(report_outputs.report_path),
+            }
+        )
     else:
         calibration_payload = {
             "available": False,
@@ -167,6 +193,11 @@ def export_experiment_feedback_issues(
     return path.read_bytes() if path.exists() else b""
 
 
+def export_experiment_feedback_report(run_dir: str | Path) -> bytes:
+    path = Path(run_dir) / "report" / "prediction_experiment_report.md"
+    return path.read_bytes() if path.is_file() else b""
+
+
 def _validation_payload(validation: object) -> dict[str, Any]:
     return {
         "is_valid": bool(validation.is_valid),  # type: ignore[attr-defined]
@@ -243,6 +274,7 @@ def _json_ready(value: object) -> object:
 __all__ = [
     "DEFAULT_EXPERIMENT_FEEDBACK_ROOT",
     "export_experiment_feedback_issues",
+    "export_experiment_feedback_report",
     "list_experiment_feedback_runs",
     "list_prediction_fact_packs",
     "load_experiment_feedback_run",
