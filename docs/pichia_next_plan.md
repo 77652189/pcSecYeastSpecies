@@ -7,7 +7,7 @@
 
 ```yaml
 current_phase: phase_1_experiment_feedback
-current_round: round_4_service_ui
+current_round: round_5_replay_acceptance
 round_status: ready
 ```
 

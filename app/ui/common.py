@@ -168,6 +168,7 @@ def page_header() -> None:
 
 
 NAV_RADIO_KEY = "app_page_nav"
+EXPERIMENT_FEEDBACK_PAGE = "实验反馈闭环"
 HOMOLOGY_AUDIT_PAGE = "基因命名与同源规则审计"
 SHADOW_CROSS_CHECK_PAGE = "Shadow LP一致性验证"
 # Streamlit forbids writing to st.session_state[key] once that key's widget has
@@ -196,6 +197,7 @@ def sidebar_navigation() -> str:
             "结果浏览",
             "仿真验证",
             "全基因组KO/OE筛查",
+            EXPERIMENT_FEEDBACK_PAGE,
             HOMOLOGY_AUDIT_PAGE,
             SHADOW_CROSS_CHECK_PAGE,
             "运行日志",
