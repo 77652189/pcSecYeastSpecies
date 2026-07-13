@@ -7,7 +7,7 @@
 
 ```yaml
 current_phase: phase_2_gene_level_oe
-current_round: round_3_constraints
+current_round: round_4_screen_reports
 round_status: ready
 ```
 
@@ -466,4 +466,4 @@ Phase 2 完成必须满足：
 
 ## 当前下一步
 
-从 Phase 2 Round 0 开始：先冻结 gene-enzyme-reaction capacity、OE 剂量、蛋白资源成本、外部模型映射和兼容 proxy 的架构契约，再进入实现。不得在架构冻结前直接写候选特例或替换稳定求解路径。
+从 Phase 2 Round 4 开始：在已通过的单候选 baseline/proxy/gene-capacity 求解路径上实现小批量 screen 与对照报告，并将运行产物写入 ignored `local_runs/oe_capacity/`。不得回退重做 Round 0，也不得跳过 screen/report 验收直接进入 UI。

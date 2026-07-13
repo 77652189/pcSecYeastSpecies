@@ -85,7 +85,11 @@ def plan_gene_level_overexpression(
 
 
 def build_oe_capacity_constraints(prepared_model: Any, plan: Any) -> Any:
-    _phase_gate("build_oe_capacity_constraints", 3)
+    from pcsec_pichia.oe_capacity.constraints import (
+        build_oe_capacity_constraints as _build,
+    )
+
+    return _build(prepared_model, plan)
 
 
 def run_gene_level_oe_comparison(
@@ -93,7 +97,11 @@ def run_gene_level_oe_comparison(
     plan: Any,
     solver_options: Mapping[str, Any] | None = None,
 ) -> Any:
-    _phase_gate("run_gene_level_oe_comparison", 3)
+    from pcsec_pichia.oe_capacity.simulation import (
+        run_gene_level_oe_comparison as _run,
+    )
+
+    return _run(prepared_model, plan, solver_options)
 
 
 def run_gene_level_oe_screen(
