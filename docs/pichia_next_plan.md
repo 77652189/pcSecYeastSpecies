@@ -7,7 +7,7 @@
 
 ```yaml
 current_phase: phase_2_gene_level_oe
-current_round: round_5_service_streamlit
+current_round: round_6_hlf_opn_acceptance
 round_status: ready
 ```
 
@@ -466,4 +466,4 @@ Phase 2 完成必须满足：
 
 ## 当前下一步
 
-从 Phase 2 Round 5 开始：在已通过的小批量 screen/report API 上增加薄 service facade 与 Streamlit 工作流，展示 mapping、dose、参数来源、uncertainty、资源成本和不可执行原因。必须检查页面入口、导航、旧引用、session state、cache key、target 隔离、health endpoint 和真实浏览器渲染。
+从 Phase 2 Round 6 开始：分别完成 hLF、OPN 的 executable 与边界候选 smoke，生成 coverage、数值回归、性能、保护目录和数据泄漏验收证据；复核 feature-off、1x baseline 与旧 proxy 兼容路径。通过最终 review 后把状态推进到 Phase 3 Round 0，并停止，不进入 Phase 3 实现。

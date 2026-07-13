@@ -328,6 +328,36 @@ def summarize_screen_result(result: ScreenResult) -> dict[str, Any]:
     }
 
 
+def prepare_screen_inputs(
+    model: CobraModel,
+    target: TargetSpec,
+    amino_acids: AminoAcidStoichiometry,
+    metabolic: MetabolicEnzymeData,
+    secretory: SecretoryEnzymeData,
+    combined: CombinedEnzymeData,
+    growth_rate: float,
+    write_ribosome_translation_constraint: bool = False,
+    write_misfolding_constraints: bool = False,
+) -> dict[str, Any]:
+    """Prepare one target with the canonical screen baseline path.
+
+    Service facades that need a prepared model should use this public adapter
+    instead of depending on the private implementation helper below.
+    """
+
+    return _prepare_screen_inputs(
+        model,
+        target,
+        amino_acids,
+        metabolic,
+        secretory,
+        combined,
+        growth_rate,
+        write_ribosome_translation_constraint=write_ribosome_translation_constraint,
+        write_misfolding_constraints=write_misfolding_constraints,
+    )
+
+
 def _prepare_screen_inputs(
     model: CobraModel,
     target: TargetSpec,

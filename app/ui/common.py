@@ -169,6 +169,7 @@ def page_header() -> None:
 
 NAV_RADIO_KEY = "app_page_nav"
 EXPERIMENT_FEEDBACK_PAGE = "实验反馈闭环"
+OE_CAPACITY_PAGE = "基因级OE容量对照"
 HOMOLOGY_AUDIT_PAGE = "基因命名与同源规则审计"
 SHADOW_CROSS_CHECK_PAGE = "Shadow LP一致性验证"
 # Streamlit forbids writing to st.session_state[key] once that key's widget has
@@ -197,6 +198,7 @@ def sidebar_navigation() -> str:
             "结果浏览",
             "仿真验证",
             "全基因组KO/OE筛查",
+            OE_CAPACITY_PAGE,
             EXPERIMENT_FEEDBACK_PAGE,
             HOMOLOGY_AUDIT_PAGE,
             SHADOW_CROSS_CHECK_PAGE,
@@ -213,10 +215,11 @@ def sidebar_navigation() -> str:
         1. 项目总览
         2. 结果浏览
         3. 全基因组KO/OE筛查（探索：找出哪些基因值得关注）
-        4. 基因命名与同源规则审计（复核：查看离线 BLAST/RBH 证据和规则迁移状态）
-        5. Shadow LP一致性验证
-        6. 仿真验证（核实：可从筛查结果候选行直接跳转过来并自动填好靶点/基因）
-        7. 运行日志
+        4. 基因级OE容量对照（比较 baseline、reaction proxy 与 gene-capacity）
+        5. 基因命名与同源规则审计（复核：查看离线 BLAST/RBH 证据和规则迁移状态）
+        6. Shadow LP一致性验证
+        7. 仿真验证（核实：可从筛查结果候选行直接跳转过来并自动填好靶点/基因）
+        8. 运行日志
         """
     )
     if page == "结果浏览":
