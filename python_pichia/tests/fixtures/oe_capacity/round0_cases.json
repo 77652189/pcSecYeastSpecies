@@ -1,0 +1,139 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "case_id": "single-gene-current-model",
+      "case_type": "single_gene",
+      "gene_id": "GENE_SINGLE_001",
+      "reaction_id": "RXN_SINGLE_001",
+      "enzyme_id": "ENZ_SINGLE_001",
+      "gpr_rule": "GENE_SINGLE_001",
+      "gpr_role": "single_gene",
+      "source": {
+        "type": "current_model",
+        "ref": "deidentified-current-model/gpr",
+        "version": "fixture-v1",
+        "confidence": "high"
+      },
+      "execution_status": "gene_level_executable",
+      "missing_information": [],
+      "warnings": []
+    },
+    {
+      "case_id": "isoenzyme-shared-reaction",
+      "case_type": "isoenzyme",
+      "gene_id": "GENE_ISO_001",
+      "reaction_id": "RXN_ISO_SHARED_001",
+      "enzyme_id": "ENZ_ISO_001",
+      "gpr_rule": "GENE_ISO_001 or GENE_ISO_002",
+      "gpr_role": "isoenzyme",
+      "source": {
+        "type": "current_model",
+        "ref": "deidentified-current-model/gpr",
+        "version": "fixture-v1",
+        "confidence": "high"
+      },
+      "execution_status": "isoenzyme_ambiguous",
+      "missing_information": [
+        "gene_specific_enzyme_capacity"
+      ],
+      "warnings": [
+        "The shared reaction bound must not be relaxed for one isoenzyme."
+      ]
+    },
+    {
+      "case_id": "complex-subunit-no-stoichiometry",
+      "case_type": "complex_subunit",
+      "gene_id": "GENE_COMPLEX_001",
+      "reaction_id": "RXN_COMPLEX_001",
+      "enzyme_id": "ENZ_COMPLEX_001",
+      "gpr_rule": "GENE_COMPLEX_001 and GENE_COMPLEX_002",
+      "gpr_role": "complex_subunit",
+      "complex_id": "COMPLEX_001",
+      "subunit_stoichiometry": [],
+      "source": {
+        "type": "local_enzyme_data",
+        "ref": "deidentified-local-enzyme-data/complex",
+        "version": "fixture-v1",
+        "confidence": "medium"
+      },
+      "execution_status": "complex_limited",
+      "missing_information": [
+        "subunit_stoichiometry",
+        "limiting_subunit_evidence"
+      ],
+      "warnings": [
+        "Overexpressing one subunit does not establish increased assembled-complex capacity."
+      ]
+    },
+    {
+      "case_id": "mixed-gpr-scoped-mapping",
+      "case_type": "mixed",
+      "gene_id": "GENE_MIXED_001",
+      "reaction_id": "RXN_MIXED_001",
+      "enzyme_id": "ENZ_MIXED_BRANCH_001",
+      "gpr_rule": "GENE_MIXED_001 or (GENE_MIXED_002 and GENE_MIXED_003)",
+      "gpr_role": "mixed",
+      "source": {
+        "type": "reviewed_pichia_mapping",
+        "ref": "deidentified-reviewed-mapping/mixed-gpr",
+        "version": "fixture-v1",
+        "confidence": "medium"
+      },
+      "execution_status": "partial_mapping",
+      "missing_information": [
+        "branch_specific_capacity_scope"
+      ],
+      "warnings": [
+        "Each mixed-GPR branch must retain its own capacity scope."
+      ]
+    },
+    {
+      "case_id": "single-gene-missing-parameters",
+      "case_type": "missing_parameter",
+      "gene_id": "GENE_PARAM_001",
+      "reaction_id": "RXN_PARAM_001",
+      "enzyme_id": "ENZ_PARAM_001",
+      "gpr_rule": "GENE_PARAM_001",
+      "gpr_role": "single_gene",
+      "source": {
+        "type": "current_model",
+        "ref": "deidentified-current-model/gpr",
+        "version": "fixture-v1",
+        "confidence": "high"
+      },
+      "execution_status": "partial_mapping",
+      "missing_information": [
+        "kcat",
+        "baseline_enzyme_amount"
+      ],
+      "warnings": [
+        "Missing parameters require explicit uncertainty scenarios; no point value may be invented."
+      ]
+    },
+    {
+      "case_id": "external-model-evidence-only",
+      "case_type": "external_evidence_only",
+      "gene_id": "GENE_EXTERNAL_001",
+      "reaction_id": "RXN_EXTERNAL_001",
+      "enzyme_id": "ENZ_EXTERNAL_001",
+      "gpr_rule": "GENE_EXTERNAL_001",
+      "gpr_role": "single_gene",
+      "source": {
+        "type": "external_pichia_model",
+        "ref": "deidentified-external-model/evidence",
+        "version": "fixture-v1",
+        "confidence": "low"
+      },
+      "execution_status": "external_evidence_only",
+      "missing_information": [
+        "current_model_gene_mapping",
+        "current_model_enzyme_mapping",
+        "current_model_reaction_mapping"
+      ],
+      "warnings": [
+        "External evidence cannot make a mapping executable without current-model confirmation."
+      ]
+    }
+  ]
+}

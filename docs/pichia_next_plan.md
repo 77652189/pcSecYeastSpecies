@@ -7,7 +7,7 @@
 
 ```yaml
 current_phase: phase_2_gene_level_oe
-current_round: round_0_architecture
+current_round: round_1_mapping_catalog
 round_status: ready
 ```
 
