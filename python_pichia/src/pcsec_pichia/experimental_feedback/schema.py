@@ -296,6 +296,12 @@ class PredictionLinkRecord:
     common_name: str = ""
     reaction_id: str = ""
     reason: str = ""
+    prediction_rank: int | None = None
+    predicted_direction: str = ""
+    evidence_tier: str = ""
+    recommendation_tier: str = ""
+    prediction_score: float | None = None
+    prediction_context_id: str = ""
     schema_version: int = SCHEMA_VERSION
 
     def validate(self) -> None:
@@ -311,6 +317,15 @@ class PredictionLinkRecord:
                 _require_text(getattr(self, field_name), field_name)
         else:
             _require_text(self.reason, "reason")
+        if self.prediction_rank is not None and (
+            not isinstance(self.prediction_rank, int)
+            or isinstance(self.prediction_rank, bool)
+            or self.prediction_rank < 1
+        ):
+            raise SchemaValidationError("prediction_rank must be a positive integer or None.")
+        _validate_optional_number(self.prediction_score, "prediction_score")
+        if self.predicted_direction not in {"", "increase", "decrease", "neutral"}:
+            raise SchemaValidationError("predicted_direction must be increase, decrease, neutral, or empty.")
 
 
 @dataclass(frozen=True)

@@ -17,6 +17,16 @@ from pcsec_pichia.experimental_feedback.linkage import (
     PredictionLinkageResult,
     PredictionRecord,
 )
+from pcsec_pichia.experimental_feedback.calibration import (
+    CalibrationConfig,
+    CalibrationOutputs,
+    CalibrationRecord,
+    CalibrationSummary,
+    EvidenceTierCalibrationMetric,
+    TargetCalibrationSummary,
+    TopKCalibrationMetric,
+    write_calibration_outputs,
+)
 from pcsec_pichia.experimental_feedback.schema import (
     SCHEMA_VERSION,
     CANONICAL_UNITS,
@@ -43,6 +53,11 @@ __all__ = [
     "SCHEMA_VERSION",
     "CANONICAL_UNITS",
     "SUPPORTED_COMPARTMENTS",
+    "CalibrationConfig",
+    "CalibrationOutputs",
+    "CalibrationRecord",
+    "CalibrationSummary",
+    "EvidenceTierCalibrationMetric",
     "ConditionContext",
     "ExperimentBundle",
     "ExperimentImportConflict",
@@ -65,6 +80,8 @@ __all__ = [
     "PredictionRecord",
     "QualityStatus",
     "SchemaValidationError",
+    "TargetCalibrationSummary",
+    "TopKCalibrationMetric",
     "UnitValidationError",
     "build_calibration_summary",
     "build_prediction_index",
@@ -72,4 +89,5 @@ __all__ = [
     "load_experiment_bundle",
     "validate_experiment_bundle",
     "write_experiment_feedback_cache",
+    "write_calibration_outputs",
 ]

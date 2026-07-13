@@ -243,6 +243,12 @@ def link_experiments_to_predictions(
                 status=PredictionLinkStatus.MATCHED,
                 common_name=intervention.common_name,
                 reaction_id=prediction.reaction_id,
+                prediction_rank=prediction.rank,
+                predicted_direction=prediction.predicted_direction,
+                evidence_tier=prediction.evidence_tier,
+                recommendation_tier=prediction.recommendation_tier,
+                prediction_score=prediction.score,
+                prediction_context_id=prediction.context_id,
             )
         )
     result = PredictionLinkageResult(links=tuple(links), control_count=control_count)
@@ -302,6 +308,12 @@ def _unmatched(
         common_name=intervention.common_name,
         reaction_id=prediction.reaction_id if prediction else "",
         reason=reason,
+        prediction_rank=prediction.rank if prediction else None,
+        predicted_direction=prediction.predicted_direction if prediction else "",
+        evidence_tier=prediction.evidence_tier if prediction else "",
+        recommendation_tier=prediction.recommendation_tier if prediction else "",
+        prediction_score=prediction.score if prediction else None,
+        prediction_context_id=prediction.context_id if prediction else "",
     )
 
 
