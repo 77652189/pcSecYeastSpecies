@@ -1,56 +1,77 @@
 # pcSecPichia 数据与结果治理策略
 
 状态：active  
-最后更新：2026-07-07
+最后更新：2026-07-13
 
 ## 目录职责
 
-- `Data/`：稳定输入、参考数据、外部注释、目标蛋白输入和人工确认的科学数据。
+- `Data/`：人工确认、可追溯、允许长期维护的稳定输入和 curated scientific data。
 - `Model/`：人工确认的 GEM / pcSec 模型资产。
-- `Enzymedata/`：人工确认的酶约束资产。
-- `Results/`：legacy MATLAB results，只读参考历史结果，不作为当前 Python / Streamlit 默认输出。
-- `local_runs/`：当前 Python、Streamlit、MATLAB harness、LP diff、cache 和验证证据的默认运行产物目录，保持 ignored。
-- `docs/archive/`：历史计划、阶段性验证记录和已被 active 文档吸收的长文档。
+- `Enzymedata/`：人工确认的酶容量和资源约束资产。
+- `Results/`：legacy MATLAB results，只读参考，不作为当前 Python / Streamlit 输出目录。
+- `local_runs/`：运行产物、临时缓存、外部下载、smoke、报告和待复核实验导入，默认 ignored。
+- `docs/archive/`：已完成计划、阶段验证和被 active 文档吸收的历史设计，默认不进入公开版本控制。
 
-明确口径：`Results/` 是 legacy MATLAB results，不是当前 Python 或 Streamlit 的默认输出目录。`local_runs/` 是当前 Python、Streamlit、MATLAB harness 本地运行产物、缓存和验证证据的默认位置。
+## 实验反馈数据
+
+实验数据分为三层：
+
+1. 原始导入：仪器导出、研发记录和未清洗表格进入 `local_runs/experiment_feedback/inbox/`。
+2. 标准化缓存：完成 schema、单位、重复和 prediction linkage 检查后，进入 `local_runs/experiment_feedback/validated/`。
+3. 稳定 curated 数据：只有人工确认来源、权限、脱敏、单位和上下文后，才可单独 checkpoint 提升到 `Data/` 下的正式目录。
+
+不得把自由文本“提高/降低”当作唯一实验结果。至少保留 target、host、intervention、培养条件、测量方法、单位、重复、误差和原始来源。
+
+失败、无效、不可测和阴性结果必须保留，不能只收集成功实验。
+
+## 外部数据与模型
+
+- BLAST/RBH、在线数据库响应、外部 GEM、MEMOTE 报告和 GPR mapping 默认进入 `local_runs/`。
+- 外部数据必须保留 source URL、version、retrieved_at、query、hash、license/provenance 和 warning。
+- 外部名称、同源关系或 GPR 不得自动覆盖内部 `gene_id` 和当前模型规则。
+- 将外部模型或 cache 提升到 `Data/Model/Enzymedata` 前，必须单独 review 和 checkpoint。
+
+## LLM 数据边界
+
+- LLM 只读取程序生成的 fact pack，不直接遍历运行目录。
+- 只有用户明确触发时才调用外部 LLM API。
+- fact pack 应只包含完成报告所需的模型结果和证据，不包含 API key、环境配置或无关实验原始文件。
+- 最终报告必须同时通过程序 validator 和 Judge。
+- LLM 不能修改模型、recommendation tier、curated evidence 或实验记录。
+
+## 密钥和本地配置
+
+- `.env`、`.env.*`、API key、认证文件和个人路径不得提交。
+- 可提交不含真实值的 `.env.example`。
+- 日志、manifest、异常信息和测试输出不得打印密钥或完整认证 header。
 
 ## 提交规则
 
-- 新生成的 LP、solver output、BLAST cache、MATLAB harness output、Streamlit run result、Markdown report 默认进入 `local_runs/`。
-- 新增大文件前必须说明来源、是否可再生成、是否应进入 Git LFS，以及为什么不是运行产物。
-- `Data/`、`Model/`、`Enzymedata/`、`Results/` 的新增或修改必须被明确声明为科学资产变更。
-- 本轮 BLAST/RBH 同源映射 cache 不写入 `Data/`，先作为 `local_runs/` 产物验证。
-- Streamlit 同源审计页面默认只读 `local_runs/` 或未来人工提升的稳定 cache；页面打开、筛选和导出不得默认运行 BLAST、联网查询或生成大文件。
-- 若未来要把同源 crosswalk 升级为稳定资产，应单独建立 checkpoint，并说明来源、版本、生成命令和人工复核状态。
+- LP、solver output、BLAST cache、外部下载、Streamlit run、LLM report 和 smoke 默认进入 `local_runs/`。
+- 大文件进入 Git 前必须说明来源、可再生成性、license、人工复核状态和为什么不是运行产物。
+- `Data/Model/Enzymedata/Results` 的任何修改都必须明确声明为科学资产变更。
+- 不提交包含真实实验人员身份、客户信息或未经批准的原始实验数据。
 
 ## 保护检查
 
-每个涉及模型、screen、cache 或报告的任务结束前都应运行：
+每个涉及模型、筛查、证据、实验反馈或报告的任务结束前运行：
 
 ```powershell
 git diff --name-only -- Code Model Enzymedata Results requirements.txt python_pichia\pyproject.toml
 ```
 
-预期为空，除非该任务明确要求修改这些边界文件。
+预期为空，除非本轮明确声明相应边界变更。
+
+同时检查：
+
+```powershell
+git status --short
+git diff --check
+git ls-files -- .env '.env.*'
+```
 
 ## 归档规则
 
-归档不是删除历史，而是把不再作为当前入口的长文档移到 `docs/archive/`。
+适合归档：已完成阶段计划、一次性可行性验证、长排查记录和已被当前文档吸收的函数设计。
 
-适合归档：
-
-- 已完成阶段验证记录。
-- 已被当前架构文档吸收的旧计划。
-- 长篇排查记录，但当前下一步不再依赖其细节。
-- 与当前任务无关的历史候选或旧设计。
-
-不应归档：
-
-- 当前架构入口。
-- 下一步计划。
-- 数据边界和提交规则。
-- 当前任务的正式设计文档。
-
-## 后续迁移边界
-
-如需迁移历史 `Results/`、启用 Git LFS、发布 GitHub Release artifact 或接入外部存储，应单独立项并先做 checkpoint。迁移前不得删除或移动 legacy MATLAB 结果。
+active 根目录只保留当前架构、下一步计划、数据治理和索引。归档文档不能成为执行当前任务的必要前置条件。

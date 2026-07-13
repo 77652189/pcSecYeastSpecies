@@ -1,30 +1,35 @@
 # pcSecPichia 文档索引
 
 状态：active  
-最后更新：2026-07-10
+最后更新：2026-07-13
 
-当前文档只保留对现状判断和下一步执行有用的入口。历史计划、阶段验证和长排查记录放在 `docs/archive/`。
+项目文档围绕一个原始研发目标组织：通过 KO/OE 和分泌路径改造，提高 hLF、OPN 等目标蛋白在 Pichia 中的分泌表现。
+
+当前系统能够生成、筛选、解释和复核 KO/OE 候选，但不能承诺真实发酵产量、mg/L 绝对值或实验成功率。下一阶段重点是用实验反馈提升候选命中率，而不是继续堆叠平行的阶段计划。
 
 ## 当前入口
 
 | 文档 | 用途 |
 | --- | --- |
-| [当前架构与需求](pichia_current_architecture_and_requirements.md) | 当前工作目标、系统分层、能力边界和 COBRApy / Shadow LP 状态 |
-| [下一步计划](pichia_next_plan.md) | 接下来应做什么、暂不做什么、每项的验证命令 |
-| [COBRApy 导入、GEM QA 与 Shadow LP 产品化计划](pichia_cobrapy_import_qa_shadow_plan.md) | COBRApy 辅助外部 GEM 导入、MEMOTE/GEM QA 和 Shadow LP cross-check service 的执行计划 |
-| [BLAST/RBH 同源映射架构](pichia_homology_crosswalk_architecture.md) | 酿酒酵母到 Pichia 的本地同源证据层、BLAST/RBH cache、name audit、rule-transfer audit 和 Streamlit 审计边界 |
-| [在线外部数据库证据层架构](pichia_online_external_reference_architecture.md) | UniProt / NCBI / SGD 的受控联网 fetcher、external reference cache、命名校对和函数契约 |
-| [数据与结果治理策略](data_and_results_policy.md) | 哪些目录只读、哪些产物进 `local_runs/`、何时需要 checkpoint |
+| [当前架构与能力边界](pichia_current_architecture_and_requirements.md) | 当前能做什么、不能做什么、核心模块和证据边界 |
+| [下一阶段执行计划](pichia_next_plan.md) | 从实验反馈闭环到 gene-level OE、组合筛查和前瞻验证的固定顺序 |
+| [数据与结果治理策略](data_and_results_policy.md) | 模型、外部证据、实验数据、LLM 输入和运行产物的保存规则 |
 
-## 已归档内容
+## 阅读顺序
 
-历史计划、阶段验证和长排查记录保留在本地 `docs/archive/`，不纳入版本控制（包含项目内部设计细节，不适合公开分发）。
+1. 判断当前能力或讨论产品方向：先读“当前架构与能力边界”。
+2. 准备下一轮开发：再读“下一阶段执行计划”，从当前未完成轮次继续，不重新从 Round 1 开始。
+3. 写入数据、模型、缓存或报告前：检查“数据与结果治理策略”。
 
-## 当前推荐阅读顺序
+## 归档边界
 
-1. 先读 [当前架构与需求](pichia_current_architecture_and_requirements.md)。
-2. 再读 [下一步计划](pichia_next_plan.md)。
-3. 若要做 COBRApy import、GEM QA 或 Shadow LP cross-check，读 [COBRApy 导入、GEM QA 与 Shadow LP 产品化计划](pichia_cobrapy_import_qa_shadow_plan.md)。
-4. 若要做 BLAST/RBH 或 Streamlit 同源审计，读 [同源映射架构](pichia_homology_crosswalk_architecture.md)。
-5. 若要接入 UniProt / NCBI / SGD 或扩展新的外部来源，读 [在线外部数据库证据层架构](pichia_online_external_reference_architecture.md)。
-6. 执行前确认 [数据与结果治理策略](data_and_results_policy.md)。
+`docs/archive/` 保存已经完成的阶段计划、可行性验证、历史设计决策和长排查记录。归档内容保留原始证据，但不再作为当前执行入口。
+
+已归档的主要主题包括：
+
+- COBRApy import、GEM QA 与 Shadow LP 产品化阶段计划。
+- BLAST/RBH 同源 crosswalk 详细架构和 SCE/Pichia 可行性试跑。
+- 在线外部数据库证据层 Round 1-9 设计与函数契约。
+- 旧 KO/OE 全基因组筛查设计、碳源计划和 Python 迁移记录。
+
+归档目录按当前策略不进入公开版本控制；active 文档必须独立表达现状和下一步，不依赖归档文件才能执行。
