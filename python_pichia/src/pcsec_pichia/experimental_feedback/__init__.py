@@ -11,11 +11,14 @@ from pcsec_pichia.experimental_feedback.quality import (
     ExperimentValidationResult,
     validate_experiment_bundle,
 )
+from pcsec_pichia.experimental_feedback.io import ExperimentFeedbackOutputs
 from pcsec_pichia.experimental_feedback.schema import (
     SCHEMA_VERSION,
     CANONICAL_UNITS,
+    SUPPORTED_COMPARTMENTS,
     ConditionContext,
     ExperimentBundle,
+    ExperimentImportConflict,
     ExperimentImportManifest,
     ExperimentRecord,
     ExperimentalFeedbackError,
@@ -34,10 +37,13 @@ from pcsec_pichia.experimental_feedback.schema import (
 __all__ = [
     "SCHEMA_VERSION",
     "CANONICAL_UNITS",
+    "SUPPORTED_COMPARTMENTS",
     "ConditionContext",
     "ExperimentBundle",
+    "ExperimentImportConflict",
     "ExperimentImportManifest",
     "ExperimentRecord",
+    "ExperimentFeedbackOutputs",
     "ExperimentValidationIssue",
     "ExperimentValidationResult",
     "ExperimentalFeedbackError",

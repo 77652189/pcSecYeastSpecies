@@ -175,7 +175,7 @@ def test_public_api_exposes_structured_validation_result() -> None:
     result = validate_experiment_bundle(invalid)
 
     assert result.is_valid is False
-    assert result.errors[0].code == "schema_validation_error"
+    assert any(issue.code == "missing_experiment_reference" for issue in result.errors)
     assert all(
         callable(api)
         for api in (

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any, Iterable
 
+from pcsec_pichia.experimental_feedback.io import (
+    load_experiment_bundle,
+    write_experiment_feedback_cache,
+)
 from pcsec_pichia.experimental_feedback.quality import (
     ExperimentValidationResult,
     validate_experiment_bundle,
@@ -12,19 +15,6 @@ from pcsec_pichia.experimental_feedback.schema import ExperimentBundle, Experime
 
 class ExperimentalFeedbackPhaseError(ExperimentalFeedbackError):
     """Raised when a frozen public entrypoint belongs to a later Phase 1 round."""
-
-
-def load_experiment_bundle(path: str | Path) -> ExperimentBundle:
-    raise ExperimentalFeedbackPhaseError("load_experiment_bundle is implemented in Phase 1 Round 1.")
-
-
-def write_experiment_feedback_cache(
-    bundle: ExperimentBundle,
-    output_dir: str | Path,
-) -> Any:
-    raise ExperimentalFeedbackPhaseError(
-        "write_experiment_feedback_cache is implemented in Phase 1 Round 1."
-    )
 
 
 def build_prediction_index(screen_runs: Iterable[Any]) -> Any:

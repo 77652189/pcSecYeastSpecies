@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
+import math
 
 
 SCHEMA_VERSION = 1
@@ -27,6 +28,13 @@ CANONICAL_UNITS = {
     "time": "h",
     "viability": "%",
     "od600": "OD600",
+}
+
+SUPPORTED_COMPARTMENTS = {
+    "extracellular",
+    "intracellular",
+    "whole_culture",
+    "not_applicable",
 }
 
 
@@ -88,8 +96,8 @@ class ConditionContext:
         _validate_optional_number(self.temperature_c, "condition.temperature_c")
         _validate_optional_number(self.ph, "condition.ph")
         _validate_optional_number(self.sampling_time_h, "condition.sampling_time_h")
-        if self.sampling_time_h is None or self.sampling_time_h < 0:
-            raise SchemaValidationError("condition.sampling_time_h must be a non-negative number.")
+        if self.sampling_time_h is not None and self.sampling_time_h < 0:
+            raise SchemaValidationError("condition.sampling_time_h must be non-negative when provided.")
 
 
 @dataclass(frozen=True)
@@ -136,6 +144,25 @@ class ExperimentImportManifest:
             raise SchemaValidationError("source_sha256 must be a 64-character hex digest.")
         if self.record_count < 0:
             raise SchemaValidationError("record_count must be non-negative.")
+
+
+@dataclass(frozen=True)
+class ExperimentImportConflict:
+    code: str
+    record_type: str
+    record_id: str
+    first_payload_json: str
+    conflicting_payload_json: str
+
+    def validate(self) -> None:
+        for field_name in (
+            "code",
+            "record_type",
+            "record_id",
+            "first_payload_json",
+            "conflicting_payload_json",
+        ):
+            _require_text(getattr(self, field_name), field_name)
 
 
 @dataclass(frozen=True)
@@ -213,6 +240,10 @@ class MeasurementRecord:
             _require_text(getattr(self, field_name), field_name)
         if not isinstance(self.status, MeasurementStatus):
             raise SchemaValidationError("status must be a MeasurementStatus value.")
+        if self.compartment not in SUPPORTED_COMPARTMENTS:
+            raise SchemaValidationError(
+                f"compartment must be one of {sorted(SUPPORTED_COMPARTMENTS)}."
+            )
         _validate_optional_number(self.raw_value, "raw_value")
         _validate_optional_number(self.canonical_value, "canonical_value")
         expected_unit = CANONICAL_UNITS.get(self.assay_type)
@@ -285,8 +316,10 @@ class ExperimentBundle:
     interventions: tuple[InterventionRecord, ...]
     measurements: tuple[MeasurementRecord, ...] = ()
     prediction_links: tuple[PredictionLinkRecord, ...] = ()
-    source_file: str = ""
-    warnings: tuple[str, ...] = ()
+    source_file: str = field(default="", compare=False)
+    warnings: tuple[str, ...] = field(default=(), compare=False)
+    import_manifest: ExperimentImportManifest | None = field(default=None, compare=False)
+    import_conflicts: tuple[ExperimentImportConflict, ...] = field(default=(), compare=False)
     schema_version: int = SCHEMA_VERSION
 
     def validate(self) -> None:
@@ -348,14 +381,18 @@ def _require_text(value: object, field_name: str) -> None:
 def _validate_optional_number(value: object, field_name: str) -> None:
     if value is not None and (not isinstance(value, (int, float)) or isinstance(value, bool)):
         raise SchemaValidationError(f"{field_name} must be numeric or None.")
+    if value is not None and not math.isfinite(float(value)):
+        raise SchemaValidationError(f"{field_name} must be finite when provided.")
 
 
 __all__ = [
     "SCHEMA_VERSION",
     "CANONICAL_UNITS",
+    "SUPPORTED_COMPARTMENTS",
     "ConditionContext",
     "ExperimentBundle",
     "ExperimentImportManifest",
+    "ExperimentImportConflict",
     "ExperimentRecord",
     "ExperimentalFeedbackError",
     "HostContext",
