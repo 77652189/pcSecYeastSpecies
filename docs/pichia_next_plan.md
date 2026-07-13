@@ -65,7 +65,7 @@ round_status: ready
 
 ## 子 agent 协作策略
 
-Phase 1 可以使用内置子 agent 提高速度，但所有子任务仍属于同一个目标和同一个主分支。不要再创建多个用户会话并手动切换共享工作区分支。
+当前阶段可以使用内置子 agent 提高速度，但所有子任务仍属于同一个目标和同一个主分支。不要再创建多个用户会话并手动切换共享工作区分支。
 
 ### 主 agent 职责
 
@@ -85,7 +85,7 @@ Phase 1 可以使用内置子 agent 提高速度，但所有子任务仍属于�
 - worker 必须说明修改文件、验证命令、已知限制和未解决问题。
 - 主 agent 不重复实现已经委派的任务；等待期间处理不重叠的关键路径工作。
 - 子 agent 产物整合后必须由主 agent 重新 review 和运行测试，不能直接视为完成。
-- smoke 输出使用独立的 tmp_path 或唯一 `local_runs/experiment_feedback/<round>/<agent>/`，避免相互覆盖。
+- smoke 输出使用独立 tmp_path 或当前阶段约定的唯一 `local_runs/<phase>/<round>/<agent>/`，避免相互覆盖。
 
 ### 适合并行的任务
 
@@ -96,23 +96,12 @@ Phase 1 可以使用内置子 agent 提高速度，但所有子任务仍属于�
 
 ### 不适合并行的任务
 
-- Phase 1 canonical schema 和 public API 的最终决定。
-- 会影响所有后续模块的 ID、单位、control matching 和 calibration eligibility。
+- 当前阶段 canonical schema、public API 和数学语义的最终决定。
+- 会影响后续模块的 ID、单位、执行状态、参数优先级和约束含义。
 - 同一个文件或同一个测试 fixture 的修改。
 - stage、commit、push、迁移稳定科学资产或修改保护目录。
 
-### 各 Round 推荐分工
-
-| Round | 主 agent 关键路径 | 可委派子任务 |
-| --- | --- | --- |
-| 0 | 冻结 schema、public API、status 和文件边界 | explorer 审计现有 schema/cache 模式；worker 在 API 冻结后补独立 contract tests/fixtures |
-| 1 | 确认 bundle/manifest 语义并整合 | worker A 实现 IO；worker B 实现独立坏输入 fixtures/tests，文件互斥 |
-| 2 | 冻结 PredictionIndex 和 linkage status | explorer 追踪 screen/report 字段；worker 实现 linkage tests 或 prediction adapter |
-| 3 | 决定 control matching 和 calibration 公式 | worker 分别实现统计测试与报告序列化；不得并行设计两套公式 |
-| 4 | 冻结 service contract 和页面工作流 | worker A 负责 service+service tests；worker B 负责 UI+UI tests，不能修改对方文件 |
-| 5 | 汇总验收和最终决策 | worker A 跑 hLF smoke；worker B 跑 OPN smoke；explorer/worker C 做只读数据泄漏和保护目录审计 |
-
-每轮最多进行一次主并行波次。若子任务结果暴露接口问题，先由主 agent 收束接口，再决定是否进行第二波；不能无限创建 agent 掩盖架构不清。
+当前 Round 的具体分工以当前 Phase 章节为准。每轮最多进行一次主并行波次；若子任务暴露接口问题，先由主 agent 收束接口，再决定是否进行第二波，不能无限创建 agent 掩盖架构不清。
 
 ## Phase 1：实验反馈闭环
 
@@ -301,19 +290,133 @@ Phase 1 完成时，研发同事应能在 Streamlit 中：
 
 ## Phase 2：gene-level OE 与酶容量
 
-进入条件：Phase 1 数据契约稳定，至少能评价 OE proxy 与实验方向的一致性。
+这是当前实现阶段。Phase 1 已完成并验收；再次复验 Phase 1 不能替代 Phase 2 实现。
 
-目标：把 reaction-level proxy 升级为 gene-enzyme-reaction capacity，表达 OE 剂量和蛋白资源成本。
+### 执行锁
 
-主要内容：
+- 当状态为 `phase_2_gene_level_oe / round_0_architecture / ready` 时，执行任务必须创建 Phase 2 生产代码和测试。
+- Round 0 只有在 `oe_capacity` 包、可执行数据契约、validation、fixtures 和 contract tests 存在并通过后才能完成。
+- 只读审计、清理工作区、重复 Phase 1 测试或只修改文档均不构成 Round 0 交付。
+- 已批准的 Phase 2 active 文档不得被视为“误启动内容”删除；不确定的既有代码只允许保留和审计，不得擅自回滚。
 
-- 评估并人工复核 iPichia/ecPichia 等外部模型资产。
-- 建立 gene-enzyme-reaction mapping，不原样覆盖当前 GPR。
-- 表达 promoter/copy-number 档位、酶容量、复合体亚基和总蛋白成本。
-- 对缺 kcat/丰度数据使用区间和 uncertainty，不硬编码成单一真值。
-- 保留旧 OE proxy 作为兼容和对照路径。
+### 目标与边界
 
-验收：同一 OE 在 proxy 和 gene-level capacity 路径中的差异可解释；没有 locus/GPR 的候选不得伪装成 gene-level 可执行。
+目标是把 reaction-level proxy 升级为可审计的 gene-enzyme-reaction capacity，表达基因到酶和反应的映射、OE 剂量、复合体/同工酶语义、参数不确定性和蛋白资源成本。
+
+- 保留旧 reaction proxy 作为独立兼容和对照模式。
+- 复用当前 GPR parser、enzyme data、protein pool、SciPy HiGHS、Shadow LP 和 reference solve。
+- 不新增默认 solver，不重写 Shadow LP，不修改稳定模型资产。
+- 外部 GEM/GPR、BLAST/RBH、数据库和同源参数只作为候选证据，不自动覆盖当前模型。
+- Phase 2 不实现 UPR、ERAD、糖基化或囊泡资源池，这些属于 Phase 3。
+- 输出仍是模型内相对比较，不预测 mg/L、真实表达倍数或实验成功率。
+
+### 模块布局
+
+```text
+python_pichia/src/pcsec_pichia/oe_capacity/
+  __init__.py
+  schema.py
+  mapping.py
+  parameters.py
+  constraints.py
+  simulation.py
+  reports.py
+```
+
+- `schema.py`：frozen dataclass、枚举、status 和 validation。
+- `mapping.py`：复用当前模型 GPR、gene index 和 enzyme data，生成 mapping catalog。
+- `parameters.py`：dose、kcat、MW、baseline abundance、复合体化学计量和 uncertainty scenario。
+- `constraints.py`：生成 backend-neutral 结构化容量修改，不调用 solver。
+- `simulation.py`：调用现有模型准备和求解路径，执行 baseline/proxy/gene-capacity 对照。
+- `reports.py`：输出 rows、coverage、manifest、parameter trace 和差异报告。
+- `screens/gene_interventions.py` 继续拥有 GPR 解释和旧 proxy；不得复制第二套 parser。
+- `external_refs` 继续拥有联网抓取与外部 cache；正式 screen 求解不联网。
+
+### 核心契约
+
+`ParameterEstimate`：参数名、nominal/lower/upper、unit、source type/ref/version、confidence、是否同源转移和 warnings。区间必须满足 `lower <= nominal <= upper`。
+
+`OEDoseSpec`：dose id、`explicit_multiplier/promoter_copy_mapping/categorical_only`、multiplier、promoter、copy number、induction、mapping source、uncertainty 和 warnings。没有审核 dose mapping 的类别输入不得自动变成 multiplier。
+
+`GeneEnzymeReactionMapping`：model fingerprint、gene/enzyme/reaction id、GPR、GPR role、complex/subunit、enzyme variable、formation/dilution reaction、source、confidence、execution status 和 warnings。
+
+`GeneCapacitySpec`：mapping、kcat、MW、baseline enzyme amount、complex stoichiometry、dose、parameter scenario 和 resource cost mode。
+
+`OECapacityPlan`：gene/target/context、dose、execution mode/status、executable specs、explain-only mappings、proxy reactions、constraint changes、uncertainty scenarios、missing information 和 warnings。
+
+`OECapacityComparisonResult`：baseline/proxy/gene-capacity solver status、secretion objective、growth retention、最大可行生长率、protein resource cost、scenario 结果、差异、traceability 和 skipped reason。
+
+execution mode 固定为 `gene_capacity`、`reaction_proxy`、`comparison`、`not_executable`；不得静默降级或改名。
+
+execution status 至少包括：
+
+- `gene_level_executable`
+- `partial_mapping`
+- `isoenzyme_ambiguous`
+- `complex_limited`
+- `external_evidence_only`
+- `categorical_dose_only`
+- `proxy_only`
+- `unresolved`
+
+### 语义规则
+
+- gene、reaction、enzyme entity 都映射到当前模型后才能成为 gene-level executable。
+- 同工酶 OE 只能改变明确属于该基因的酶容量项，不能放宽整个反应上界。
+- 单个复合体亚基 OE 默认不能提高完整复合体容量；缺限制亚基/组装证据时为 `complex_limited`。
+- mixed GPR 必须保留每条 mapping 的作用范围。
+- 外部 GPR、同源关系和外部模型参数不能单独提升 execution status。
+- 优先使用当前 pcSecPichia GPR 和本地 enzyme data；外部 Pichia 模型、数据库、文献、同源转移和 smoke fixture 依次降级。
+- 缺参数使用显式 low/nominal/high scenario，不静默填单值。
+- 如果模型存在 enzyme amount 或 formation/dilution variable，gene-level OE 修改对应容量项并计入资源成本。
+- 仅把代谢反应 bound 乘以 factor 的路径仍是 reaction proxy。
+- `1.0x` gene-capacity 必须与 baseline 在容差内一致；feature-off 和 proxy-only 必须保持旧结果回归。
+- 放宽容量不保证 secretion 一定提高，必须保留无变化、降低、不可行和资源成本上升结果。
+
+### 公共 API
+
+```python
+build_gene_enzyme_reaction_catalog(model, metabolic, combined, external_evidence=None) -> GeneCapacityCatalog
+validate_gene_capacity_catalog(catalog) -> GeneCapacityValidationResult
+build_oe_dose_spec(payload, dose_mapping=None) -> OEDoseSpec
+build_gene_capacity_specs(gene_id, catalog, dose, parameter_policy) -> tuple[GeneCapacitySpec, ...]
+plan_gene_level_overexpression(model, gene_id, target_id, context_id, dose, catalog, parameter_policy) -> OECapacityPlan
+build_oe_capacity_constraints(prepared_model, plan) -> OECapacityConstraintBundle
+run_gene_level_oe_comparison(prepared_model, plan, solver_options=None) -> OECapacityComparisonResult
+run_gene_level_oe_screen(prepared_model, requests, screen_config) -> OECapacityScreenResult
+write_oe_capacity_outputs(result, output_dir) -> OECapacityOutputs
+```
+
+service/UI 不得绕过这些 API 自行解释 GPR、换算剂量或修改约束。
+
+### Round 0-6
+
+1. **Round 0 架构与可执行契约**：审计 GPR/enzyme/protein/solver 链路；创建 `oe_capacity` 包、schema、validation、fixtures、contract tests。禁止 service/UI 和真实 screen。
+2. **Round 1 mapping catalog**：从当前模型建立 gene-enzyme-reaction catalog 和 coverage；外部 evidence 只增加 traceability。
+3. **Round 2 dose/parameter/uncertainty**：实现 dose、参数优先级、冲突、low/nominal/high、isoenzyme/complex/missing-parameter 状态。
+4. **Round 3 constraint 与单候选求解**：构建真实容量约束；运行 baseline、1x、proxy、gene-capacity scenarios；验证资源成本和回归。
+5. **Round 4 screen 与对照报告**：实现小批量/catalog screen；并列输出 proxy/gene-capacity；写入 `local_runs/oe_capacity/`。
+6. **Round 5 service/Streamlit**：增加薄 facade 和页面工作流；展示 mapping、dose、参数、uncertainty、资源成本和不可执行原因。
+7. **Round 6 hLF/OPN 验收**：分别运行 executable 与边界候选，生成 coverage、数值回归、性能、保护目录和数据泄漏报告。
+
+每个 Round 都必须有生产实现、focused tests 和可验证结果。不得跳到后续 Round，也不得反复选择最简单字段。
+
+子 agent 分工建议：Round 0 并行现有链路审计与独立 contract fixtures；Round 1 并行 catalog/coverage tests；Round 2 并行 parameter 实现与坏输入测试；Round 3 并行 constraint builder 与 tiny-model 回归；Round 4 并行 screen 与 report/fact-pack tests；Round 5 在 service API 冻结后并行 service/UI；Round 6 并行 hLF、OPN smoke 和只读安全审计。schema、数学语义、参数优先级、整合、commit 和阶段判断始终由主 agent负责。
+
+### 输出与验收
+
+screen rows 并行保留旧字段，并新增 execution mode/status、dose、expression multiplier、mapping、parameter source/confidence、uncertainty scenarios、gene-capacity objective、proxy objective、差异、resource cost、missing information 和 warnings。
+
+Phase 2 完成必须满足：
+
+- single gene、isoenzyme、complex、mixed、missing parameter 和 external-only 都有测试。
+- gene-level capacity 是真实结构化约束，不是 proxy 改名。
+- 旧 proxy 可逐候选比较且兼容模式数值不变。
+- 1x baseline、feature-off 和 proxy 回归通过。
+- hLF/OPN 分别完成 smoke。
+- 输出进入 ignored `local_runs/oe_capacity/`。
+- `Code/Model/Enzymedata/Results` 和依赖声明没有非预期 diff。
+- 状态推进到 `phase_3_secretory_resources / round_0_architecture / ready` 后停止。
 
 ## Phase 3：分泌资源与蛋白稳态约束
 

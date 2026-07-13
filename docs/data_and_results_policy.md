@@ -31,6 +31,15 @@
 - 外部名称、同源关系或 GPR 不得自动覆盖内部 `gene_id` 和当前模型规则。
 - 将外部模型或 cache 提升到 `Data/Model/Enzymedata` 前，必须单独 review 和 checkpoint。
 
+## OE capacity 参数与映射
+
+- gene-enzyme-reaction mapping、kcat、分子量、复合体亚基、基线丰度和剂量映射都必须保留单位、来源、版本、模型指纹、置信度和 warning。
+- 当前 pcSecPichia 模型 GPR 与本地 enzyme data 是“当前模型可执行性”的权威来源；外部 iPichia/ecPichia、UniProt、BRENDA、SABIO-RK 或同源转移只作为候选证据。
+- promoter、copy number、induction mode 等实验标签没有经过审核的 dose mapping 时，只能保留为类别输入，不能自动换算成单一 expression multiplier。
+- 缺失参数使用显式区间和 low/nominal/high 场景；不得用未标注的默认值伪装成测量真值。
+- 外部下载、参数候选、mapping audit 和 Phase 2 screen 输出默认写入 `local_runs/oe_capacity/`。
+- 只有人工复核 license、provenance、映射和参数后，才能通过独立 checkpoint 提升到稳定科学资产目录。
+
 ## LLM 数据边界
 
 - LLM 只读取程序生成的 fact pack，不直接遍历运行目录。

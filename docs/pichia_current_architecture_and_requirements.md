@@ -42,7 +42,7 @@
   -> 实验反馈与下一轮排序校准
 ```
 
-最后一环“实验反馈与排序校准”是下一阶段的核心缺口。
+实验反馈与排序校准的结构化闭环已经完成；当前核心缺口是把 OE 从反应容量代理提升为具有基因、酶、剂量、复合体和蛋白资源语义的可执行路径。
 
 ## 已有能力
 
@@ -79,6 +79,13 @@
 - Judge 读取 fact pack、writer 输出和 validator 结果，不合格时反馈重写。
 - 最终报告按 hLF / OPN 分区，引用表由程序生成。
 
+### 实验反馈
+
+- CSV/XLSX/JSONL 实验记录可导入统一 schema，并保留原始值、单位、重复、失败和排除状态。
+- prediction linkage 显式区分 matched、ambiguous、missing 和 context mismatch。
+- hLF/OPN 回放可生成校准记录、方向一致性、Top-K 描述指标和证据不足提示。
+- 实验导入不会自动修改 recommendation tier、curated evidence 或模型约束。
+
 ## 核心证据边界
 
 | 层级 | 能说明什么 | 不能说明什么 |
@@ -87,6 +94,7 @@
 | BLAST/RBH | 序列层同源候选 | 当前 GEM 可执行性或功能完全等价 |
 | 模型 GPR | KO 可以在当前模型中执行 | 实验一定可行 |
 | OE reaction proxy | 关联反应容量变化方向 | 启动子、拷贝数和 gene-level 表达量 |
+| gene-level enzyme capacity | 在明确映射和参数场景下比较某基因 OE 的模型内容量与资源代价 | 真实表达倍数、绝对产量或跨条件保证 |
 | curated phenotype | 特定 intervention/context 的已有表型方向 | 通用 mg/L 或跨条件保证 |
 | 实验反馈 | 当前宿主、目标和条件下的观测结果 | 未测试条件的自动外推 |
 
@@ -94,8 +102,8 @@
 
 ## 当前主要缺口
 
-1. 缺少统一的实验数据契约和 prediction-to-experiment linkage。
-2. OE 仍以 reaction proxy 为主，缺少 gene-enzyme-capacity、表达剂量和蛋白资源成本。
+1. OE 仍以 reaction proxy 为主，缺少 gene-enzyme-capacity、表达剂量和蛋白资源成本。
+2. Phase 1 尚未接入获批真实实验数据，当前只有脱敏回放和数据契约证据。
 3. 分泌、折叠、UPR、ERAD、糖基化和囊泡运输的机制约束仍不完整。
 4. 大量模型外蛋白有序列和注释，但没有可执行 GPR，不能直接进入 KO/OE 求解。
 5. 筛查以单基因为主，缺少组合改造和上位性分析。
@@ -111,7 +119,8 @@ app/ui
        -> loading / media / targets
        -> constraints / simulation / shadow_lp
        -> screens / analysis / reports
-       -> services / homology / external_refs
+       -> services / homology / external_refs / experimental_feedback
+       -> oe_capacity
 ```
 
 - `python_pichia/`：核心科学逻辑、数据契约、约束、求解、筛查、证据和报告事实层。
@@ -119,6 +128,15 @@ app/ui
 - `app/ui/`：Streamlit 展示和用户操作，不直接修改模型语义。
 - `Code/`、`Model/`、`Enzymedata/`、`Results/`：legacy/reference 科学资产，默认只读。
 - `local_runs/`：运行产物、缓存、报告和验证证据，默认 ignored。
+
+### Phase 2 所有权边界
+
+- `oe_capacity` 负责 gene-enzyme-reaction 映射、OE 剂量、参数不确定性、约束计划和 proxy 对照结果。
+- `screens/gene_interventions.py` 继续拥有现有 GPR 解析与兼容 proxy 规划；Phase 2 调用它，不复制另一套 GPR 解释器。
+- `core/pichia_enzymes.py` 和当前模型中的酶变量/稀释反应是本地执行语义的首要来源。
+- `external_refs` 只提供外部 GEM、GPR、kcat、丰度和同源映射候选；未经当前模型 reaction/gene/enzyme 复核不得成为可执行约束。
+- `shadow_lp`、SciPy HiGHS 和现有 reference solve 仍是求解路径；Phase 2 不引入新的默认 solver。
+- gene-level capacity 与旧 reaction proxy 必须作为两个明确模式并行存在，不能通过改名掩盖降级。
 
 ## 项目成功标准
 
