@@ -107,13 +107,12 @@ def build_prediction_index(screen_runs: Iterable[Mapping[str, Any]]) -> Predicti
         raw_items = screen_run.get("evidence_items") or screen_run.get("rows") or ()
         if not isinstance(raw_items, Iterable) or isinstance(raw_items, (str, bytes, Mapping)):
             raise SchemaValidationError("screen run evidence_items must be an iterable of mappings.")
-        for default_rank, item in enumerate(raw_items, start=1):
+        for item in raw_items:
             if not isinstance(item, Mapping):
                 raise SchemaValidationError("prediction row must be a mapping.")
             record = _prediction_from_mapping(
                 item,
                 default_run_id=run_id,
-                default_rank=default_rank,
             )
             record.validate()
             records.append(record)
@@ -261,7 +260,6 @@ def _prediction_from_mapping(
     item: Mapping[str, Any],
     *,
     default_run_id: str,
-    default_rank: int,
 ) -> PredictionRecord:
     intervention_text = str(item.get("intervention_type") or "").strip()
     try:
@@ -278,7 +276,7 @@ def _prediction_from_mapping(
         gene_id=str(item.get("canonical_gene_id") or item.get("gene_id") or ""),
         intervention_type=intervention_type,
         context_id=str(item.get("context_id") or item.get("medium_condition_id") or ""),
-        rank=_optional_int(item.get("rank")) or default_rank,
+        rank=_optional_int(item.get("rank")),
         recommendation_tier=str(item.get("recommendation_tier") or ""),
         evidence_tier=str(item.get("evidence_tier") or item.get("recommendation_tier") or ""),
         reaction_id=str(item.get("reaction_id") or ""),

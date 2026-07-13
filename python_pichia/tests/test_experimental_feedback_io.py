@@ -5,6 +5,9 @@ import json
 from dataclasses import asdict, replace
 from enum import Enum
 
+from openpyxl import Workbook
+import pytest
+
 from pcsec_pichia.experimental_feedback import (
     ConditionContext,
     ExperimentBundle,
@@ -14,6 +17,7 @@ from pcsec_pichia.experimental_feedback import (
     InterventionType,
     MeasurementRecord,
     MeasurementStatus,
+    SchemaValidationError,
     load_experiment_bundle,
     validate_experiment_bundle,
     write_experiment_feedback_cache,
@@ -154,6 +158,44 @@ def test_csv_import_reports_duplicates_conflicts_bad_units_and_missing_condition
     assert any("duplicate_record_ignored" in warning for warning in manifest["warnings"])
     assert manifest["validated_record_count"] == 3
     assert manifest["conflict_count"] == 3
+
+
+def test_xlsx_import_uses_the_same_record_envelope_contract_as_csv(tmp_path) -> None:
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.title = "records"
+    worksheet.append(("record_type", "payload_json"))
+    bundle = _bundle()
+    for record_type, records in (
+        ("experiment", bundle.experiments),
+        ("intervention", bundle.interventions),
+        ("measurement", bundle.measurements),
+    ):
+        for record in records:
+            worksheet.append(
+                (record_type, json.dumps(asdict(record), default=_enum_value))
+            )
+    xlsx_path = tmp_path / "sanitized_import.xlsx"
+    workbook.save(xlsx_path)
+
+    loaded = load_experiment_bundle(xlsx_path)
+    validation = validate_experiment_bundle(loaded)
+
+    assert validation.is_valid is True
+    assert loaded.experiments == bundle.experiments
+    assert loaded.interventions == bundle.interventions
+    assert loaded.measurements == bundle.measurements
+    assert loaded.import_manifest is not None
+    assert loaded.import_manifest.source_file == str(xlsx_path)
+    assert len(loaded.import_manifest.source_sha256) == 64
+
+
+def test_corrupt_xlsx_is_reported_as_a_schema_validation_error(tmp_path) -> None:
+    xlsx_path = tmp_path / "corrupt.xlsx"
+    xlsx_path.write_bytes(b"not-an-xlsx-container")
+
+    with pytest.raises(SchemaValidationError, match="invalid XLSX experiment bundle"):
+        load_experiment_bundle(xlsx_path)
 
 
 def _enum_value(value: object) -> object:

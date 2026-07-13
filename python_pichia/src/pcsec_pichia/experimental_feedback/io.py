@@ -8,6 +8,10 @@ from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Any, Iterable, Mapping
+from zipfile import BadZipFile
+
+from openpyxl import load_workbook
+from openpyxl.utils.exceptions import InvalidFileException
 
 from pcsec_pichia.experimental_feedback.quality import validate_experiment_bundle
 from pcsec_pichia.experimental_feedback.schema import (
@@ -48,6 +52,8 @@ def load_experiment_bundle(path: str | Path) -> ExperimentBundle:
     resolved = Path(path)
     if resolved.suffix.lower() == ".csv":
         records = _load_csv_records(resolved)
+    elif resolved.suffix.lower() == ".xlsx":
+        records = _load_xlsx_records(resolved)
     elif resolved.suffix.lower() == ".jsonl":
         records = _load_jsonl_records(resolved)
     else:
@@ -102,6 +108,44 @@ def _load_csv_records(resolved: Path) -> list[tuple[str, object]]:
                 )
             )
     return records
+
+
+def _load_xlsx_records(resolved: Path) -> list[tuple[str, object]]:
+    try:
+        workbook = load_workbook(resolved, read_only=True, data_only=True)
+    except (BadZipFile, InvalidFileException, OSError, ValueError) as exc:
+        raise SchemaValidationError(f"invalid XLSX experiment bundle: {exc}") from exc
+    try:
+        worksheet = workbook["records"] if "records" in workbook.sheetnames else workbook.active
+        rows = worksheet.iter_rows(values_only=True)
+        header_row = next(rows, None)
+        headers = [str(value or "").strip() for value in (header_row or ())]
+        required = {"record_type", "payload_json"}
+        if not required.issubset(headers):
+            raise SchemaValidationError("XLSX requires record_type and payload_json columns.")
+        record_type_index = headers.index("record_type")
+        payload_index = headers.index("payload_json")
+        records: list[tuple[str, object]] = []
+        for line_number, row in enumerate(rows, start=2):
+            if not row or not any(value not in (None, "") for value in row):
+                continue
+            record_type = row[record_type_index] if record_type_index < len(row) else None
+            payload_json = row[payload_index] if payload_index < len(row) else None
+            try:
+                record_payload = json.loads(str(payload_json or ""))
+            except json.JSONDecodeError as exc:
+                raise SchemaValidationError(
+                    f"invalid XLSX payload_json at row {line_number}: {exc.msg}"
+                ) from exc
+            records.append(
+                _record_from_envelope(
+                    {"record_type": record_type, "record": record_payload},
+                    line_number=line_number,
+                )
+            )
+        return records
+    finally:
+        workbook.close()
 
 
 def write_experiment_feedback_cache(

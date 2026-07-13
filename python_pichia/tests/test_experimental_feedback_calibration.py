@@ -194,6 +194,73 @@ def test_incomplete_condition_and_invalid_quality_cannot_enter_calibration() -> 
     assert "experiment_quality_status:invalid" in summary.records[0].ineligibility_reasons
 
 
+def test_ranking_assessment_counts_only_records_with_rank_and_observed_ratio() -> None:
+    base = _single_candidate_bundle(candidate_value=11.0, control_value=10.0)
+    host = base.experiments[0].host
+    condition = base.experiments[0].condition
+    bundle = replace(
+        base,
+        experiments=(
+            *base.experiments,
+            ExperimentRecord("HLF-CANDIDATE-2", "hLF", host, "B01", condition, context_id="ctx-hlf"),
+            ExperimentRecord("HLF-CANDIDATE-3", "hLF", host, "B01", condition, context_id="ctx-hlf"),
+        ),
+        interventions=(
+            *base.interventions,
+            InterventionRecord(
+                "HLF-CANDIDATE-2",
+                "KO-1",
+                1,
+                InterventionType.KO,
+                gene_id="G2",
+                construction_method="CRISPR-Cas9",
+                prediction_run_id="calibration-run",
+                evidence_id="hLF-KO-2",
+            ),
+            InterventionRecord(
+                "HLF-CANDIDATE-3",
+                "KO-1",
+                1,
+                InterventionType.KO,
+                gene_id="G3",
+                construction_method="CRISPR-Cas9",
+                prediction_run_id="calibration-run",
+                evidence_id="hLF-KO-3",
+            ),
+        ),
+        measurements=(
+            *base.measurements,
+            _measurement("HLF-CANDIDATE-2", "CANDIDATE-2-T1", 12.0),
+            _measurement("HLF-CANDIDATE-3", "CANDIDATE-3-T1", 13.0),
+        ),
+    )
+    index = build_prediction_index(
+        (
+            {
+                "prediction_run_id": "calibration-run",
+                "evidence_items": [
+                    _prediction_row("hLF-KO-1", "hLF", "G1", 1, "high", "ctx-hlf"),
+                    _prediction_row("hLF-KO-2", "hLF", "G2", None, "medium", "ctx-hlf"),
+                    _prediction_row("hLF-KO-3", "hLF", "G3", None, "low", "ctx-hlf"),
+                ],
+            },
+        )
+    )
+    linkage = link_experiments_to_predictions(bundle, index)
+
+    summary = build_calibration_summary(
+        validate_experiment_bundle(bundle),
+        linkage,
+        CalibrationConfig(minimum_rank_pairs=2),
+    )
+
+    target = summary.targets[0]
+    assert target.eligible_count == 3
+    assert target.comparable_rank_pair_count == 1
+    assert target.ranking_assessment == "insufficient_evidence"
+    assert target.rank_correlation is None
+
+
 def _single_candidate_bundle(*, candidate_value: float, control_value: float) -> ExperimentBundle:
     host = HostContext("Komagataella phaffii", "X33", "X33")
     condition = ConditionContext("BMMY", "methanol", "shake_flask", 30.0, 6.0, "250 rpm", 72.0)
@@ -313,7 +380,7 @@ def _prediction_row(
     evidence_id: str,
     target_id: str,
     gene_id: str,
-    rank: int,
+    rank: int | None,
     evidence_tier: str,
     context_id: str,
 ) -> dict[str, object]:

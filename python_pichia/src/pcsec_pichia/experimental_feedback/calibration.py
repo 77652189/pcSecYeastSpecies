@@ -121,6 +121,8 @@ class TargetCalibrationSummary:
     target_id: str
     eligible_count: int
     ineligible_count: int
+    comparable_rank_pair_count: int
+    ranking_assessment: str
     direction_consistency_rate: float | None
     rank_correlation: float | None
     top_k_metrics: tuple[TopKCalibrationMetric, ...]
@@ -455,11 +457,21 @@ def _build_target_summaries(
             for record in eligible
             if record.direction_consistent is not None
         ]
+        comparable_rank_pair_count = sum(
+            record.prediction_rank is not None and record.observed_ratio is not None
+            for record in eligible
+        )
         summaries.append(
             TargetCalibrationSummary(
                 target_id=target_id,
                 eligible_count=len(eligible),
                 ineligible_count=len(target_records) - len(eligible),
+                comparable_rank_pair_count=comparable_rank_pair_count,
+                ranking_assessment=(
+                    "descriptive_evidence_available"
+                    if comparable_rank_pair_count >= config.minimum_rank_pairs
+                    else "insufficient_evidence"
+                ),
                 direction_consistency_rate=(
                     sum(value is True for value in direction_values) / len(direction_values)
                     if direction_values

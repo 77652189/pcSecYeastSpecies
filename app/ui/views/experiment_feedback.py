@@ -63,10 +63,10 @@ def render_experiment_feedback() -> None:
 
 def _render_import() -> None:
     st.subheader("导入脱敏实验 bundle")
-    st.caption("支持 canonical JSONL，或 record_type + payload_json 的 CSV 导入适配格式。修正问题后重新上传为新的 run，原 run 不覆盖。")
+    st.caption("支持 canonical JSONL，或 record_type + payload_json 的 CSV/XLSX 导入适配格式。XLSX 优先读取 records 工作表。修正问题后重新上传为新的 run，原 run 不覆盖。")
     experiment_upload = st.file_uploader(
-        "实验文件（CSV / JSONL）",
-        type=["csv", "jsonl"],
+        "实验文件（CSV / XLSX / JSONL）",
+        type=["csv", "xlsx", "jsonl"],
         key=EXPERIMENT_UPLOAD_KEY,
     )
     prediction_paths = list_prediction_fact_packs("local_runs")
@@ -229,7 +229,14 @@ def _render_calibration(payload: dict[str, Any] | None) -> None:
         if not target:
             st.info(f"{target_id} 尚无 calibration 记录。")
             continue
-        metric_cols = st.columns(3)
+        comparable_rank_pairs = int(target.get("comparable_rank_pair_count", 0))
+        minimum_rank_pairs = int(
+            (calibration.get("config") or {}).get("minimum_rank_pairs", 2)
+        )
+        ranking_assessment = str(
+            target.get("ranking_assessment") or "insufficient_evidence"
+        )
+        metric_cols = st.columns(4)
         metric_cols[0].metric("Eligible", int(target.get("eligible_count", 0)))
         metric_cols[1].metric("不可校准", int(target.get("ineligible_count", 0)))
         consistency = target.get("direction_consistency_rate")
@@ -237,6 +244,22 @@ def _render_calibration(payload: dict[str, Any] | None) -> None:
             "方向一致率",
             "N/A" if consistency is None else f"{float(consistency):.1%}",
         )
+        metric_cols[3].metric(
+            "排名可比较对",
+            f"{comparable_rank_pairs}/{minimum_rank_pairs}",
+        )
+        if ranking_assessment == "insufficient_evidence":
+            st.warning(
+                "排序证据不足（ranking_assessment=insufficient_evidence）："
+                f"仅有 {comparable_rank_pairs} 个 prediction_rank + observed_ratio 可比较对，"
+                f"低于最低要求 {minimum_rank_pairs}。下方 Top-K、hit rate 与 enrichment 仅作描述性展示。"
+            )
+        else:
+            st.info(
+                "排序证据状态："
+                f"{ranking_assessment}；可比较排名对 {comparable_rank_pairs}/{minimum_rank_pairs}。"
+            )
+        st.caption("Top-K 与 enrichment 不会自动修改 recommendation tier 或模型约束。")
         st.dataframe(target.get("top_k_metrics") or [], use_container_width=True, hide_index=True)
         st.dataframe(target.get("evidence_tier_metrics") or [], use_container_width=True, hide_index=True)
         target_records = [record for record in records if record.get("target_id") == target_id]

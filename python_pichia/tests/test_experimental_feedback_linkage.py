@@ -125,7 +125,7 @@ def test_linkage_preserves_ambiguous_missing_and_context_mismatch_states() -> No
     assert result.context_mismatch_count == 2
     assert result.matched_count == 0
     assert next(link for link in result.links if link.intervention_id == "COMMON").reason == "common_name_only"
-    assert [record.rank for record in index.records] == [1, 2, 3, 4]
+    assert [record.rank for record in index.records] == [None, None, None, None]
 
 
 def test_prediction_index_rejects_duplicate_run_and_evidence_identity() -> None:

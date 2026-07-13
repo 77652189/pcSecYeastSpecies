@@ -6,6 +6,8 @@ from dataclasses import asdict
 from enum import Enum
 from pathlib import Path
 
+from openpyxl import Workbook
+
 from app.services.pichia_experiment_feedback_service import (
     export_experiment_feedback_issues,
     export_experiment_feedback_report,
@@ -54,6 +56,8 @@ def test_service_imports_links_calibrates_and_exposes_issue_exports(tmp_path) ->
     assert result["linkage"]["matched_count"] == 1
     assert result["calibration"]["targets"][0]["target_id"] == "hLF"
     assert result["calibration"]["targets"][0]["eligible_count"] == 1
+    assert result["calibration"]["targets"][0]["comparable_rank_pair_count"] == 1
+    assert result["calibration"]["targets"][0]["ranking_assessment"] == "insufficient_evidence"
     run_dir = tmp_path / "runs" / "ui-contract"
     assert (run_dir / "inbox" / "sanitized_ui.csv").exists()
     assert (run_dir / "validated" / "manifest.json").exists()
@@ -74,6 +78,32 @@ def test_service_imports_links_calibrates_and_exposes_issue_exports(tmp_path) ->
     )
     assert load_experiment_feedback_run(run_dir)["run_name"] == "ui-contract"
     assert export_experiment_feedback_issues(run_dir, issue_kind="conflicts") == b""
+
+
+def test_service_accepts_xlsx_experiment_uploads(tmp_path) -> None:
+    csv_bytes = _experiment_csv_bytes(tmp_path)
+    reader = csv.DictReader(csv_bytes.decode("utf-8").splitlines())
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.title = "records"
+    worksheet.append(("record_type", "payload_json"))
+    for row in reader:
+        worksheet.append((row["record_type"], row["payload_json"]))
+    source_path = tmp_path / "sanitized_ui.xlsx"
+    workbook.save(source_path)
+
+    result = submit_experiment_feedback_import(
+        experiment_filename=source_path.name,
+        experiment_bytes=source_path.read_bytes(),
+        run_name="ui-xlsx-contract",
+        output_root=tmp_path / "runs",
+    )
+
+    assert result["validation"]["is_valid"] is True
+    assert result["linkage"]["missing_prediction_count"] == 1
+    run_dir = tmp_path / "runs" / "ui-xlsx-contract"
+    assert (run_dir / "inbox" / source_path.name).exists()
+    assert (run_dir / "report" / "prediction_experiment_report.md").exists()
 
 
 def _experiment_csv_bytes(tmp_path) -> bytes:

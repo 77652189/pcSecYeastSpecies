@@ -45,6 +45,7 @@ def build_screen_report_fact_pack(
         ),
     )
     _assign_evidence_ids(evidence_items)
+    _assign_prediction_ranks(evidence_items)
     targets = {target_key: _target_payload(target_key, evidence_items) for target_key in TARGET_KEYS}
     warnings = []
     if protected_results_detected:
@@ -222,6 +223,16 @@ def _assign_evidence_ids(items: list[dict[str, Any]]) -> None:
         item["evidence_id"] = f"{key[0]}-{key[1] or 'UNK'}-{counters[key]:04d}"
 
 
+def _assign_prediction_ranks(items: list[dict[str, Any]]) -> None:
+    for target_key in TARGET_KEYS:
+        target_items = sorted(
+            (item for item in items if item["target_key"] == target_key),
+            key=_item_sort_key,
+        )
+        for rank, item in enumerate(target_items, start=1):
+            item["rank"] = rank
+
+
 def _target_payload(target_key: str, items: list[dict[str, Any]]) -> dict[str, Any]:
     target_items = [item for item in items if item["target_key"] == target_key]
     useful_ko = [item for item in target_items if item["intervention_type"] == "KO" and _is_useful_executable(item)]
@@ -244,6 +255,7 @@ def _target_payload(target_key: str, items: list[dict[str, Any]]) -> dict[str, A
 def _brief_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     fields = (
         "evidence_id",
+        "rank",
         "target_id",
         "gene_id",
         "reaction_id",

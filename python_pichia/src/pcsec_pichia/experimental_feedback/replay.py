@@ -229,11 +229,13 @@ def _summary_payload(calibration: CalibrationSummary) -> dict[str, Any]:
         targets[target.target_id] = {
             "eligible_count": target.eligible_count,
             "ineligible_count": target.ineligible_count,
+            "comparable_rank_pair_count": target.comparable_rank_pair_count,
+            "minimum_rank_pairs": calibration.config.minimum_rank_pairs,
             "direction_consistent_count": consistent,
             "direction_discordant_count": discordant,
             "direction_consistency_rate": target.direction_consistency_rate,
             "rank_correlation": target.rank_correlation,
-            "ranking_assessment": _ranking_assessment(target.eligible_count, calibration),
+            "ranking_assessment": target.ranking_assessment,
             "top_k_metrics": _json_ready([asdict(item) for item in target.top_k_metrics]),
             "evidence_tier_metrics": _json_ready(
                 [asdict(item) for item in target.evidence_tier_metrics]
@@ -270,12 +272,6 @@ def _summary_payload(calibration: CalibrationSummary) -> dict[str, Any]:
             "ineligible records before any ranking change. No tier is changed automatically."
         ),
     }
-
-
-def _ranking_assessment(eligible_count: int, calibration: CalibrationSummary) -> str:
-    if eligible_count < calibration.config.minimum_rank_pairs:
-        return "insufficient_evidence"
-    return "descriptive_evidence_available"
 
 
 def _candidate_payload(record: CalibrationRecord) -> dict[str, Any]:
@@ -398,6 +394,7 @@ def _render_report(payload: Mapping[str, Any], *, source_classification: str) ->
                 f"- 方向一致: {target['direction_consistent_count']}",
                 f"- 方向不一致: {target['direction_discordant_count']}",
                 f"- 排序证据状态: {target['ranking_assessment']}",
+                f"- 可比较排名对: {target['comparable_rank_pair_count']}/{target['minimum_rank_pairs']}",
                 "",
                 "### 模型推荐与实验观察",
                 "",

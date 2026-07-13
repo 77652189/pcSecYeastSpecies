@@ -116,7 +116,7 @@ Phase 1 可以使用内置子 agent 提高速度，但所有子任务仍属于�
 
 ## Phase 1：实验反馈闭环
 
-这是当前阶段，优先级最高。
+本阶段已完成并通过端到端验收；后续只在真实数据回放 checkpoint 中补充获批实验数据，不再重开实现轮次。
 
 目标：让每个 hLF/OPN KO/OE 实验能够与原始预测一一关联，并形成可审计的校准数据，而不是只把实验结果写进自由文本。
 
@@ -218,6 +218,7 @@ build_calibration_summary(validated_bundle, linkage_result, config) -> Calibrati
 #### 输入输出格式
 
 - canonical cache 使用结构化 JSONL + manifest；CSV/XLSX 只作为导入适配层，不是内部 truth format。
+- CSV/XLSX 首批共享 `record_type + payload_json` envelope；XLSX 优先读取 `records` 工作表，不存在时读取活动工作表。
 - 首批必须提供脱敏的 hLF、OPN、control、KO、OE、重复、坏单位、缺 control 和 ambiguous link fixtures。
 - 默认输出目录：`local_runs/experiment_feedback/<run_id>/`，包含 validated records、conflicts、linkage report、calibration summary 和 manifest。
 - 不新增数据库和后台服务；先使用可审计文件缓存，等数据规模证明有必要后再评估持久化数据库。
@@ -362,4 +363,4 @@ Phase 1 完成时，研发同事应能在 Streamlit 中：
 
 ## 当前下一步
 
-从 Phase 1 Round 0 开始：冻结实验数据契约、输入样例、质量规则和验收标准。完成后按 Round 1-5 顺序推进，不返回已完成的 COBRApy、BLAST 或在线证据阶段重新开发。
+从 Phase 2 Round 0 开始：先冻结 gene-enzyme-reaction capacity、OE 剂量、蛋白资源成本、外部模型映射和兼容 proxy 的架构契约，再进入实现。不得在架构冻结前直接写候选特例或替换稳定求解路径。

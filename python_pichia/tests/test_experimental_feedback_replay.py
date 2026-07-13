@@ -43,6 +43,8 @@ def test_sanitized_hlf_opn_replay_writes_auditable_report_bundle(tmp_path) -> No
 
     summary = json.loads(result.outputs.summary_path.read_text(encoding="utf-8"))
     assert summary["targets"]["hLF"]["ranking_assessment"] == "insufficient_evidence"
+    assert summary["targets"]["hLF"]["comparable_rank_pair_count"] == 1
+    assert summary["targets"]["hLF"]["minimum_rank_pairs"] == 2
     assert summary["targets"]["hLF"]["confirmed_direction_candidates"][0]["gene_id"] == "G-H1"
     assert summary["targets"]["hLF"]["confirmed_direction_candidates"][0]["intervention_type"] == "KO"
     assert summary["targets"]["OPN"]["direction_discordant_count"] == 1
@@ -70,6 +72,7 @@ def test_sanitized_hlf_opn_replay_writes_auditable_report_bundle(tmp_path) -> No
     assert "## OPN" in report
     assert "G-H1" in report
     assert "G-O1" in report
+    assert "可比较排名对: 1/2" in report
     assert "assay_failed" in report
     assert "control_match_missing" in report
     assert "prediction_link:ambiguous" in report

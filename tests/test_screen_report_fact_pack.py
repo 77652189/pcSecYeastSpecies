@@ -64,8 +64,33 @@ def test_fact_pack_groups_hlf_and_opn_without_target_mixup(tmp_path: Path) -> No
     assert fact_pack["targets"]["OPN"]["candidate_count"] == 1
     evidence_ids = [item["evidence_id"] for item in fact_pack["evidence_items"]]
     assert evidence_ids == ["hLF-KO-0001", "OPN-OE-0001"]
+    assert [item["rank"] for item in fact_pack["evidence_items"]] == [1, 1]
     assert fact_pack["targets"]["hLF"]["useful_ko_candidates"][0]["gene_id"] == "PAS_HLF_KO"
     assert fact_pack["targets"]["OPN"]["useful_oe_candidates"][0]["gene_id"] == "PAS_OPN_OE"
+
+
+def test_fact_pack_assigns_deterministic_target_local_prediction_ranks(tmp_path: Path) -> None:
+    paths = _paths(tmp_path)
+    csv_path = _write_run(
+        tmp_path,
+        "fixture_run",
+        [
+            _row("hLF", "PAS_HLF_LOW", "KO", 1.1),
+            _row("OPN_ALPHA_FULL_PROJECT", "PAS_OPN", "OE", 1.2),
+            _row("hLF", "PAS_HLF_HIGH", "KO", 1.4),
+        ],
+    )
+
+    fact_pack = build_screen_report_fact_pack(paths, csv_paths=(csv_path,))
+
+    ranks = {
+        (item["target_id"], item["gene_id"]): item["rank"]
+        for item in fact_pack["evidence_items"]
+    }
+    assert ranks[("hLF", "PAS_HLF_HIGH")] == 1
+    assert ranks[("hLF", "PAS_HLF_LOW")] == 2
+    assert ranks[("OPN_ALPHA_FULL_PROJECT", "PAS_OPN")] == 1
+    assert fact_pack["targets"]["hLF"]["top_candidates"][0]["rank"] == 1
 
 
 def test_fact_pack_keeps_homology_auxiliary_out_of_executable_recommendations(tmp_path: Path) -> None:

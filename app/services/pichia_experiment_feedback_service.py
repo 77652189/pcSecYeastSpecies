@@ -26,7 +26,7 @@ from pcsec_pichia.experimental_feedback import (
 
 
 DEFAULT_EXPERIMENT_FEEDBACK_ROOT = Path("local_runs") / "experiment_feedback" / "ui_runs"
-_EXPERIMENT_SUFFIXES = {".csv", ".jsonl"}
+_EXPERIMENT_SUFFIXES = {".csv", ".xlsx", ".jsonl"}
 
 
 def submit_experiment_feedback_import(

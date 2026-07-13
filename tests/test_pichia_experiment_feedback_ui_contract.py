@@ -36,6 +36,7 @@ def test_experiment_feedback_view_uses_service_only_and_stable_session_keys() ->
     assert "experiment_feedback_last_import" in source
     assert "experiment_feedback_experiment_upload" in source
     assert "experiment_feedback_prediction_upload" in source
+    assert 'type=["csv", "xlsx", "jsonl"]' in source
     assert "st.cache_data" not in source
     assert "st.cache_resource" not in source
     assert "submit_experiment_feedback_import" in source
@@ -60,6 +61,10 @@ def test_experiment_feedback_view_exposes_all_required_states_and_exports() -> N
         "export_experiment_feedback_issues",
         "export_experiment_feedback_report",
         "下载 prediction-vs-experiment 报告",
+        "ranking_assessment",
+        "comparable_rank_pair_count",
+        "排序证据不足",
+        "仅作描述性展示",
     ):
         assert text in source
     assert ".read_bytes()" not in source
