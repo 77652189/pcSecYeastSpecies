@@ -72,7 +72,7 @@ def test_import_probe_requests_load_downloaded_artifact_cache_rows(tmp_path) -> 
     assert Path(requests[0].artifact_path).exists()
 
 
-def test_import_probe_reports_fake_cobrapy_model_diagnostics(tmp_path) -> None:
+def test_import_probe_reports_fake_cobrapy_model_diagnostics(monkeypatch, tmp_path) -> None:
     artifact_path = tmp_path / "toy.xml"
     artifact_path.write_text("<sbml></sbml>", encoding="utf-8")
     request = ExternalModelImportProbeRequest(
@@ -82,6 +82,7 @@ def test_import_probe_reports_fake_cobrapy_model_diagnostics(tmp_path) -> None:
         source_page_url="https://example.test/model",
     )
 
+    monkeypatch.setattr(model_import_probe, "_compare_libsbml_import", lambda *_args: ("aligned", ()))
     outputs = probe_external_model_imports((request,), tmp_path / "probe", cobra_module=_FakeCobra())
     result = outputs.results[0]
     manifest = json.loads(outputs.manifest_path.read_text(encoding="utf-8"))
@@ -94,12 +95,31 @@ def test_import_probe_reports_fake_cobrapy_model_diagnostics(tmp_path) -> None:
     assert result.gene_count == 2
     assert result.gpr_count == 2
     assert result.objective_reaction == "R_TARGET"
-    assert result.libsbml_comparison_status == "not_run"
+    assert result.libsbml_comparison_status == "aligned"
+    assert result.id_sanitization_warnings == ()
     assert result.manual_review_required is False
     assert manifest["imported_count"] == 1
     assert "recommendation tiers" in report
     assert "mg/L" not in report
     assert "absolute secretion yield" in report
+
+
+def test_import_probe_requires_review_when_core_model_semantics_are_missing(monkeypatch, tmp_path) -> None:
+    artifact_path = tmp_path / "toy.xml"
+    artifact_path.write_text("<sbml></sbml>", encoding="utf-8")
+    monkeypatch.setattr(model_import_probe, "_compare_libsbml_import", lambda *_args: ("aligned", ()))
+
+    result = probe_cobrapy_model_import(
+        ExternalModelImportProbeRequest(model_id="toy_model", artifact_path=str(artifact_path), artifact_type="SBML"),
+        cobra_module=_FakeCobraEmptySemantics(),
+    )
+
+    assert result.import_status == "imported"
+    assert result.manual_review_required is True
+    assert result.objective_reaction == ""
+    assert "no_metabolites_detected" in result.warnings
+    assert "no_gpr_rules_detected" in result.warnings
+    assert "objective_reaction_not_detected" in result.warnings
 
 
 class _FakeCobra:
@@ -113,6 +133,21 @@ class _FakeCobraIo:
     def read_sbml_model(self, path: str) -> object:
         assert Path(path).exists()
         return _FakeModel()
+
+
+class _FakeCobraEmptySemantics:
+    class io:
+        @staticmethod
+        def read_sbml_model(_path: str) -> object:
+            return type(
+                "EmptySemanticModel",
+                (),
+                {
+                    "reactions": (_FakeReaction("R1", "", 0.0),),
+                    "metabolites": (),
+                    "genes": (),
+                },
+            )()
 
 
 class _FakeReaction:

@@ -136,9 +136,11 @@ def test_gem_qa_requests_can_be_loaded_from_artifact_cache(tmp_path) -> None:
 
 class _FakeCobra:
     io = None
+    flux_analysis = None
 
     def __init__(self, model_factory) -> None:
         self.io = _FakeCobraIo(model_factory)
+        self.flux_analysis = _FakeFluxAnalysis()
 
 
 class _FakeCobraIo:
@@ -150,13 +152,34 @@ class _FakeCobraIo:
         return self._model_factory()
 
 
+class _FakeFluxAnalysis:
+    @staticmethod
+    def find_blocked_reactions(model: object) -> tuple[str, ...]:
+        return tuple(
+            reaction.id
+            for reaction in model.reactions
+            if reaction.lower_bound == 0.0 and reaction.upper_bound == 0.0
+        )
+
+
 class _FakeMemote:
-    def score_model(self, _model: object) -> dict[str, object]:
-        return {
-            "memote_score": 0.82,
-            "annotation_score": 0.7,
-            "stoichiometric_consistency_status": "passed",
-        }
+    @staticmethod
+    def test_model(_model: object, *, results: bool) -> tuple[int, dict[str, object]]:
+        assert results is True
+        return 0, {"raw": "result"}
+
+    @staticmethod
+    def snapshot_report(_result: object, *, html: bool) -> str:
+        assert html is False
+        return json.dumps(
+            {
+                "score": {
+                    "total_score": 0.82,
+                    "sections": [{"section": "annotation", "score": 0.7}],
+                },
+                "tests": {"test_stoichiometric_consistency": {"result": "passed"}},
+            }
+        )
 
 
 def _review_model() -> object:

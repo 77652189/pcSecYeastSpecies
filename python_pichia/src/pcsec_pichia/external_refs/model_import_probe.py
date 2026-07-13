@@ -45,6 +45,7 @@ class ExternalModelImportProbeResult:
     gpr_count: int | None = None
     objective_reaction: str = ""
     libsbml_comparison_status: str = "not_run"
+    id_sanitization_warnings: tuple[str, ...] = ()
     manual_review_required: bool = True
     source_page_url: str = ""
     warnings: tuple[str, ...] = ()
@@ -148,6 +149,26 @@ def probe_cobrapy_model_import(
             warnings=tuple(dict.fromkeys((*request.warnings, f"{type(exc).__name__}: {exc}"))),
         )
 
+    reaction_count = len(getattr(model, "reactions", ()) or ())
+    metabolite_count = len(getattr(model, "metabolites", ()) or ())
+    gene_count = len(getattr(model, "genes", ()) or ())
+    gpr_count = _gpr_count(model)
+    objective_reaction = _objective_reaction(model)
+    comparison_status, id_sanitization_warnings = _compare_libsbml_import(
+        artifact_path,
+        request.artifact_type,
+        model,
+    )
+    semantic_warnings = _semantic_import_warnings(
+        reaction_count=reaction_count,
+        metabolite_count=metabolite_count,
+        gene_count=gene_count,
+        gpr_count=gpr_count,
+        objective_reaction=objective_reaction,
+    )
+    warnings = tuple(
+        dict.fromkeys((*request.warnings, *semantic_warnings, *id_sanitization_warnings))
+    )
     return ExternalModelImportProbeResult(
         model_id=request.model_id,
         artifact_path=str(artifact_path),
@@ -155,15 +176,16 @@ def probe_cobrapy_model_import(
         backend="cobrapy",
         backend_available=True,
         import_status="imported",
-        reaction_count=len(getattr(model, "reactions", ()) or ()),
-        metabolite_count=len(getattr(model, "metabolites", ()) or ()),
-        gene_count=len(getattr(model, "genes", ()) or ()),
-        gpr_count=_gpr_count(model),
-        objective_reaction=_objective_reaction(model),
-        libsbml_comparison_status="not_run",
-        manual_review_required=False,
+        reaction_count=reaction_count,
+        metabolite_count=metabolite_count,
+        gene_count=gene_count,
+        gpr_count=gpr_count,
+        objective_reaction=objective_reaction,
+        libsbml_comparison_status=comparison_status,
+        id_sanitization_warnings=id_sanitization_warnings,
+        manual_review_required=bool(warnings) or comparison_status in {"count_mismatch", "id_mismatch", "failed"},
         source_page_url=request.source_page_url,
-        warnings=request.warnings,
+        warnings=warnings,
     )
 
 
@@ -226,15 +248,16 @@ def render_external_model_import_probe_report(
             "",
             "## Results",
             "",
-            "| model_id | status | backend_available | reactions | metabolites | genes | gpr_rules | manual_review | warnings |",
-            "|---|---|---:|---:|---:|---:|---:|---:|---|",
+            "| model_id | status | backend_available | reactions | metabolites | genes | gpr_rules | libsbml | manual_review | warnings |",
+            "|---|---|---:|---:|---:|---:|---:|---|---:|---|",
         ]
     )
     for result in resolved:
         lines.append(
             f"| {result.model_id} | {result.import_status} | {result.backend_available} | "
             f"{_fmt(result.reaction_count)} | {_fmt(result.metabolite_count)} | {_fmt(result.gene_count)} | "
-            f"{_fmt(result.gpr_count)} | {result.manual_review_required} | {'; '.join(result.warnings)} |"
+            f"{_fmt(result.gpr_count)} | {result.libsbml_comparison_status} | "
+            f"{result.manual_review_required} | {'; '.join(result.warnings)} |"
         )
     lines.extend(
         [
@@ -302,8 +325,66 @@ def _objective_reaction(model: Any) -> str:
                 return str(getattr(reaction, "id", reaction))
         except (TypeError, ValueError):
             continue
-    objective = getattr(model, "objective", None)
-    return "" if objective is None else str(objective)
+    return ""
+
+
+def _semantic_import_warnings(
+    *,
+    reaction_count: int,
+    metabolite_count: int,
+    gene_count: int,
+    gpr_count: int,
+    objective_reaction: str,
+) -> tuple[str, ...]:
+    warnings: list[str] = []
+    if reaction_count <= 0:
+        warnings.append("no_reactions_detected")
+    if metabolite_count <= 0:
+        warnings.append("no_metabolites_detected")
+    if gene_count <= 0:
+        warnings.append("no_genes_detected")
+    if gpr_count <= 0:
+        warnings.append("no_gpr_rules_detected")
+    if not objective_reaction:
+        warnings.append("objective_reaction_not_detected")
+    return tuple(warnings)
+
+
+def _compare_libsbml_import(path: Path, artifact_type: str, model: Any) -> tuple[str, tuple[str, ...]]:
+    artifact_hint = artifact_type.lower()
+    if "sbml" not in artifact_hint and path.suffix.lower() not in {".xml", ".sbml"}:
+        return "not_applicable", ()
+    try:
+        libsbml = importlib.import_module("libsbml")
+    except Exception:
+        return "unavailable", ()
+    try:
+        document = libsbml.readSBMLFromFile(str(path))
+        sbml_model = document.getModel() if document is not None else None
+        if sbml_model is None:
+            return "failed", ("libsbml_model_missing",)
+        raw_reaction_ids = {str(item.getId()) for item in sbml_model.getListOfReactions()}
+        raw_metabolite_ids = {str(item.getId()) for item in sbml_model.getListOfSpecies()}
+        cobra_reaction_ids = {str(getattr(item, "id", "")) for item in getattr(model, "reactions", ()) or ()}
+        cobra_metabolite_ids = {str(getattr(item, "id", "")) for item in getattr(model, "metabolites", ()) or ()}
+        warnings: list[str] = []
+        if len(raw_reaction_ids) != len(cobra_reaction_ids):
+            warnings.append(
+                f"reaction_count_mismatch:libsbml={len(raw_reaction_ids)},cobrapy={len(cobra_reaction_ids)}"
+            )
+        if len(raw_metabolite_ids) != len(cobra_metabolite_ids):
+            warnings.append(
+                f"metabolite_count_mismatch:libsbml={len(raw_metabolite_ids)},cobrapy={len(cobra_metabolite_ids)}"
+            )
+        if warnings:
+            return "count_mismatch", tuple(warnings)
+        if raw_reaction_ids != cobra_reaction_ids:
+            warnings.append("reaction_ids_changed_during_cobrapy_import")
+        if raw_metabolite_ids != cobra_metabolite_ids:
+            warnings.append("metabolite_ids_changed_during_cobrapy_import")
+        return ("id_mismatch", tuple(warnings)) if warnings else ("aligned", ())
+    except Exception as exc:  # pragma: no cover - depends on optional libSBML parser behavior.
+        return "failed", (f"libsbml_comparison_failed:{type(exc).__name__}",)
 
 
 def _outputs_payload(

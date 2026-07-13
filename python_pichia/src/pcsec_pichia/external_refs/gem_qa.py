@@ -166,9 +166,9 @@ def run_external_model_gem_qa_one(
 
     cobra = cobra_module if cobra_module is not None else _import_cobra()
     model = _load_model_for_basic_qa(cobra, request)
-    basic = _basic_qa_metrics(model, probe.gpr_count or 0, probe.reaction_count or 0)
+    basic = _basic_qa_metrics(model, probe.gpr_count or 0, probe.reaction_count or 0, cobra_module=cobra)
     memote = _memote_summary(model, request.run_memote, memote_module=memote_module)
-    warnings = tuple(dict.fromkeys((*request.warnings, *memote["warnings"])))
+    warnings = tuple(dict.fromkeys((*request.warnings, *basic["warnings"], *memote["warnings"])))
     manual_review_reasons = _manual_review_reasons(basic)
     qa_status = "passed_basic" if not manual_review_reasons else "review_required"
     return ExternalModelGemQaResult(
@@ -271,15 +271,17 @@ def _load_model_for_basic_qa(cobra: Any, request: ExternalModelGemQaRequest) -> 
     raise ValueError(f"unsupported artifact type: {request.artifact_type or suffix or 'unknown'}")
 
 
-def _basic_qa_metrics(model: Any, gpr_count: int, reaction_count: int) -> dict[str, Any]:
+def _basic_qa_metrics(
+    model: Any,
+    gpr_count: int,
+    reaction_count: int,
+    *,
+    cobra_module: Any,
+) -> dict[str, Any]:
     reactions = tuple(getattr(model, "reactions", ()) or ())
     metabolites = tuple(getattr(model, "metabolites", ()) or ())
     resolved_reaction_count = reaction_count or len(reactions)
-    blocked_reactions = tuple(
-        reaction
-        for reaction in reactions
-        if _float_attr(reaction, "lower_bound") == 0.0 and _float_attr(reaction, "upper_bound") == 0.0
-    )
+    blocked_reaction_count, blocked_warnings = _blocked_reaction_count(model, reactions, cobra_module)
     dead_end_metabolites = tuple(
         metabolite
         for metabolite in metabolites
@@ -287,9 +289,32 @@ def _basic_qa_metrics(model: Any, gpr_count: int, reaction_count: int) -> dict[s
     )
     return {
         "gpr_coverage": None if resolved_reaction_count <= 0 else float(gpr_count) / float(resolved_reaction_count),
-        "blocked_reaction_count": len(blocked_reactions),
+        "blocked_reaction_count": blocked_reaction_count,
         "dead_end_metabolite_count": len(dead_end_metabolites),
+        "warnings": blocked_warnings,
     }
+
+
+def _blocked_reaction_count(
+    model: Any,
+    reactions: tuple[Any, ...],
+    cobra_module: Any,
+) -> tuple[int, tuple[str, ...]]:
+    flux_analysis = getattr(cobra_module, "flux_analysis", None)
+    finder = getattr(flux_analysis, "find_blocked_reactions", None)
+    if callable(finder):
+        try:
+            return len(tuple(finder(model))), ()
+        except Exception as exc:  # pragma: no cover - solver behavior depends on optional COBRApy stack.
+            warning = f"blocked_reaction_analysis_failed:{type(exc).__name__}"
+    else:
+        warning = "blocked_reaction_analysis_unavailable"
+    fixed_zero = tuple(
+        reaction
+        for reaction in reactions
+        if _float_attr(reaction, "lower_bound") == 0.0 and _float_attr(reaction, "upper_bound") == 0.0
+    )
+    return len(fixed_zero), (warning, "blocked_reaction_count_uses_fixed_zero_fallback")
 
 
 def _memote_summary(
@@ -303,18 +328,38 @@ def _memote_summary(
     memote = memote_module if memote_module is not None else _import_memote()
     if memote is None:
         return _memote_payload(False, "unavailable", None, "not_run", None, ("memote_unavailable",))
-    score_model = getattr(memote, "score_model", None)
-    if score_model is None:
-        return _memote_payload(True, "available_not_run", None, "not_run", None, ("memote_score_model_api_unavailable",))
-    summary = score_model(model)
-    return _memote_payload(
-        True,
-        "scored",
-        _optional_float(_mapping_get(summary, "memote_score", "score", "total_score")),
-        str(_mapping_get(summary, "stoichiometric_consistency_status", "consistency_status") or "not_reported"),
-        _optional_float(_mapping_get(summary, "annotation_score")),
-        (),
-    )
+    test_model = getattr(memote, "test_model", None)
+    snapshot_report = getattr(memote, "snapshot_report", None)
+    if not callable(test_model) or not callable(snapshot_report):
+        return _memote_payload(
+            True,
+            "available_not_run",
+            None,
+            "not_run",
+            None,
+            ("memote_public_api_unavailable",),
+        )
+    try:
+        _return_code, result = test_model(model, results=True)
+        report = snapshot_report(result, html=False)
+        payload = json.loads(report) if isinstance(report, str) else report
+        return _memote_payload(
+            True,
+            "scored",
+            _optional_float(_nested_get(payload, "score", "total_score")),
+            _memote_consistency_status(payload),
+            _memote_annotation_score(payload),
+            (),
+        )
+    except Exception as exc:  # pragma: no cover - optional MEMOTE runtime and plugins vary by environment.
+        return _memote_payload(
+            True,
+            "failed",
+            None,
+            "not_run",
+            None,
+            (f"memote_run_failed:{type(exc).__name__}",),
+        )
 
 
 def _memote_payload(
@@ -384,6 +429,38 @@ def _mapping_get(value: Any, *keys: str) -> Any:
         if key in value:
             return value[key]
     return None
+
+
+def _nested_get(value: Any, *keys: str) -> Any:
+    current = value
+    for key in keys:
+        if not isinstance(current, dict):
+            return None
+        current = current.get(key)
+    return current
+
+
+def _memote_annotation_score(payload: Any) -> float | None:
+    sections = _nested_get(payload, "score", "sections")
+    if not isinstance(sections, list):
+        return None
+    for row in sections:
+        if not isinstance(row, dict):
+            continue
+        section = str(row.get("section", "")).lower()
+        if "annotation" in section:
+            return _optional_float(row.get("score"))
+    return None
+
+
+def _memote_consistency_status(payload: Any) -> str:
+    tests = payload.get("tests") if isinstance(payload, dict) else None
+    if not isinstance(tests, dict):
+        return "not_reported"
+    row = tests.get("test_stoichiometric_consistency")
+    if not isinstance(row, dict):
+        return "not_reported"
+    return str(row.get("result") or "not_reported")
 
 
 def _optional_float(value: Any) -> float | None:

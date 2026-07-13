@@ -14,9 +14,12 @@ from pcsec_pichia.analysis.shadow_lp import (
     ShadowLpCrossCheckRequest,
     run_shadow_lp_cross_check,
 )
+from pcsec_pichia.core.paths import ProjectPaths
 
 
-SHADOW_CROSS_CHECK_RUNS_DIR = Path("local_runs") / "shadow_lp_cross_check"
+SHADOW_CROSS_CHECK_RUNS_DIR = (
+    ProjectPaths.discover(Path(__file__)).repo_root / "local_runs" / "shadow_lp_cross_check"
+)
 
 
 def run_pichia_shadow_cross_check(
@@ -61,11 +64,18 @@ def load_pichia_shadow_cross_check_manifest(path: Path | str) -> dict[str, Any]:
 
 
 def _resolve_output_dir(output_dir: Path | str | None, *, target_id: str) -> Path:
+    base_dir = SHADOW_CROSS_CHECK_RUNS_DIR.resolve()
     if output_dir is not None:
-        return Path(output_dir)
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        candidate = Path(output_dir)
+        if not candidate.is_absolute():
+            candidate = ProjectPaths.discover(Path(__file__)).repo_root / candidate
+        resolved = candidate.resolve()
+        if resolved != base_dir and base_dir not in resolved.parents:
+            raise ValueError("output_dir must stay under local_runs/shadow_lp_cross_check.")
+        return resolved
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     safe_target = "".join(character if character.isalnum() or character in {"-", "_"} else "_" for character in target_id)
-    return SHADOW_CROSS_CHECK_RUNS_DIR / f"{stamp}_{safe_target or 'target'}"
+    return base_dir / f"{stamp}_{safe_target or 'target'}"
 
 
 __all__ = [

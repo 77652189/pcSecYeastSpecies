@@ -62,6 +62,9 @@ Streamlit UI / API facade
 - Shadow LP 使用结构化 constraint builders 和 `ScipyHighsBackend` 作为大模型默认求解后端。
 - `CobraOptlangBackend` 保留为 tiny LP / 语义验证用途，不作为 full pcSec 默认后端。
 - 内置参考目标的默认 fixed-growth capacity 已和 reference path 高精度对齐。
+- 外部 GEM 已有 optional COBRApy import probe 和 GEM basic QA；MEMOTE 使用公开 API 作为可选离线质量门，默认运行环境不依赖它。
+- Shadow LP cross-check 已可从 service/Streamlit 手动触发，并把报告写入 ignored `local_runs/`。
+- 当前 cross-check preparation 仍只覆盖 built-in target，任意 custom target 尚未进入正式契约。
 - 旧入口 `solve_secretion_capacity(...)` 仍然默认走 reference / 原 pcSec 路径。
 - reference solver 目前仍可用于 validation / comparison boundary。
 

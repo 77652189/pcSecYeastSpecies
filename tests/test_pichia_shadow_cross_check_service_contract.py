@@ -14,6 +14,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 def test_shadow_cross_check_service_calls_engine_and_returns_manifest_paths(monkeypatch, tmp_path) -> None:
     captured = {}
+    monkeypatch.setattr(service, "SHADOW_CROSS_CHECK_RUNS_DIR", tmp_path)
 
     def fake_run_shadow_lp_cross_check(request, output_dir):
         captured["request"] = request
@@ -47,6 +48,7 @@ def test_shadow_cross_check_service_calls_engine_and_returns_manifest_paths(monk
 
 
 def test_shadow_cross_check_service_default_output_dir_is_local_runs(monkeypatch) -> None:
+    monkeypatch.setattr(service, "SHADOW_CROSS_CHECK_RUNS_DIR", REPO_ROOT / "local_runs" / "shadow_lp_cross_check")
     def fake_run_shadow_lp_cross_check(_request, output_dir):
         return _FakeOutputs(
             manifest_path=output_dir / "cross_check_manifest.json",
@@ -62,6 +64,18 @@ def test_shadow_cross_check_service_default_output_dir_is_local_runs(monkeypatch
 
     assert response["output_dir"].startswith(str(service.SHADOW_CROSS_CHECK_RUNS_DIR))
     assert "OPN_ALPHA_FULL_PROJECT" in response["output_dir"]
+
+
+def test_shadow_cross_check_service_rejects_output_outside_local_runs(monkeypatch, tmp_path) -> None:
+    allowed = tmp_path / "local_runs" / "shadow_lp_cross_check"
+    monkeypatch.setattr(service, "SHADOW_CROSS_CHECK_RUNS_DIR", allowed)
+
+    try:
+        service.run_pichia_shadow_cross_check(target_id="hLF", output_dir=tmp_path / "Results")
+    except ValueError as exc:
+        assert "local_runs/shadow_lp_cross_check" in str(exc)
+    else:
+        raise AssertionError("output outside the shadow cross-check run directory must be rejected")
 
 
 def test_shadow_cross_check_service_loads_manifest_from_file_or_directory(tmp_path) -> None:
@@ -115,7 +129,7 @@ def test_shadow_cross_check_view_initializes_session_and_triggers_service(monkey
         text_values={
             "shadow_lp_cross_check_screen_run_id": "screen-2",
             "shadow_lp_cross_check_saved_result_path": str(tmp_path / "saved.json"),
-            "shadow_lp_cross_check_output_dir": str(tmp_path / "out"),
+            "shadow_lp_cross_check_output_dir": "",
         },
         clicked_keys={"shadow_lp_cross_check_run"},
     )
@@ -142,7 +156,7 @@ def test_shadow_cross_check_view_initializes_session_and_triggers_service(monkey
             "target_id": "hLF",
             "screen_run_id": "screen-2",
             "saved_result_path": tmp_path / "saved.json",
-            "output_dir": tmp_path / "out",
+            "output_dir": None,
         }
     ]
     assert view.SHADOW_CROSS_CHECK_STATE_KEY in fake_st.session_state

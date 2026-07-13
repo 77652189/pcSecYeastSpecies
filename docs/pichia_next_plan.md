@@ -1,7 +1,7 @@
 # pcSecPichia 下一步计划
 
 状态：active  
-最后更新：2026-07-10
+最后更新：2026-07-13
 
 ## 工作原则
 
@@ -17,15 +17,16 @@
 - Shadow LP 已作为 reference constrained solve 的替代候选完成 compare/validation 路径；纯 COBRApy/optlang 不作为 full pcSec 默认后端。
 - 在线外部数据库证据层 Round 1-9 已完成：schema/cache IO、query builder、受控 clients、name resolution、KO/OE gene function evidence、external GPR candidate evidence、service/Streamlit、screen/report/LLM fact pack 透传和端到端 smoke 均已落地。
 - 外部 GEM/GPR 资源优先级审计与导入主线 Round A-G 已完成：external model inventory、artifact cache/manual-required manifest、SBML GPR parse、GPR source priority、当前 Pichia GEM 映射报告、service/Streamlit/report/fact pack 透传和本地 Round G smoke 均已落地。最近 smoke 产物在 ignored `local_runs/external_model_gpr_inventory/round_g_smoke_20260709/`，不作为稳定科学资产提交。
-- 当前剩余边界是人工复核 smoke / production cache、决定是否提升稳定科学资产，以及后续可选的 Shadow LP service/backend toggle。
+- COBRApy import probe、GEM basic QA、Shadow LP cross-check core/service/Streamlit 已落地；hLF cross-check 与 reference 高精度对齐。MEMOTE 仍需专用环境真实验收，Shadow LP custom target preparation 尚未实现。
+- 当前剩余边界是外部真实 GEM/MEMOTE 验收、custom target preparation、production cache 人工复核，以及是否提升稳定科学资产。
 
-## 推荐下一主线：COBRApy 导入、GEM QA 与 Shadow LP 产品化
+## 已完成主线：COBRApy 导入、GEM QA 与 Shadow LP 产品化
 
 设计规格：[COBRApy 导入、GEM QA 与 Shadow LP 产品化计划](pichia_cobrapy_import_qa_shadow_plan.md)
 
 目标：不把 COBRApy / optlang 切成 full pcSec 默认后端，而是把 COBRApy 用于外部 GEM/SBML import probe，把 MEMOTE/COBRApy 用于外部 GEM 离线 QA，并把 Shadow LP cross-check 做成 Streamlit/service 可触发的验证能力。
 
-状态：待执行。执行时按专项文档 Round 0-5 顺序推进，不跳轮、不重复做已完成主线。
+状态：核心 Round 0-5 已实现并完成 focused tests 与 hLF smoke。后续不重复实现现有模块，只补真实 MEMOTE 环境验收和 custom target preparation。
 
 ## 已完成主线：在线外部数据库证据层
 

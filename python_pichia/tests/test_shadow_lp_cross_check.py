@@ -19,7 +19,7 @@ def test_shadow_lp_cross_check_writes_manifest_summary_report_and_diff(tmp_path)
             {
                 "target_id": "hLF",
                 "screen_run_id": "screen-001",
-                "reference_capacity": 0.5,
+                "reference_capacity": 1.00000001,
                 "warnings": ["saved_result_warning"],
             }
         ),
@@ -40,8 +40,9 @@ def test_shadow_lp_cross_check_writes_manifest_summary_report_and_diff(tmp_path)
 
     assert result.target_id == "hLF"
     assert result.screen_run_id == "screen-001"
-    assert result.reference_capacity == 1.0
-    assert result.saved_reference_capacity == 0.5
+    assert result.reference_capacity == 1.00000001
+    assert result.reference_source == "saved_result"
+    assert result.saved_reference_capacity == 1.00000001
     assert result.shadow_capacity == 1.00000001
     assert result.within_tolerance is True
     assert result.constraint_layer == "mitochondrial"
@@ -54,6 +55,27 @@ def test_shadow_lp_cross_check_writes_manifest_summary_report_and_diff(tmp_path)
     assert "mg/L" not in report
     assert "experimental success rate" in report
     assert outputs.summary_tsv_path.exists()
+
+
+def test_shadow_lp_cross_check_uses_saved_capacity_for_alignment(tmp_path) -> None:
+    saved_path = tmp_path / "saved_result.json"
+    saved_path.write_text(
+        json.dumps({"target_id": "hLF", "reference_capacity": 0.5}),
+        encoding="utf-8",
+    )
+
+    outputs = run_shadow_lp_cross_check(
+        ShadowLpCrossCheckRequest(target_id="hLF", saved_result_path=str(saved_path)),
+        tmp_path / "cross_check",
+        ladder_runner=_fake_ladder_runner,
+        reference_validator=_aligned_validator,
+    )
+
+    assert outputs.result.reference_capacity == 0.5
+    assert outputs.result.reference_source == "saved_result"
+    assert outputs.result.within_tolerance is False
+    assert outputs.result.manifest_status == "review_required"
+    assert "saved_reference_capacity_used" in outputs.result.warnings
 
 
 def test_shadow_lp_cross_check_marks_review_required_without_experimental_claim(tmp_path) -> None:

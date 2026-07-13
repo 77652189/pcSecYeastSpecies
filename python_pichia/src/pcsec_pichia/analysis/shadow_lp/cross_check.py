@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import math
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping
@@ -37,6 +38,8 @@ class ShadowLpCrossCheckRequest:
     def validate(self) -> None:
         if not self.target_id.strip():
             raise ValueError("target_id must be non-empty.")
+        if not math.isfinite(self.relative_tolerance) or self.relative_tolerance <= 0.0:
+            raise ValueError("relative_tolerance must be a finite positive number.")
 
 
 @dataclass(frozen=True)
@@ -56,6 +59,7 @@ class ShadowLpCrossCheckResult:
     target_id: str
     screen_run_id: str
     reference_capacity: float | None
+    reference_source: str
     shadow_capacity: float | None
     absolute_diff: float | None
     relative_diff: float | None
@@ -194,6 +198,7 @@ def render_shadow_lp_cross_check_report(result: ShadowLpCrossCheckResult) -> str
         "",
         f"- target_id: {result.target_id}",
         f"- screen_run_id: {result.screen_run_id}",
+        f"- reference_source: {result.reference_source}",
         f"- alignment_status: {result.alignment_status}",
         f"- within_tolerance: {result.within_tolerance}",
         f"- backend: {result.backend}",
@@ -236,18 +241,32 @@ def _cross_check_result(
 ) -> ShadowLpCrossCheckResult:
     final_layer = getattr(ladder, "final_layer")
     validation_payload = _to_mapping(validation)
-    relative_diff = _optional_float(validation_payload.get("objective_rel_diff"))
-    absolute_diff = _optional_float(validation_payload.get("objective_abs_diff"))
-    reference_capacity = _optional_float(validation_payload.get("reference_objective"))
     shadow_capacity = _optional_float(validation_payload.get("shadow_objective", getattr(final_layer, "objective", None)))
-    alignment_status = str(validation_payload.get("final_alignment_status", "review_required"))
-    within_tolerance = alignment_status == "aligned" or (
-        relative_diff is not None and relative_diff <= request.relative_tolerance
-    )
+    reference_capacity = saved_context.reference_capacity
+    reference_source = "saved_result" if reference_capacity is not None else "reference_validation"
+    if reference_capacity is None:
+        reference_capacity = _optional_float(validation_payload.get("reference_objective"))
+        relative_diff = _optional_float(validation_payload.get("objective_rel_diff"))
+        absolute_diff = _optional_float(validation_payload.get("objective_abs_diff"))
+        alignment_status = str(validation_payload.get("final_alignment_status", "review_required"))
+        within_tolerance = alignment_status == "aligned" or (
+            relative_diff is not None and relative_diff <= request.relative_tolerance
+        )
+    else:
+        absolute_diff, relative_diff = _capacity_diff(reference_capacity, shadow_capacity)
+        constraint_count_diff = validation_payload.get("constraint_count_diff")
+        constraints_aligned = constraint_count_diff in (None, 0, 0.0, "0")
+        within_tolerance = (
+            relative_diff is not None
+            and relative_diff <= request.relative_tolerance
+            and constraints_aligned
+            and _solver_status_successful(getattr(final_layer, "status", ""))
+        )
     warnings = tuple(
         dict.fromkeys(
             (
                 *context_warnings,
+                *(("saved_reference_capacity_used",) if saved_context.reference_capacity is not None else ()),
                 *tuple(getattr(ladder, "warnings", ()) or ()),
                 *(() if within_tolerance else ("shadow_cross_check_review_required",)),
             )
@@ -257,6 +276,7 @@ def _cross_check_result(
         target_id=str(getattr(ladder, "target_id", request.target_id)),
         screen_run_id=screen_run_id,
         reference_capacity=reference_capacity,
+        reference_source=reference_source,
         shadow_capacity=shadow_capacity,
         absolute_diff=absolute_diff,
         relative_diff=relative_diff,
@@ -313,6 +333,18 @@ def _optional_float(value: Any) -> float | None:
     if value is None or value == "":
         return None
     return float(value)
+
+
+def _capacity_diff(reference: float | None, shadow: float | None) -> tuple[float | None, float | None]:
+    if reference is None or shadow is None:
+        return None, None
+    absolute = abs(shadow - reference)
+    scale = max(abs(reference), 1e-12)
+    return absolute, absolute / scale
+
+
+def _solver_status_successful(value: Any) -> bool:
+    return str(value).strip().lower() in {"0", "ok", "optimal", "success", "succeeded"}
 
 
 def _tsv_value(value: object) -> str:

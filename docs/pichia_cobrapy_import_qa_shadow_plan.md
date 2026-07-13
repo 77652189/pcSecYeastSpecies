@@ -1,7 +1,15 @@
 # COBRApy 导入、GEM QA 与 Shadow LP 产品化计划
 
-状态：active
-最后更新：2026-07-10
+状态：implemented_with_follow_up
+最后更新：2026-07-13
+
+## 当前验收状态
+
+- COBRApy import probe 已实现 optional dependency、artifact cache 输入、结构计数、objective/GPR 语义检查和 libSBML 对照状态；真实 toy SBML 已在隔离 COBRApy 环境跑通。
+- GEM basic QA 已实现，MEMOTE 适配改用其公开 `test_model` / `snapshot_report` API；默认开发环境未安装 MEMOTE，因此真实 MEMOTE 评分仍需在专用 QA 环境验收。
+- Shadow LP cross-check 已有 core、service facade 和 Streamlit 入口；hLF 完整约束层 smoke 与 reference 对齐，相对差约 `2.85e-7`。
+- 默认 KO/OE、report 和核心仿真不依赖 COBRApy/MEMOTE，运行产物继续写入 ignored `local_runs/`。
+- 尚未完成任意 custom target 的 Shadow LP preparation；当前正式入口只支持已有 built-in target。该能力需要单独设计 prepared-target 输入契约，不能通过 UI 文本框伪装完成。
 
 ## 决策摘要
 
@@ -272,3 +280,5 @@ git diff --name-only -- Code Model Enzymedata Results requirements.txt python_pi
 - Shadow LP cross-check 可从 Streamlit/service 触发或读取，并生成研发可读报告。
 - 默认 KO/OE screen、recommendation、report 和核心仿真不依赖 COBRApy/MEMOTE。
 - 保护目录和依赖声明没有非预期 diff。
+
+当前结论：前三项主能力已落地；真实 MEMOTE 环境验收和 custom target preparation 作为后续条件保留，不据此宣称 COBRApy 已替代 full pcSec 默认求解逻辑。
