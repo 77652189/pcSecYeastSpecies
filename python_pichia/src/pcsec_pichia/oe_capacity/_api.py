@@ -25,11 +25,19 @@ def build_gene_enzyme_reaction_catalog(
     combined: Any,
     external_evidence: Any = None,
 ) -> Any:
-    _phase_gate("build_gene_enzyme_reaction_catalog", 1)
+    from pcsec_pichia.oe_capacity.mapping import (
+        build_gene_enzyme_reaction_catalog as _build,
+    )
+
+    return _build(model, metabolic, combined, external_evidence)
 
 
 def validate_gene_capacity_catalog(catalog: Any) -> Any:
-    _phase_gate("validate_gene_capacity_catalog", 1)
+    from pcsec_pichia.oe_capacity.mapping import (
+        validate_gene_capacity_catalog as _validate,
+    )
+
+    return _validate(catalog)
 
 
 def build_oe_dose_spec(

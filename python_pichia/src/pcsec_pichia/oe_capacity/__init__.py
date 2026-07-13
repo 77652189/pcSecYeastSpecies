@@ -12,12 +12,14 @@ from pcsec_pichia.oe_capacity._api import (
     validate_gene_capacity_catalog,
     write_oe_capacity_outputs,
 )
+from pcsec_pichia.oe_capacity.mapping import summarize_gene_capacity_catalog
 from pcsec_pichia.oe_capacity.schema import (
     CapacityConstraintChange,
     ConfidenceLevel,
     ConstraintChangeKind,
     EvidenceSourceType,
     GeneCapacityCatalog,
+    GeneCapacityCoverage,
     GeneCapacitySpec,
     GeneCapacityValidationIssue,
     GeneCapacityValidationResult,
@@ -49,6 +51,7 @@ __all__ = [
     "CapacityConstraintChange",
     "EvidenceSourceType",
     "GeneCapacityCatalog",
+    "GeneCapacityCoverage",
     "GeneCapacitySpec",
     "GeneCapacityValidationIssue",
     "GeneCapacityValidationResult",
@@ -80,6 +83,7 @@ __all__ = [
     "plan_gene_level_overexpression",
     "run_gene_level_oe_comparison",
     "run_gene_level_oe_screen",
+    "summarize_gene_capacity_catalog",
     "validate_gene_capacity_catalog",
     "write_oe_capacity_outputs",
 ]

@@ -381,6 +381,28 @@ class GeneCapacityCatalog:
 
 
 @dataclass(frozen=True)
+class GeneCapacityCoverage:
+    total_mappings: int
+    gene_count: int
+    reaction_count: int
+    enzyme_count: int
+    by_role: tuple[tuple[str, int], ...]
+    by_status: tuple[tuple[str, int], ...]
+
+    def validate(self) -> None:
+        for field_name, value in (
+            ("total_mappings", self.total_mappings),
+            ("gene_count", self.gene_count),
+            ("reaction_count", self.reaction_count),
+            ("enzyme_count", self.enzyme_count),
+        ):
+            if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                raise OECapacityValidationError(
+                    f"{field_name} must be a non-negative integer."
+                )
+
+
+@dataclass(frozen=True)
 class GeneCapacityValidationIssue:
     code: str
     message: str
@@ -703,6 +725,7 @@ __all__ = [
     "EvidenceSourceType",
     "GeneCapacitySpec",
     "GeneCapacityCatalog",
+    "GeneCapacityCoverage",
     "GeneCapacityValidationIssue",
     "GeneCapacityValidationResult",
     "GeneEnzymeReactionMapping",
