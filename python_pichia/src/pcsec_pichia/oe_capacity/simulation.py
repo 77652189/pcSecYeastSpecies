@@ -7,12 +7,26 @@ import numpy as np
 
 from pcsec_pichia.oe_capacity.constraints import build_oe_capacity_constraints
 from pcsec_pichia.oe_capacity.schema import (
+    ConfidenceLevel,
     OECapacityComparisonResult,
     OECapacityPlan,
+    OECapacityScreenConfig,
+    OECapacityScreenRequest,
+    OECapacityScreenResult,
+    OECapacityScreenRow,
     OECapacityValidationError,
     OEExecutionMode,
+    OEExecutionStatus,
     ParameterScenario,
     SolverSnapshot,
+)
+from pcsec_pichia.oe_capacity.mapping import (
+    build_gene_enzyme_reaction_catalog,
+    fingerprint_oe_capacity_model,
+)
+from pcsec_pichia.oe_capacity.parameters import (
+    build_current_model_parameter_policy,
+    plan_gene_level_overexpression,
 )
 from pcsec_pichia.probe import run_pcsec_oe_screen, solve_pcsec_maximize
 
@@ -226,6 +240,327 @@ def run_gene_level_oe_comparison(
     )
     comparison.validate()
     return comparison
+
+
+def run_gene_level_oe_screen(
+    prepared_model: Any,
+    requests: tuple[OECapacityScreenRequest, ...] | list[OECapacityScreenRequest],
+    screen_config: OECapacityScreenConfig,
+) -> OECapacityScreenResult:
+    screen_config.validate()
+    resolved_requests = tuple(requests)
+    for request in resolved_requests:
+        request.validate()
+    request_identities = tuple(
+        (request.gene_id, request.target_id, request.context_id, request.dose.dose_id)
+        for request in resolved_requests
+    )
+    if len(set(request_identities)) != len(request_identities):
+        raise OECapacityValidationError("screen requests must be unique.")
+
+    model = getattr(prepared_model, "fixed_model", None)
+    if model is None:
+        raise OECapacityValidationError(
+            "gene-level OE screen requires prepared_model.fixed_model."
+        )
+    fixed_growth_rate = _fixed_growth_rate(model)
+    if abs(fixed_growth_rate - float(screen_config.growth_rate)) > 1e-12:
+        raise OECapacityValidationError(
+            "screen_config growth_rate does not match the prepared fixed BIOMASS bound."
+        )
+    catalog = getattr(prepared_model, "gene_capacity_catalog", None)
+    if catalog is None:
+        catalog = build_gene_enzyme_reaction_catalog(
+            model,
+            prepared_model.metabolic,
+            prepared_model.combined,
+        )
+    catalog.validate()
+    if catalog.model_fingerprint != fingerprint_oe_capacity_model(model):
+        raise OECapacityValidationError(
+            "prepared gene capacity catalog does not match the fixed model."
+        )
+    parameter_policy = getattr(prepared_model, "parameter_policy", None)
+    if parameter_policy is None:
+        parameter_policy = build_current_model_parameter_policy(
+            catalog,
+            prepared_model.combined,
+        )
+    parameter_policy = replace(
+        parameter_policy,
+        scenarios=screen_config.parameter_scenarios,
+    )
+    parameter_policy.validate()
+
+    solver_options = dict(screen_config.solver_options)
+    rows: list[OECapacityScreenRow] = []
+    failures: list[OECapacityScreenRow] = []
+    target_id = str(getattr(prepared_model, "target_id", ""))
+    for request in resolved_requests:
+        if request.target_id != target_id:
+            failures.append(
+                _request_failure_row(
+                    request,
+                    "request target does not match prepared target",
+                )
+            )
+            continue
+        try:
+            plan = plan_gene_level_overexpression(
+                model,
+                request.gene_id,
+                request.target_id,
+                request.context_id,
+                request.dose,
+                catalog,
+                parameter_policy,
+            )
+            plan = _plan_for_screen_mode(plan, request, screen_config)
+            if plan.execution_mode is OEExecutionMode.NOT_EXECUTABLE:
+                failures.append(_screen_row(plan, None))
+                continue
+            comparison = run_gene_level_oe_comparison(
+                prepared_model,
+                plan,
+                solver_options,
+            )
+            row = _screen_row(plan, comparison)
+            (rows if _comparison_succeeded(plan, comparison) else failures).append(row)
+        except Exception as exc:
+            failures.append(_request_failure_row(request, str(exc)))
+
+    result_warnings = (
+        ("Gene-capacity feature is disabled; only legacy reaction proxy was executed.",)
+        if not screen_config.feature_enabled
+        else ()
+    )
+    result = OECapacityScreenResult(
+        model_fingerprint=catalog.model_fingerprint,
+        config=screen_config,
+        rows=tuple(rows),
+        failures=tuple(failures),
+        warnings=result_warnings,
+    )
+    result.validate()
+    return result
+
+
+def _plan_for_screen_mode(
+    plan: OECapacityPlan,
+    request: OECapacityScreenRequest,
+    config: OECapacityScreenConfig,
+) -> OECapacityPlan:
+    requested_mode = request.execution_mode
+    if requested_mode is OEExecutionMode.NOT_EXECUTABLE:
+        return replace(
+            plan,
+            execution_mode=OEExecutionMode.NOT_EXECUTABLE,
+            executable_capacity_specs=(),
+            proxy_reaction_ids=(),
+            uncertainty_scenarios=(),
+            missing_information=tuple(
+                dict.fromkeys((*plan.missing_information, "execution_not_requested"))
+            ),
+        )
+    if not config.feature_enabled or requested_mode is OEExecutionMode.REACTION_PROXY:
+        if not plan.proxy_reaction_ids:
+            return replace(
+                plan,
+                execution_mode=OEExecutionMode.NOT_EXECUTABLE,
+                executable_capacity_specs=(),
+                uncertainty_scenarios=(),
+                missing_information=tuple(
+                    dict.fromkeys((*plan.missing_information, "proxy_reaction_mapping"))
+                ),
+            )
+        return replace(
+            plan,
+            execution_mode=OEExecutionMode.REACTION_PROXY,
+            execution_status=OEExecutionStatus.PROXY_ONLY,
+            executable_capacity_specs=(),
+            uncertainty_scenarios=(),
+        )
+    if requested_mode is OEExecutionMode.GENE_CAPACITY or not config.compare_proxy:
+        if not plan.executable_capacity_specs:
+            return replace(
+                plan,
+                execution_mode=OEExecutionMode.NOT_EXECUTABLE,
+                proxy_reaction_ids=(),
+                uncertainty_scenarios=(),
+                missing_information=tuple(
+                    dict.fromkeys((*plan.missing_information, "capacity_parameters"))
+                ),
+            )
+        return replace(
+            plan,
+            execution_mode=OEExecutionMode.GENE_CAPACITY,
+            proxy_reaction_ids=(),
+        )
+    return plan
+
+
+def _comparison_succeeded(
+    plan: OECapacityPlan,
+    comparison: OECapacityComparisonResult,
+) -> bool:
+    if not comparison.baseline.success:
+        return False
+    proxy_success = comparison.proxy is not None and comparison.proxy.success
+    capacity_success = any(
+        snapshot.success for snapshot in comparison.gene_capacity_scenarios
+    )
+    if plan.execution_mode is OEExecutionMode.REACTION_PROXY:
+        return proxy_success
+    if plan.execution_mode is OEExecutionMode.GENE_CAPACITY:
+        return capacity_success
+    if plan.execution_mode is OEExecutionMode.COMPARISON:
+        return capacity_success and proxy_success
+    return False
+
+
+def _screen_row(
+    plan: OECapacityPlan,
+    comparison: OECapacityComparisonResult | None,
+) -> OECapacityScreenRow:
+    specs = plan.executable_capacity_specs
+    mappings = tuple(
+        dict.fromkeys(
+            (
+                *(spec.mapping.mapping_id for spec in specs),
+                *(mapping.mapping_id for mapping in plan.explain_only_mappings),
+            )
+        )
+    )
+    estimates = tuple(
+        estimate
+        for spec in specs
+        for estimate in (
+            spec.kcat,
+            spec.molecular_weight,
+            spec.baseline_enzyme_amount,
+            spec.complex_stoichiometry,
+        )
+        if estimate is not None
+    )
+    parameter_sources = tuple(
+        dict.fromkeys(
+            f"{estimate.source_type.value}:{estimate.source_ref}"
+            for estimate in estimates
+        )
+    )
+    confidence = _lowest_confidence(
+        tuple(
+            (
+                *(spec.mapping.mapping_confidence for spec in specs),
+                *(estimate.confidence for estimate in estimates),
+            )
+        )
+    )
+    nominal = None
+    if comparison is not None:
+        nominal = next(
+            (
+                snapshot
+                for snapshot in comparison.gene_capacity_scenarios
+                if snapshot.parameter_scenario is ParameterScenario.NOMINAL
+            ),
+            comparison.gene_capacity_scenarios[0]
+            if comparison.gene_capacity_scenarios
+            else None,
+        )
+    warnings = list(plan.warnings)
+    missing = list(plan.missing_information)
+    if comparison is not None:
+        warnings.extend(comparison.warnings)
+        missing.extend(comparison.missing_information)
+        if comparison.proxy is not None:
+            warnings.extend(comparison.proxy.warnings)
+        warnings.extend(
+            warning
+            for snapshot in comparison.gene_capacity_scenarios
+            for warning in snapshot.warnings
+        )
+    return OECapacityScreenRow(
+        gene_id=plan.gene_id,
+        target_id=plan.target_id,
+        context_id=plan.context_id,
+        execution_mode=plan.execution_mode,
+        execution_status=plan.execution_status,
+        dose_id=plan.requested_dose.dose_id,
+        dose_mode=plan.requested_dose.dose_mode,
+        expression_multiplier=plan.requested_dose.expression_multiplier,
+        mapping_ids=mappings,
+        parameter_sources=parameter_sources,
+        parameter_confidence=confidence,
+        uncertainty_scenarios=plan.uncertainty_scenarios,
+        baseline_objective=(
+            comparison.baseline.secretion_objective if comparison is not None else None
+        ),
+        proxy_objective=(
+            comparison.proxy.secretion_objective
+            if comparison is not None and comparison.proxy is not None
+            else None
+        ),
+        gene_capacity_objective=(nominal.secretion_objective if nominal else None),
+        gene_capacity_vs_baseline_delta=(
+            comparison.gene_capacity_vs_baseline_delta
+            if comparison is not None
+            else None
+        ),
+        gene_capacity_vs_proxy_delta=(
+            comparison.gene_capacity_vs_proxy_delta
+            if comparison is not None
+            else None
+        ),
+        protein_resource_cost_delta=(
+            comparison.protein_resource_cost_delta
+            if comparison is not None
+            else None
+        ),
+        missing_information=tuple(dict.fromkeys(missing)),
+        warnings=tuple(dict.fromkeys(warnings)),
+    )
+
+
+def _request_failure_row(
+    request: OECapacityScreenRequest,
+    reason: str,
+) -> OECapacityScreenRow:
+    return OECapacityScreenRow(
+        gene_id=request.gene_id,
+        target_id=request.target_id,
+        context_id=request.context_id,
+        execution_mode=OEExecutionMode.NOT_EXECUTABLE,
+        execution_status=OEExecutionStatus.UNRESOLVED,
+        dose_id=request.dose.dose_id,
+        dose_mode=request.dose.dose_mode,
+        expression_multiplier=request.dose.expression_multiplier,
+        mapping_ids=(),
+        parameter_sources=(),
+        parameter_confidence=None,
+        uncertainty_scenarios=(),
+        baseline_objective=None,
+        proxy_objective=None,
+        gene_capacity_objective=None,
+        gene_capacity_vs_baseline_delta=None,
+        gene_capacity_vs_proxy_delta=None,
+        protein_resource_cost_delta=None,
+        missing_information=("screen_execution",),
+        warnings=(reason or "screen request failed",),
+    )
+
+
+def _lowest_confidence(
+    values: tuple[ConfidenceLevel, ...],
+) -> ConfidenceLevel | None:
+    if not values:
+        return None
+    priority = {
+        ConfidenceLevel.HIGH: 0,
+        ConfidenceLevel.MEDIUM: 1,
+        ConfidenceLevel.LOW: 2,
+    }
+    return max(values, key=priority.__getitem__)
 
 
 def _run_proxy_snapshot(
@@ -453,4 +788,4 @@ def _format_flux(value: float) -> str:
     return "0" if abs(value) <= 1e-12 else f"{value:.17g}"
 
 
-__all__ = ["run_gene_level_oe_comparison"]
+__all__ = ["run_gene_level_oe_comparison", "run_gene_level_oe_screen"]

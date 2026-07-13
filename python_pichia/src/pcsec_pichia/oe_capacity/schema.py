@@ -709,6 +709,10 @@ class OECapacityScreenConfig:
     solver_options: tuple[tuple[str, str], ...] = ()
 
     def validate(self) -> None:
+        if not isinstance(self.feature_enabled, bool):
+            raise OECapacityValidationError("feature_enabled must be boolean.")
+        if not isinstance(self.compare_proxy, bool):
+            raise OECapacityValidationError("compare_proxy must be boolean.")
         _require_positive_number(self.growth_rate, "growth_rate")
         if not self.parameter_scenarios:
             raise OECapacityValidationError(
@@ -716,6 +720,13 @@ class OECapacityScreenConfig:
             )
         if len(set(self.parameter_scenarios)) != len(self.parameter_scenarios):
             raise OECapacityValidationError("parameter_scenarios must be unique.")
+        option_names: set[str] = set()
+        for name, value in self.solver_options:
+            _require_text(name, "solver option name")
+            _require_text(value, "solver option value")
+            if name in option_names:
+                raise OECapacityValidationError(f"duplicate solver option: {name}")
+            option_names.add(name)
 
 
 @dataclass(frozen=True)
@@ -735,6 +746,7 @@ class OECapacityScreenRow:
     baseline_objective: float | None
     proxy_objective: float | None
     gene_capacity_objective: float | None
+    gene_capacity_vs_baseline_delta: float | None
     gene_capacity_vs_proxy_delta: float | None
     protein_resource_cost_delta: float | None
     missing_information: tuple[str, ...] = ()
@@ -748,6 +760,33 @@ class OECapacityScreenRow:
             ("dose_id", self.dose_id),
         ):
             _require_text(value, field_name)
+        if self.expression_multiplier is not None:
+            _require_positive_number(self.expression_multiplier, "expression_multiplier")
+        if len(set(self.mapping_ids)) != len(self.mapping_ids):
+            raise OECapacityValidationError("mapping_ids must be unique.")
+        if len(set(self.parameter_sources)) != len(self.parameter_sources):
+            raise OECapacityValidationError("parameter_sources must be unique.")
+        if len(set(self.uncertainty_scenarios)) != len(self.uncertainty_scenarios):
+            raise OECapacityValidationError("uncertainty_scenarios must be unique.")
+        for field_name, value in (
+            ("baseline_objective", self.baseline_objective),
+            ("proxy_objective", self.proxy_objective),
+            ("gene_capacity_objective", self.gene_capacity_objective),
+            (
+                "gene_capacity_vs_baseline_delta",
+                self.gene_capacity_vs_baseline_delta,
+            ),
+            ("gene_capacity_vs_proxy_delta", self.gene_capacity_vs_proxy_delta),
+            ("protein_resource_cost_delta", self.protein_resource_cost_delta),
+        ):
+            if value is not None and (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+            ):
+                raise OECapacityValidationError(
+                    f"{field_name} must be finite when present."
+                )
 
 
 @dataclass(frozen=True)
@@ -763,6 +802,14 @@ class OECapacityScreenResult:
         self.config.validate()
         for row in (*self.rows, *self.failures):
             row.validate()
+        identities = [
+            (row.gene_id, row.target_id, row.context_id, row.dose_id)
+            for row in (*self.rows, *self.failures)
+        ]
+        if len(set(identities)) != len(identities):
+            raise OECapacityValidationError(
+                "screen rows and failures must have unique request identities."
+            )
 
 
 @dataclass(frozen=True)

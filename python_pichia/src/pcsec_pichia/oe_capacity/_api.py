@@ -109,11 +109,15 @@ def run_gene_level_oe_screen(
     requests: Sequence[Any],
     screen_config: Any,
 ) -> Any:
-    _phase_gate("run_gene_level_oe_screen", 4)
+    from pcsec_pichia.oe_capacity.simulation import run_gene_level_oe_screen as _run
+
+    return _run(prepared_model, requests, screen_config)
 
 
 def write_oe_capacity_outputs(result: Any, output_dir: Any) -> Any:
-    _phase_gate("write_oe_capacity_outputs", 4)
+    from pcsec_pichia.oe_capacity.reports import write_oe_capacity_outputs as _write
+
+    return _write(result, output_dir)
 
 
 __all__ = [

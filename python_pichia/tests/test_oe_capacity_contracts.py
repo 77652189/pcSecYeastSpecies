@@ -30,8 +30,6 @@ from pcsec_pichia.oe_capacity import (
     build_gene_enzyme_reaction_catalog,
     build_oe_dose_spec,
     build_oe_capacity_constraints,
-    run_gene_level_oe_screen,
-    write_oe_capacity_outputs,
 )
 
 
@@ -242,11 +240,12 @@ def test_constraint_bundle_keeps_gene_capacity_changes_separate_from_proxy_bound
         ).validate()
 
 
-def test_future_public_api_is_importable_but_phase_gated_until_its_round() -> None:
-    with pytest.raises(OECapacityPhaseError, match="Round 4"):
-        run_gene_level_oe_screen(None, (), None)
-    with pytest.raises(OECapacityPhaseError, match="Round 4"):
-        write_oe_capacity_outputs(None, None)
+def test_phase_error_remains_explicit_for_future_contracts() -> None:
+    error = OECapacityPhaseError("future_api", 5)
+
+    assert error.api_name == "future_api"
+    assert error.required_round == 5
+    assert "Round 5" in str(error)
 
 
 def test_execution_statuses_and_comparison_snapshots_are_explicit() -> None:

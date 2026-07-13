@@ -7,7 +7,7 @@
 
 ```yaml
 current_phase: phase_2_gene_level_oe
-current_round: round_4_screen_reports
+current_round: round_5_service_streamlit
 round_status: ready
 ```
 
@@ -466,4 +466,4 @@ Phase 2 完成必须满足：
 
 ## 当前下一步
 
-从 Phase 2 Round 4 开始：在已通过的单候选 baseline/proxy/gene-capacity 求解路径上实现小批量 screen 与对照报告，并将运行产物写入 ignored `local_runs/oe_capacity/`。不得回退重做 Round 0，也不得跳过 screen/report 验收直接进入 UI。
+从 Phase 2 Round 5 开始：在已通过的小批量 screen/report API 上增加薄 service facade 与 Streamlit 工作流，展示 mapping、dose、参数来源、uncertainty、资源成本和不可执行原因。必须检查页面入口、导航、旧引用、session state、cache key、target 隔离、health endpoint 和真实浏览器渲染。
