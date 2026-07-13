@@ -6,6 +6,8 @@ from pathlib import Path
 
 from pcsec_pichia.core.paths import ProjectPaths
 
+from app.services import screen_report_llm
+from app.services.screen_report_llm import OpenAIJsonLlmClient, judge_screen_report
 from app.services.screen_report_service import (
     build_fact_pack_for_runs,
     generate_judged_screen_report,
@@ -182,6 +184,81 @@ def test_markdown_reference_table_is_program_generated() -> None:
     assert "## OPN 总结" in markdown
     assert "| evidence_id | target_id | gene_id/reaction_id |" in markdown
     assert "hLF-KO-0001" in markdown
+
+
+def test_openai_client_uses_configured_model_and_base_url(monkeypatch) -> None:
+    monkeypatch.setenv("SCREEN_REPORT_LLM_MODEL", "configured-model")
+    monkeypatch.setenv("SCREEN_REPORT_LLM_BASE_URL", "http://example.test/v1")
+
+    client = OpenAIJsonLlmClient()
+
+    assert client.model == "configured-model"
+    assert client.base_url == "http://example.test/v1"
+
+
+def test_project_env_loader_only_imports_screen_report_keys(monkeypatch, tmp_path: Path) -> None:
+    env_path = tmp_path / ".env"
+    env_path.write_text(
+        "OPENAI_API_KEY=test-key\nSCREEN_REPORT_LLM_MODEL=test-model\nUNRELATED_SETTING=must-not-load\n",
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("SCREEN_REPORT_LLM_MODEL", raising=False)
+    monkeypatch.delenv("UNRELATED_SETTING", raising=False)
+
+    screen_report_llm._load_project_env(env_path)
+
+    assert screen_report_llm.os.environ["OPENAI_API_KEY"] == "test-key"
+    assert screen_report_llm.os.environ["SCREEN_REPORT_LLM_MODEL"] == "test-model"
+    assert "UNRELATED_SETTING" not in screen_report_llm.os.environ
+
+
+def test_judge_malformed_schema_fails_closed() -> None:
+    client = FakeWriter(
+        [{"verdict": "pass", "blocking_issues": "not-a-list", "required_fixes": "not-a-list"}]
+    )
+
+    result = judge_screen_report(
+        client,
+        {"schema_version": 1, "targets": {}, "evidence_items": [], "source_runs": []},
+        _valid_report(),
+        {"verdict": "pass", "blocking_issues": [], "warnings": []},
+    )
+
+    assert result["verdict"] == "fail"
+    assert any(issue["type"] == "schema" for issue in result["blocking_issues"])
+
+
+def test_judge_non_object_blocking_issue_fails_closed() -> None:
+    client = FakeWriter(
+        [{"verdict": "pass", "blocking_issues": ["not-an-object"], "required_fixes": []}]
+    )
+
+    result = judge_screen_report(
+        client,
+        {"schema_version": 1, "targets": {}, "evidence_items": [], "source_runs": []},
+        _valid_report(),
+        {"verdict": "pass", "blocking_issues": [], "warnings": []},
+    )
+
+    assert result["verdict"] == "fail"
+    assert any(issue["type"] == "schema" for issue in result["blocking_issues"])
+
+
+def test_judge_pass_with_required_fixes_fails_closed() -> None:
+    client = FakeWriter(
+        [{"verdict": "pass", "blocking_issues": [], "required_fixes": ["still needs a fix"]}]
+    )
+
+    result = judge_screen_report(
+        client,
+        {"schema_version": 1, "targets": {}, "evidence_items": [], "source_runs": []},
+        _valid_report(),
+        {"verdict": "pass", "blocking_issues": [], "warnings": []},
+    )
+
+    assert result["verdict"] == "fail"
+    assert any(issue["type"] == "schema" for issue in result["blocking_issues"])
 
 
 def _external_evidence_csv(tmp_path: Path) -> Path:

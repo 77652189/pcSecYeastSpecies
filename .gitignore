@@ -1,6 +1,9 @@
 # Local runtime outputs
 local_runs/
 python_pichia/local_runs/
+.env
+.env.*
+!.env.example
 
 # Archived design/decision docs - internal detail not meant for public distribution
 docs/archive/

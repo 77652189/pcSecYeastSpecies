@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 from typing import Any, Protocol
 
 
@@ -19,22 +20,44 @@ JUDGE_SYSTEM_PROMPT = """你是研发报告 judge。你只检查 writer 报告�
 输出必须是 JSON，verdict 只能是 pass 或 fail。
 """
 
+_SCREEN_REPORT_ENV_KEYS = {
+    "OPENAI_API_KEY",
+    "OPENAI_BASE_URL",
+    "OPENAI_API_BASE",
+    "SCREEN_REPORT_LLM_PROVIDER",
+    "REPORT_LLM_PROVIDER",
+    "SCREEN_REPORT_LLM_MODEL",
+    "SCREEN_REPORT_LLM_BASE_URL",
+}
+
 
 class JsonLlmClient(Protocol):
     def complete_json(self, *, system_prompt: str, payload: dict[str, Any]) -> dict[str, Any]: ...
 
 
 class OpenAIJsonLlmClient:
-    def __init__(self, model: str | None = None) -> None:
+    def __init__(self, model: str | None = None, base_url: str | None = None) -> None:
+        _load_project_env()
         self.model = model or os.environ.get("SCREEN_REPORT_LLM_MODEL", "gpt-4o-mini")
+        self.base_url = (
+            base_url
+            or os.environ.get("SCREEN_REPORT_LLM_BASE_URL")
+            or os.environ.get("OPENAI_BASE_URL")
+            or os.environ.get("OPENAI_API_BASE")
+            or ""
+        )
 
     def complete_json(self, *, system_prompt: str, payload: dict[str, Any]) -> dict[str, Any]:
+        _load_project_env()
         api_key = os.environ.get("OPENAI_API_KEY")
         if not api_key:
             raise RuntimeError("OPENAI_API_KEY 未设置；无法生成 LLM 研发建议报告，但 fact pack 仍可生成和下载。")
         from openai import OpenAI
 
-        client = OpenAI(api_key=api_key)
+        client_kwargs: dict[str, str] = {"api_key": api_key}
+        if self.base_url:
+            client_kwargs["base_url"] = self.base_url
+        client = OpenAI(**client_kwargs)
         response = client.chat.completions.create(
             model=self.model,
             messages=[
@@ -51,6 +74,7 @@ class OpenAIJsonLlmClient:
 
 
 def get_default_screen_report_llm_client() -> JsonLlmClient:
+    _load_project_env()
     provider = os.environ.get("SCREEN_REPORT_LLM_PROVIDER", os.environ.get("REPORT_LLM_PROVIDER", "openai")).strip().lower()
     if provider == "openai":
         return OpenAIJsonLlmClient()
@@ -90,11 +114,35 @@ def judge_screen_report(
     }
     result = client.complete_json(system_prompt=JUDGE_SYSTEM_PROMPT, payload=payload)
     verdict = str(result.get("verdict") or "").lower()
+    blocking_issues = result.get("blocking_issues")
+    if not isinstance(blocking_issues, list):
+        blocking_issues = [{"type": "schema", "message": "Judge blocking_issues must be a list."}]
+    else:
+        invalid_issue_count = sum(1 for item in blocking_issues if not isinstance(item, dict))
+        blocking_issues = [item for item in blocking_issues if isinstance(item, dict)]
+        if invalid_issue_count:
+            blocking_issues.append(
+                {
+                    "type": "schema",
+                    "message": f"Judge blocking_issues contained {invalid_issue_count} non-object item(s).",
+                }
+            )
+    required_fixes = result.get("required_fixes")
+    if not isinstance(required_fixes, list):
+        blocking_issues.append({"type": "schema", "message": "Judge required_fixes must be a list."})
+        required_fixes = []
     if verdict not in {"pass", "fail"}:
-        result["verdict"] = "fail"
-        result.setdefault("blocking_issues", []).append({"type": "schema", "message": "Judge verdict was not pass/fail."})
-    result.setdefault("blocking_issues", [])
-    result.setdefault("required_fixes", [])
+        blocking_issues.append({"type": "schema", "message": "Judge verdict was not pass/fail."})
+        verdict = "fail"
+    if verdict == "pass" and (blocking_issues or required_fixes):
+        if required_fixes and not blocking_issues:
+            blocking_issues.append(
+                {"type": "schema", "message": "Judge returned pass with non-empty required_fixes."}
+            )
+        verdict = "fail"
+    result["verdict"] = verdict
+    result["blocking_issues"] = blocking_issues
+    result["required_fixes"] = required_fixes
     return result
 
 
@@ -172,6 +220,45 @@ def _cited_evidence_ids(report_json: dict[str, Any]) -> list[str]:
                 if isinstance(row, dict) and row.get("evidence_id"):
                     cited.append(str(row["evidence_id"]))
     return list(dict.fromkeys(cited))
+
+
+_PROJECT_ENV_LOADED = False
+
+
+def _load_project_env(env_path: Path | None = None) -> None:
+    global _PROJECT_ENV_LOADED
+    use_cache = env_path is None
+    if use_cache and _PROJECT_ENV_LOADED:
+        return
+    env_path = env_path or (Path(__file__).resolve().parents[2] / ".env")
+    if not env_path.exists():
+        if use_cache:
+            _PROJECT_ENV_LOADED = True
+        return
+    try:
+        lines = env_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        if use_cache:
+            _PROJECT_ENV_LOADED = True
+        return
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, value = stripped.split("=", 1)
+        key = key.strip().lstrip("\ufeff")
+        if key not in _SCREEN_REPORT_ENV_KEYS or key in os.environ:
+            continue
+        os.environ[key] = _clean_env_value(value)
+    if use_cache:
+        _PROJECT_ENV_LOADED = True
+
+
+def _clean_env_value(value: str) -> str:
+    cleaned = value.strip()
+    if len(cleaned) >= 2 and cleaned[0] == cleaned[-1] and cleaned[0] in {'"', "'"}:
+        return cleaned[1:-1]
+    return cleaned
 
 
 __all__ = [

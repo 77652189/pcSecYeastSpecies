@@ -61,6 +61,69 @@ def test_validator_passes_traceable_report() -> None:
     assert result["verdict"] == "pass"
 
 
+def test_validator_requires_schema_version() -> None:
+    report = _report()
+    del report["schema_version"]
+
+    result = validate_screen_report_json(_fact_pack(), report)
+
+    assert result["verdict"] == "fail"
+    assert any(issue["type"] == "schema_version" for issue in result["blocking_issues"])
+
+
+def test_validator_blocks_string_schema_version() -> None:
+    report = _report()
+    report["schema_version"] = "1"
+
+    result = validate_screen_report_json(_fact_pack(), report)
+
+    assert result["verdict"] == "fail"
+    assert any(issue["type"] == "schema_version" for issue in result["blocking_issues"])
+
+
+def test_validator_blocks_unsupported_integer_schema_version() -> None:
+    report = _report()
+    report["schema_version"] = 2
+
+    result = validate_screen_report_json(_fact_pack(), report)
+
+    assert result["verdict"] == "fail"
+    assert any(issue["type"] == "schema_version" for issue in result["blocking_issues"])
+
+
+def test_validator_accepts_supported_schema_version() -> None:
+    report = _report()
+    report["schema_version"] = 1
+
+    result = validate_screen_report_json(_fact_pack(), report)
+
+    assert result["verdict"] == "pass"
+    assert not any(issue["type"] == "schema_version" for issue in result["blocking_issues"])
+
+
+def test_validator_requires_both_target_sections_and_complete_schema() -> None:
+    report = _report()
+    del report["targets"]["OPN"]
+    del report["targets"]["hLF"]["evidence_boundaries"]
+
+    result = validate_screen_report_json(_fact_pack(), report)
+
+    issue_types = {issue["type"] for issue in result["blocking_issues"]}
+    assert result["verdict"] == "fail"
+    assert "missing_target" in issue_types
+    assert "missing_field" in issue_types
+
+
+def test_validator_requires_string_list_global_warnings() -> None:
+    report = _report()
+    report["global_warnings"] = "not-a-list"
+
+    result = validate_screen_report_json(_fact_pack(), report)
+
+    assert result["verdict"] == "fail"
+    assert any(issue.get("location") == "global_warnings" for issue in result["blocking_issues"])
+
+
 def test_validator_blocks_fabricated_evidence_id_and_gene_id() -> None:
     result = validate_screen_report_json(_fact_pack(), _report("hLF-KO-9999", "PAS_FAKE_GENE 很好"))
 
@@ -101,3 +164,112 @@ def test_validator_blocks_tokens_from_the_wrong_cited_evidence_item() -> None:
     assert result["verdict"] == "fail"
     issue_types = {issue["type"] for issue in result["blocking_issues"]}
     assert "evidence_token_mismatch" in issue_types
+
+
+def test_validator_blocks_ko_evidence_in_oe_recommendations() -> None:
+    report = _report()
+    report["targets"]["hLF"]["recommended_oe"] = report["targets"]["hLF"].pop("recommended_ko")
+
+    result = validate_screen_report_json(_fact_pack(), report)
+
+    assert result["verdict"] == "fail"
+    assert any(issue["type"] == "intervention_mismatch" for issue in result["blocking_issues"])
+
+
+def test_validator_blocks_known_gene_borrowed_by_evidence_without_gene() -> None:
+    fact_pack = _fact_pack()
+    fact_pack["evidence_items"].append(
+        {
+            "evidence_id": "hLF-KO-0002",
+            "target_id": "hLF",
+            "intervention_type": "KO",
+            "recommendation_tier": "manual_review_required",
+            "numeric_fields": {},
+        }
+    )
+    report = _report("hLF-KO-0002", "PAS_OPN_OE 可用于 hLF")
+    report["targets"]["hLF"]["recommended_ko"] = []
+    report["targets"]["hLF"]["manual_review"] = [
+        {"evidence_id": "hLF-KO-0002", "claim": "PAS_OPN_OE 可用于 hLF", "rationale": "待核对", "risk": "未知", "next_step": "人工复核"}
+    ]
+
+    result = validate_screen_report_json(fact_pack, report)
+
+    assert result["verdict"] == "fail"
+    assert any(issue["type"] == "evidence_token_mismatch" for issue in result["blocking_issues"])
+
+
+def test_validator_blocks_fabricated_integer_or_percentage() -> None:
+    report = _report(claim="PAS_HLF_KO 预计提升 50% 并进入第 2 轮")
+
+    result = validate_screen_report_json(_fact_pack(), report)
+
+    assert result["verdict"] == "fail"
+    assert any(issue["type"] == "unsupported_numeric_value" for issue in result["blocking_issues"])
+
+
+def test_validator_blocks_target_mixup_in_executive_summary() -> None:
+    report = _report()
+    report["targets"]["hLF"]["executive_summary"] = "PAS_OPN_OE 是 hLF 的主要候选"
+
+    result = validate_screen_report_json(_fact_pack(), report)
+
+    assert result["verdict"] == "fail"
+    assert any(issue["type"] == "target_token_mismatch" for issue in result["blocking_issues"])
+
+
+def test_validator_blocks_fabricated_number_in_executive_summary() -> None:
+    report = _report()
+    report["targets"]["hLF"]["executive_summary"] = "预计总体提升 50%"
+
+    result = validate_screen_report_json(_fact_pack(), report)
+
+    assert result["verdict"] == "fail"
+    assert any(issue["type"] == "unsupported_numeric_value" for issue in result["blocking_issues"])
+
+
+def test_validator_blocks_empty_bucket_when_fact_pack_has_useful_candidates() -> None:
+    fact_pack = _fact_pack()
+    fact_pack["targets"]["hLF"] = {
+        "useful_ko_candidates": [{"evidence_id": "hLF-KO-0001"}],
+        "useful_oe_candidates": [],
+        "growth_risk_candidates": [],
+        "manual_review_candidates": [],
+    }
+    report = _report()
+    report["targets"]["hLF"]["recommended_ko"] = []
+
+    result = validate_screen_report_json(fact_pack, report)
+
+    assert result["verdict"] == "fail"
+    assert any(issue["type"] == "omission" for issue in result["blocking_issues"])
+
+
+def test_validator_does_not_require_growth_risk_candidate_in_recommended_bucket() -> None:
+    fact_pack = _fact_pack()
+    fact_pack["targets"]["hLF"] = {
+        "useful_ko_candidates": [
+            {"evidence_id": "hLF-KO-0001", "recommendation_tier": "not_recommended_growth_risk"}
+        ],
+        "useful_oe_candidates": [],
+        "growth_risk_candidates": [{"evidence_id": "hLF-KO-0001"}],
+        "manual_review_candidates": [],
+    }
+    report = _report()
+    report["targets"]["hLF"]["recommended_ko"] = []
+    report["targets"]["hLF"]["not_recommended_or_risky"] = [
+        {
+            "evidence_id": "hLF-KO-0001",
+            "claim": "PAS_HLF_KO 存在生长风险",
+            "rationale": "来自 fact pack",
+            "risk": "生长风险",
+            "next_step": "不进入推荐列表",
+        }
+    ]
+
+    result = validate_screen_report_json(fact_pack, report)
+
+    assert not any(
+        issue["type"] == "omission" and issue.get("location") == "hLF.recommended_ko"
+        for issue in result["blocking_issues"]
+    )
