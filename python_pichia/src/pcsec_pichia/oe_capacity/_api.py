@@ -44,7 +44,9 @@ def build_oe_dose_spec(
     payload: Mapping[str, Any],
     dose_mapping: Mapping[str, Any] | None = None,
 ) -> Any:
-    _phase_gate("build_oe_dose_spec", 2)
+    from pcsec_pichia.oe_capacity.parameters import build_oe_dose_spec as _build
+
+    return _build(payload, dose_mapping)
 
 
 def build_gene_capacity_specs(
@@ -53,7 +55,9 @@ def build_gene_capacity_specs(
     dose: Any,
     parameter_policy: Any,
 ) -> Any:
-    _phase_gate("build_gene_capacity_specs", 2)
+    from pcsec_pichia.oe_capacity.parameters import build_gene_capacity_specs as _build
+
+    return _build(gene_id, catalog, dose, parameter_policy)
 
 
 def plan_gene_level_overexpression(
@@ -65,7 +69,19 @@ def plan_gene_level_overexpression(
     catalog: Any,
     parameter_policy: Any,
 ) -> Any:
-    _phase_gate("plan_gene_level_overexpression", 2)
+    from pcsec_pichia.oe_capacity.parameters import (
+        plan_gene_level_overexpression as _plan,
+    )
+
+    return _plan(
+        model,
+        gene_id,
+        target_id,
+        context_id,
+        dose,
+        catalog,
+        parameter_policy,
+    )
 
 
 def build_oe_capacity_constraints(prepared_model: Any, plan: Any) -> Any:

@@ -222,6 +222,10 @@ def summarize_gene_capacity_catalog(
     return coverage
 
 
+def fingerprint_oe_capacity_model(model: Any) -> str:
+    return _model_fingerprint(model)
+
+
 def _mapping(
     *,
     fingerprint: str,
@@ -360,6 +364,7 @@ def _external_source_type(value: Any) -> EvidenceSourceType:
 
 __all__ = [
     "build_gene_enzyme_reaction_catalog",
+    "fingerprint_oe_capacity_model",
     "summarize_gene_capacity_catalog",
     "validate_gene_capacity_catalog",
 ]

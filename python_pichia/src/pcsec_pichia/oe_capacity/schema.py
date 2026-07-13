@@ -13,6 +13,10 @@ class OECapacityValidationError(OECapacityError, ValueError):
     """Raised when an OE capacity contract violates a frozen invariant."""
 
 
+class OECapacityParameterConflictError(OECapacityValidationError):
+    """Raised when equally preferred parameter evidence conflicts."""
+
+
 class EvidenceSourceType(str, Enum):
     CURRENT_MODEL = "current_model"
     LOCAL_ENZYME_DATA = "local_enzyme_data"
@@ -114,6 +118,13 @@ class ParameterEstimate:
             raise OECapacityValidationError(
                 "is_transferred parameters must use source_type=homology_transfer."
             )
+
+    def value_for_scenario(self, scenario: ParameterScenario) -> float:
+        if scenario is ParameterScenario.LOW:
+            return float(self.lower_bound)
+        if scenario is ParameterScenario.HIGH:
+            return float(self.upper_bound)
+        return float(self.nominal_value)
 
 
 @dataclass(frozen=True)
@@ -287,6 +298,74 @@ class GeneCapacitySpec:
             raise OECapacityValidationError(
                 "executable GeneCapacitySpec requires an auditable resource cost mode."
             )
+
+
+@dataclass(frozen=True)
+class GeneCapacityParameterSet:
+    parameter_set_id: str
+    mapping_id: str
+    gene_id: str
+    enzyme_id: str
+    kcat: ParameterEstimate | None
+    molecular_weight: ParameterEstimate | None
+    baseline_enzyme_amount: ParameterEstimate | None
+    complex_stoichiometry: ParameterEstimate | None = None
+    warnings: tuple[str, ...] = ()
+
+    def validate(self) -> None:
+        _require_text(self.parameter_set_id, "parameter_set_id")
+        _require_text(self.gene_id, "gene_id")
+        _require_text(self.enzyme_id, "enzyme_id")
+        if not self.mapping_id:
+            raise OECapacityValidationError("mapping_id must be non-empty.")
+        expected_names = (
+            ("kcat", self.kcat),
+            ("molecular_weight", self.molecular_weight),
+            ("baseline_enzyme_amount", self.baseline_enzyme_amount),
+            ("complex_stoichiometry", self.complex_stoichiometry),
+        )
+        for expected_name, estimate in expected_names:
+            if estimate is None:
+                continue
+            estimate.validate()
+            if estimate.parameter_name != expected_name:
+                raise OECapacityValidationError(
+                    f"{expected_name} estimate must use parameter_name={expected_name}."
+                )
+
+    @property
+    def missing_information(self) -> tuple[str, ...]:
+        values = (
+            ("kcat", self.kcat),
+            ("molecular_weight", self.molecular_weight),
+            ("baseline_enzyme_amount", self.baseline_enzyme_amount),
+        )
+        return tuple(name for name, value in values if value is None)
+
+
+@dataclass(frozen=True)
+class ParameterPolicy:
+    parameter_sets: tuple[GeneCapacityParameterSet, ...]
+    scenarios: tuple[ParameterScenario, ...] = (
+        ParameterScenario.LOW,
+        ParameterScenario.NOMINAL,
+        ParameterScenario.HIGH,
+    )
+    strict_conflicts: bool = True
+
+    def validate(self) -> None:
+        if not self.scenarios or len(set(self.scenarios)) != len(self.scenarios):
+            raise OECapacityValidationError(
+                "ParameterPolicy scenarios must be non-empty and unique."
+            )
+        ids: set[str] = set()
+        for parameter_set in self.parameter_sets:
+            parameter_set.validate()
+            if parameter_set.parameter_set_id in ids:
+                raise OECapacityValidationError(
+                    f"duplicate parameter_set_id: {parameter_set.parameter_set_id}"
+                )
+            ids.add(parameter_set.parameter_set_id)
 
 
 @dataclass(frozen=True)
@@ -726,6 +805,7 @@ __all__ = [
     "GeneCapacitySpec",
     "GeneCapacityCatalog",
     "GeneCapacityCoverage",
+    "GeneCapacityParameterSet",
     "GeneCapacityValidationIssue",
     "GeneCapacityValidationResult",
     "GeneEnzymeReactionMapping",
@@ -733,6 +813,7 @@ __all__ = [
     "OEDoseMode",
     "OEDoseSpec",
     "OECapacityError",
+    "OECapacityParameterConflictError",
     "OECapacityConstraintBundle",
     "OECapacityComparisonResult",
     "OECapacityPlan",
@@ -746,6 +827,7 @@ __all__ = [
     "OEExecutionStatus",
     "ParameterScenario",
     "ParameterEstimate",
+    "ParameterPolicy",
     "ResourceCostMode",
     "SolverSnapshot",
 ]

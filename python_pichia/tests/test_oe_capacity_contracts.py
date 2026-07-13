@@ -29,6 +29,7 @@ from pcsec_pichia.oe_capacity import (
     ResourceCostMode,
     build_gene_enzyme_reaction_catalog,
     build_oe_dose_spec,
+    build_oe_capacity_constraints,
 )
 
 
@@ -240,8 +241,8 @@ def test_constraint_bundle_keeps_gene_capacity_changes_separate_from_proxy_bound
 
 
 def test_future_public_api_is_importable_but_phase_gated_until_its_round() -> None:
-    with pytest.raises(OECapacityPhaseError, match="Round 2"):
-        build_oe_dose_spec({})
+    with pytest.raises(OECapacityPhaseError, match="Round 3"):
+        build_oe_capacity_constraints(None, None)
 
 
 def test_execution_statuses_and_comparison_snapshots_are_explicit() -> None:

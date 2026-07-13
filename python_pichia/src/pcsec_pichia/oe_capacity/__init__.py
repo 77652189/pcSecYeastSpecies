@@ -12,7 +12,11 @@ from pcsec_pichia.oe_capacity._api import (
     validate_gene_capacity_catalog,
     write_oe_capacity_outputs,
 )
-from pcsec_pichia.oe_capacity.mapping import summarize_gene_capacity_catalog
+from pcsec_pichia.oe_capacity.mapping import (
+    fingerprint_oe_capacity_model,
+    summarize_gene_capacity_catalog,
+)
+from pcsec_pichia.oe_capacity.parameters import build_current_model_parameter_policy
 from pcsec_pichia.oe_capacity.schema import (
     CapacityConstraintChange,
     ConfidenceLevel,
@@ -20,6 +24,7 @@ from pcsec_pichia.oe_capacity.schema import (
     EvidenceSourceType,
     GeneCapacityCatalog,
     GeneCapacityCoverage,
+    GeneCapacityParameterSet,
     GeneCapacitySpec,
     GeneCapacityValidationIssue,
     GeneCapacityValidationResult,
@@ -28,6 +33,7 @@ from pcsec_pichia.oe_capacity.schema import (
     OEDoseMode,
     OEDoseSpec,
     OECapacityError,
+    OECapacityParameterConflictError,
     OECapacityComparisonResult,
     OECapacityConstraintBundle,
     OECapacityPlan,
@@ -41,6 +47,7 @@ from pcsec_pichia.oe_capacity.schema import (
     OEExecutionStatus,
     ParameterScenario,
     ParameterEstimate,
+    ParameterPolicy,
     ResourceCostMode,
     SolverSnapshot,
 )
@@ -52,6 +59,7 @@ __all__ = [
     "EvidenceSourceType",
     "GeneCapacityCatalog",
     "GeneCapacityCoverage",
+    "GeneCapacityParameterSet",
     "GeneCapacitySpec",
     "GeneCapacityValidationIssue",
     "GeneCapacityValidationResult",
@@ -60,6 +68,7 @@ __all__ = [
     "OEDoseMode",
     "OEDoseSpec",
     "OECapacityError",
+    "OECapacityParameterConflictError",
     "OECapacityComparisonResult",
     "OECapacityConstraintBundle",
     "OECapacityPhaseError",
@@ -74,12 +83,15 @@ __all__ = [
     "OEExecutionStatus",
     "ParameterScenario",
     "ParameterEstimate",
+    "ParameterPolicy",
     "ResourceCostMode",
     "SolverSnapshot",
     "build_gene_capacity_specs",
+    "build_current_model_parameter_policy",
     "build_gene_enzyme_reaction_catalog",
     "build_oe_capacity_constraints",
     "build_oe_dose_spec",
+    "fingerprint_oe_capacity_model",
     "plan_gene_level_overexpression",
     "run_gene_level_oe_comparison",
     "run_gene_level_oe_screen",
