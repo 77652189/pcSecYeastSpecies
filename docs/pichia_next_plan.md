@@ -8,7 +8,7 @@
 ```yaml
 current_phase: phase_2_gene_level_oe
 current_round: round_6a_external_capacity_candidates
-round_status: ready
+round_status: in_progress
 ```
 
 执行会话必须从这里记录的阶段和轮次继续。完成一轮后，只更新到下一轮；不得在新会话中自动重置为 Phase 1 Round 0。
@@ -503,4 +503,4 @@ Phase 2 完成必须满足：
 
 ## 当前下一步
 
-执行 Phase 2 Round 6A：建立外部 baseline capacity 候选获取、标准化、审核和提升链路，优先解决 `PAS_chr2-1_0308 / G6PDH2`。完成 Round 6A 后进入 Round 6B 正式重验收；在 runner 得到 `passed=true` 前不得进入 Phase 3，也不得生成 Phase 3 Round 0 提示词。
+执行 Round 6A 的 A0a 结构收束 checkpoint：拆分当前多职责 `external_candidates.py`，把联网来源归还 `external_refs`，并提供 CLI/service 共用的公开 audit API。完成并提交 A0a 后，再单独执行 A0b 真实定量来源接入。当前仅有 UniProt identity 和人工导入流程，不构成真实外部容量来源完成，也不得把任务默认交回研发组。Round 6B 正式验收通过前，不得进入 Phase 3，也不得生成 Phase 3 Round 0 提示词。

@@ -7,6 +7,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 ACTIVE_DOCS = {
     "data_and_results_policy.md",
+    "handoff.md",
     "pichia_current_architecture_and_requirements.md",
     "pichia_next_plan.md",
     "README.md",
@@ -71,9 +72,21 @@ def test_next_plan_runs_external_capacity_candidates_before_final_acceptance() -
 
     assert "current_phase: phase_2_gene_level_oe" in current_state
     assert "current_round: round_6a_external_capacity_candidates" in current_state
-    assert "round_status: ready" in current_state
+    assert "round_status: in_progress" in current_state
     assert "从 Phase 1 Round 0 开始" not in text
     assert "Round 6A：外部 baseline capacity 候选与审核提升" in text
     assert "Round 6B：hLF/OPN 正式重验收" in text
     assert "不得进入 Phase 3" in text
     assert "不得生成 Phase 3 Round 0 提示词" in text
+
+
+def test_handoff_points_to_quantitative_source_checkpoint() -> None:
+    text = (REPO_ROOT / "docs" / "handoff.md").read_text(encoding="utf-8")
+
+    assert "current_round: round_6a_external_capacity_candidates" in text
+    assert "round_status: in_progress" in text
+    assert "current_checkpoint: a0b_quantitative_source" in text
+    assert "checkpoint_status: ready" in text
+    assert "A0a 结构收束已完成" in text
+    assert "尚未接入真实定量来源" in text
+    assert "未开始 Round 6B 或 Phase 3" in text

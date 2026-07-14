@@ -37,6 +37,31 @@ target_specific
 - 不使用 `1000` 通用上界、baseline optimal flux、固定 `1.0` 或 smoke fixture 补齐正式容量。
 - 没有合格候选时保持不可执行和 `reviewed_baseline_capacity` 缺口。
 
+## 真实来源完成标准
+
+以下能力只能证明候选工作流存在，不能证明外部容量来源已经接入：
+
+- UniProt、NCBI 或其他数据库只确认 gene/protein identity。
+- 人工 CSV/TSV/JSON 导入器及其 smoke fixture。
+- 尚未包含定量值的 source inventory 或 `manual_import_required` 记录。
+- 只验证公式、单位和 promotion 流程的合成候选。
+
+Round 6A 的真实来源 checkpoint 至少需要一个公开定量来源完成可重复获取或正式文件解析，并产出带原始值、版本、hash、license、条件和单位链的记录。优先来源为 Pichia 定量蛋白组或 iPichia/ecPichia；BRENDA/SABIO-RK 只能提供动力学部分，仍需可追溯的丰度或直接容量来源。
+
+在尚未完成上述来源接入时，不得把 Round 6A 标记为 `awaiting_candidate_review`，也不得重新把提供容量数值的责任默认交回研发组。此时状态保持 `in_progress`。
+
+## 模块和调用边界
+
+- `external_refs/capacity_sources.py` 拥有联网获取、许可元数据和原始 cache。
+- `oe_capacity/external_candidate_schema.py` 只拥有候选契约和基础校验。
+- `oe_capacity/external_candidate_io.py` 只拥有本地序列化、人工导入和离线回放。
+- `oe_capacity/external_candidate_evaluation.py` 拥有 current-model binding、单位换算、冲突和状态推导。
+- `oe_capacity/external_candidate_promotion.py` 拥有 preview、asset hash、merge、validation 和原子替换。
+- `oe_capacity/external_candidate_audit.py` 提供 CLI 和 service 共用的公开 orchestration API。
+- `app/services` 只调用上述公开 API；`python_pichia/tools` 不得导入 `app.services` 或任何私有 `_...` 函数。
+
+可以暂时保留 `external_candidates.py` 作为兼容 facade，但不得继续把新职责加入该文件。
+
 ## 影响
 
-优点是研发组无需自行产生容量数值，项目仍可利用公开 Pichia 蛋白组、酶约束模型和动力学数据推进；同时保留正式求解的可追溯性。代价是需要新增在线候选获取、单位转换、审核 UI 和 promotion 工作流，并接受部分候选只能保持低置信、不可正式执行。
+优点是研发组无需自行产生容量数值，项目仍可利用公开 Pichia 蛋白组、酶约束模型和动力学数据推进；同时保留正式求解的可追溯性。代价是需要维护独立的来源、候选评估和 promotion 边界，并接受部分候选只能保持低置信、不可正式执行。

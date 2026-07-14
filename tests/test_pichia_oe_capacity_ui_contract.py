@@ -97,6 +97,8 @@ def test_oe_capacity_view_uses_service_only_and_target_scoped_session_keys() -> 
         "oe_capacity_form_state_by_target",
         "oe_capacity_last_previews_by_target",
         "oe_capacity_last_runs_by_target",
+        "oe_capacity_candidate_selection_by_target",
+        "oe_capacity_promotion_preview_by_target",
         '"gene_id": "oe_capacity_widget_gene_id"',
         '"scenarios": "oe_capacity_widget_scenarios"',
         "on_change=_sync_form_field",
@@ -104,6 +106,7 @@ def test_oe_capacity_view_uses_service_only_and_target_scoped_session_keys() -> 
         "reviewed_baseline_capacity",
         "baseline / proxy / gene-capacity",
         "不会自动修改 recommendation tier",
+        "我明确批准以上候选写入正式容量资产",
     ):
         assert text in source
     assert "st.cache_data" not in source
@@ -123,8 +126,64 @@ def test_service_cache_key_includes_target_context_and_uncertainty() -> None:
     assert "capacity_asset_version: str" in source
     assert "_capacity_asset_version()" in source
     assert "DEFAULT_TARGET_IDS = (\"hLF\", \"OPN_ALPHA_FULL_PROJECT\")" in source
-    assert "from pcsec_pichia.screens import prepare_screen_inputs" in source
+    assert "from pcsec_pichia.oe_capacity.external_candidate_audit import (" in source
+    assert "prepare_external_candidate_runtime" in source
+    assert "from pcsec_pichia.screens" not in source
+    assert "from pcsec_pichia.loading" not in source
     assert "_prepare_screen_inputs" not in source
+
+
+def test_candidate_review_missing_cache_is_safe_and_promotion_requires_explicit_approval(
+    tmp_path: Path,
+) -> None:
+    review = service.load_oe_capacity_candidate_review(
+        tmp_path / "missing",
+        target_id="hLF",
+    )
+    assert review["available"] is False
+    assert review["candidates"] == []
+    assert "正式容量资产保持不变" in review["message"]
+
+    try:
+        service.promote_oe_capacity_candidate_selection(
+            candidate_root=tmp_path / "missing",
+            candidate_ids=("candidate-1",),
+            reviewer="reviewer",
+            expected_candidate_manifest_sha256="a" * 64,
+            expected_asset_sha256="b" * 64,
+            explicit_approval=False,
+        )
+    except ValueError as exc:
+        assert "explicit_approval=True" in str(exc)
+    else:
+        raise AssertionError("formal promotion must require explicit approval")
+
+
+def test_candidate_promotion_keeps_the_cached_runtime_resolver_seam(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_promote(repo_root, **kwargs):
+        captured["repo_root"] = repo_root
+        captured.update(kwargs)
+        return {"decision": "approved", "acceptance_started": False}
+
+    monkeypatch.setattr(service, "promote_external_candidate_selection", fake_promote)
+
+    result = service.promote_oe_capacity_candidate_selection(
+        candidate_root=tmp_path / "candidates",
+        candidate_ids=("candidate-1",),
+        reviewer="reviewer",
+        expected_candidate_manifest_sha256="a" * 64,
+        expected_asset_sha256="b" * 64,
+        explicit_approval=True,
+    )
+
+    assert result == {"decision": "approved", "acceptance_started": False}
+    assert captured["runtime_resolver"] is service._prepare_runtime
+    assert captured["capacity_asset_path"] == service.OE_CAPACITY_ASSET_PATH
 
 
 def test_canonical_screen_preparation_has_a_public_service_adapter() -> None:
@@ -348,6 +407,29 @@ def test_target_switch_persists_each_form_independently(monkeypatch) -> None:
     states = session_state[oe_capacity_view.FORM_STATE_KEY]
     assert states["OPN_ALPHA_FULL_PROJECT"]["gene_id"] == "OPN_GENE"
     assert states["OPN_ALPHA_FULL_PROJECT"]["scenarios"] == ["nominal"]
+
+
+def test_target_switch_persists_candidate_selection_independently(monkeypatch) -> None:
+    session_state: dict[str, object] = {}
+    monkeypatch.setattr(
+        oe_capacity_view,
+        "st",
+        SimpleNamespace(session_state=session_state),
+    )
+
+    oe_capacity_view._load_widget_form("hLF")
+    oe_capacity_view._load_candidate_selection("hLF")
+    session_state[oe_capacity_view.CANDIDATE_WIDGET_KEY] = ["hlf-candidate"]
+    oe_capacity_view._sync_candidate_selection("hLF")
+    session_state[oe_capacity_view.TARGET_KEY] = "OPN_ALPHA_FULL_PROJECT"
+    oe_capacity_view._switch_target_form()
+    assert session_state[oe_capacity_view.CANDIDATE_WIDGET_KEY] == []
+
+    session_state[oe_capacity_view.CANDIDATE_WIDGET_KEY] = ["opn-candidate"]
+    oe_capacity_view._sync_candidate_selection("OPN_ALPHA_FULL_PROJECT")
+    session_state[oe_capacity_view.TARGET_KEY] = "hLF"
+    oe_capacity_view._switch_target_form()
+    assert session_state[oe_capacity_view.CANDIDATE_WIDGET_KEY] == ["hlf-candidate"]
 
 
 def test_run_directory_is_reserved_before_runtime_preparation(

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import re
 from dataclasses import asdict
@@ -15,27 +14,35 @@ from app import ensure_python_pichia_on_path
 
 ensure_python_pichia_on_path()
 
-from pcsec_pichia.loading import load_pcsec_pichia_inputs
 from pcsec_pichia.oe_capacity import (
-    CapacityAnchorCatalog,
     OECapacityScreenConfig,
     OECapacityScreenRequest,
     OEExecutionMode,
-    ParameterPolicy,
     ParameterScenario,
-    build_current_model_parameter_policy,
-    build_gene_enzyme_reaction_catalog,
     build_oe_dose_spec,
-    load_capacity_anchor_catalog,
     run_gene_level_oe_screen,
     summarize_gene_capacity_catalog,
     write_oe_capacity_outputs,
 )
-from pcsec_pichia.screens import prepare_screen_inputs
+from pcsec_pichia.oe_capacity.external_candidate_audit import (
+    capacity_asset_version,
+    load_capacity_asset_snapshot,
+    load_external_candidate_review,
+    prepare_external_candidate_runtime,
+    preview_external_candidate_promotion,
+    promote_external_candidate_selection,
+)
 from pcsec_pichia.targets import load_builtin_targets
 
 
 DEFAULT_OE_CAPACITY_ROOT = Path("local_runs") / "oe_capacity" / "ui_runs"
+DEFAULT_OE_CAPACITY_CANDIDATE_ROOT = (
+    Path("local_runs")
+    / "oe_capacity"
+    / "round6a"
+    / "g6pdh2_audit"
+    / "candidates"
+)
 DEFAULT_TARGET_IDS = ("hLF", "OPN_ALPHA_FULL_PROJECT")
 OE_CAPACITY_ASSET_PATH = Path("Enzymedata") / "oe_capacity_baseline_capacity.json"
 UI_RUN_STATUS_FILENAME = "ui_run_status.json"
@@ -57,6 +64,66 @@ def list_oe_capacity_targets() -> list[dict[str, str]]:
             }
         )
     return rows
+
+
+def load_oe_capacity_candidate_review(
+    candidate_root: str | Path = DEFAULT_OE_CAPACITY_CANDIDATE_ROOT,
+    *,
+    target_id: str,
+    growth_rate: float = 0.1,
+    carbon_source_id: str = "glucose",
+) -> dict[str, Any]:
+    return load_external_candidate_review(
+        _repo_root(),
+        candidate_root,
+        target_id=target_id,
+        growth_rate=growth_rate,
+        carbon_source_id=carbon_source_id,
+        capacity_asset_path=OE_CAPACITY_ASSET_PATH,
+    )
+
+
+def preview_oe_capacity_promotion(
+    *,
+    candidate_root: str | Path,
+    candidate_ids: Sequence[str],
+    target_id: str,
+    expected_candidate_manifest_sha256: str,
+    expected_asset_sha256: str,
+) -> dict[str, Any]:
+    return preview_external_candidate_promotion(
+        _repo_root(),
+        candidate_root=candidate_root,
+        candidate_ids=candidate_ids,
+        target_id=target_id,
+        expected_candidate_manifest_sha256=expected_candidate_manifest_sha256,
+        expected_asset_sha256=expected_asset_sha256,
+        capacity_asset_path=OE_CAPACITY_ASSET_PATH,
+    )
+
+
+def promote_oe_capacity_candidate_selection(
+    *,
+    candidate_root: str | Path,
+    candidate_ids: Sequence[str],
+    reviewer: str,
+    expected_candidate_manifest_sha256: str,
+    expected_asset_sha256: str,
+    explicit_approval: bool,
+) -> dict[str, Any]:
+    promoted = promote_external_candidate_selection(
+        _repo_root(),
+        candidate_root=candidate_root,
+        candidate_ids=candidate_ids,
+        reviewer=reviewer,
+        expected_candidate_manifest_sha256=expected_candidate_manifest_sha256,
+        expected_asset_sha256=expected_asset_sha256,
+        explicit_approval=explicit_approval,
+        capacity_asset_path=OE_CAPACITY_ASSET_PATH,
+        runtime_resolver=_prepare_runtime,
+    )
+    _prepare_runtime.cache_clear()
+    return promoted
 
 
 def preview_oe_capacity_candidate(
@@ -306,105 +373,25 @@ def _prepare_runtime(
     relative_uncertainty: float,
     capacity_asset_version: str,
 ) -> SimpleNamespace:
-    targets = _target_lookup()
-    try:
-        target = targets[target_id]
-    except KeyError as exc:
-        raise KeyError(f"unknown OE capacity target: {target_id}") from exc
-    inputs = load_pcsec_pichia_inputs(
+    return prepare_external_candidate_runtime(
         _repo_root(),
+        target_id=target_id,
+        growth_rate=growth_rate,
         carbon_source_id=carbon_source_id,
-    )
-    prepared = prepare_screen_inputs(
-        inputs.prepared_model,
-        target,
-        inputs.amino_acids,
-        inputs.metabolic,
-        inputs.secretory,
-        inputs.combined,
-        growth_rate,
-    )
-    if not prepared.get("baseline_success"):
-        raise RuntimeError(
-            "target baseline preparation failed: "
-            + str(prepared.get("baseline_status") or prepared.get("build_status") or "unknown")
-        )
-    catalog = build_gene_enzyme_reaction_catalog(
-        prepared["fixed_model"],
-        inputs.metabolic,
-        prepared["combined"],
-    )
-    capacity_asset_path = _repo_root() / OE_CAPACITY_ASSET_PATH
-    anchor_catalog, capacity_asset_metadata = _load_capacity_asset_snapshot(
-        capacity_asset_path
-    )
-    loaded_asset_version = str(capacity_asset_metadata.get("sha256") or "missing")
-    if loaded_asset_version != capacity_asset_version:
-        raise RuntimeError(
-            "OE capacity asset changed during runtime preparation; retry the run."
-        )
-    context_id = _context_id(carbon_source_id, growth_rate)
-    parameter_policy = build_current_model_parameter_policy(
-        catalog,
-        prepared["combined"],
-        capacity_anchors=anchor_catalog,
-        target_id=target_id,
-        context_id=context_id,
         relative_uncertainty=relative_uncertainty,
-    )
-    return SimpleNamespace(
-        target_id=target_id,
-        fixed_model=prepared["fixed_model"],
-        exchange_reaction_id=prepared["exchange_reaction_id"],
-        metabolic=inputs.metabolic,
-        secretory=prepared["secretory"],
-        combined=prepared["combined"],
-        gene_capacity_catalog=catalog,
-        parameter_policy=ParameterPolicy(
-            parameter_sets=parameter_policy.parameter_sets,
-            scenarios=parameter_policy.scenarios,
-            strict_conflicts=parameter_policy.strict_conflicts,
-        ),
-        capacity_asset_version=capacity_asset_version,
-        capacity_asset_metadata=capacity_asset_metadata,
-        capacity_anchor_catalog=anchor_catalog,
+        capacity_asset_path=OE_CAPACITY_ASSET_PATH,
+        expected_asset_sha256=capacity_asset_version,
     )
 
 
 def _capacity_asset_version() -> str:
-    path = _repo_root() / OE_CAPACITY_ASSET_PATH
-    if not path.is_file():
-        return "missing"
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    return capacity_asset_version(_repo_root(), OE_CAPACITY_ASSET_PATH)
 
 
 def _load_capacity_asset_snapshot(
     path: Path,
-) -> tuple[CapacityAnchorCatalog, dict[str, Any]]:
-    if not path.is_file():
-        catalog = CapacityAnchorCatalog(
-            model_fingerprint="missing-capacity-asset",
-            anchors=(),
-            source_ref=str(path),
-        )
-        return catalog, {
-            "path": str(path),
-            "version": "missing",
-            "sha256": "",
-            "reviewed": False,
-        }
-    raw = path.read_bytes()
-    payload = json.loads(raw.decode("utf-8"))
-    if not isinstance(payload, dict):
-        raise ValueError("OE capacity asset root must be a JSON object.")
-    catalog = load_capacity_anchor_catalog(payload)
-    metadata = {
-        "path": str(path),
-        "version": str(payload.get("asset_version") or ""),
-        "sha256": hashlib.sha256(raw).hexdigest(),
-        "reviewed": bool(catalog.anchors),
-    }
-    return catalog, metadata
+) -> tuple[Any, dict[str, Any]]:
+    return load_capacity_asset_snapshot(path)
 
 
 def _write_run_status(directory: Path, *, status: str, **details: Any) -> None:
@@ -487,11 +474,15 @@ def _json_ready(value: Any) -> Any:
 
 
 __all__ = [
+    "DEFAULT_OE_CAPACITY_CANDIDATE_ROOT",
     "DEFAULT_OE_CAPACITY_ROOT",
     "export_oe_capacity_report",
     "list_oe_capacity_runs",
     "list_oe_capacity_targets",
+    "load_oe_capacity_candidate_review",
     "load_oe_capacity_run",
     "preview_oe_capacity_candidate",
+    "preview_oe_capacity_promotion",
+    "promote_oe_capacity_candidate_selection",
     "submit_oe_capacity_screen",
 ]

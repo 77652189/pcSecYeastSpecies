@@ -4,13 +4,7 @@ import math
 from dataclasses import dataclass
 from enum import Enum
 
-
-class OECapacityError(RuntimeError):
-    """Base error for gene-level OE capacity workflows."""
-
-
-class OECapacityValidationError(OECapacityError, ValueError):
-    """Raised when an OE capacity contract violates a frozen invariant."""
+from pcsec_pichia.errors import OECapacityError, OECapacityValidationError
 
 
 class OECapacityParameterConflictError(OECapacityValidationError):

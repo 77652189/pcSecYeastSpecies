@@ -6,10 +6,14 @@ from typing import Any
 import streamlit as st
 
 from app.services.pichia_oe_capacity_service import (
+    DEFAULT_OE_CAPACITY_CANDIDATE_ROOT,
     export_oe_capacity_report,
     list_oe_capacity_runs,
     list_oe_capacity_targets,
+    load_oe_capacity_candidate_review,
     preview_oe_capacity_candidate,
+    preview_oe_capacity_promotion,
+    promote_oe_capacity_candidate_selection,
     submit_oe_capacity_screen,
 )
 
@@ -19,6 +23,10 @@ ACTIVE_TARGET_KEY = "oe_capacity_active_form_target"
 FORM_STATE_KEY = "oe_capacity_form_state_by_target"
 LAST_PREVIEWS_KEY = "oe_capacity_last_previews_by_target"
 LAST_RUNS_KEY = "oe_capacity_last_runs_by_target"
+CANDIDATE_SELECTIONS_KEY = "oe_capacity_candidate_selection_by_target"
+CANDIDATE_PREVIEWS_KEY = "oe_capacity_promotion_preview_by_target"
+CANDIDATE_WIDGET_KEY = "oe_capacity_widget_candidate_ids"
+CANDIDATE_ACTIVE_TARGET_KEY = "oe_capacity_candidate_active_target"
 
 FORM_WIDGET_KEYS = {
     "gene_id": "oe_capacity_widget_gene_id",
@@ -84,6 +92,19 @@ def _switch_target_form() -> None:
         _save_widget_form(str(previous_target))
     target_id = str(st.session_state[TARGET_KEY])
     _load_widget_form(target_id)
+    _load_candidate_selection(target_id)
+
+
+def _load_candidate_selection(target_id: str) -> None:
+    selections = dict(st.session_state.get(CANDIDATE_SELECTIONS_KEY) or {})
+    st.session_state[CANDIDATE_WIDGET_KEY] = list(selections.get(target_id) or [])
+    st.session_state[CANDIDATE_ACTIVE_TARGET_KEY] = target_id
+
+
+def _sync_candidate_selection(target_id: str) -> None:
+    selections = dict(st.session_state.get(CANDIDATE_SELECTIONS_KEY) or {})
+    selections[target_id] = list(st.session_state.get(CANDIDATE_WIDGET_KEY) or [])
+    st.session_state[CANDIDATE_SELECTIONS_KEY] = selections
 
 
 def render_oe_capacity() -> None:
@@ -102,6 +123,8 @@ def render_oe_capacity() -> None:
         st.session_state[TARGET_KEY] = target_ids[0]
     if st.session_state.get(ACTIVE_TARGET_KEY) not in target_ids:
         _load_widget_form(str(st.session_state[TARGET_KEY]))
+    if st.session_state.get(CANDIDATE_ACTIVE_TARGET_KEY) not in target_ids:
+        _load_candidate_selection(str(st.session_state[TARGET_KEY]))
     target_id = st.selectbox(
         "目标蛋白",
         target_ids,
@@ -118,6 +141,8 @@ def render_oe_capacity() -> None:
         "带来源和审核信息的 baseline capacity。缺少 reviewed_baseline_capacity 时只展示"
         "边界与旧 reaction proxy，不会从最优 flux 或通用上界推断容量。"
     )
+
+    _render_external_candidate_review(target_id)
 
     gene_id = st.text_input(
         "模型 gene ID",
@@ -236,6 +261,127 @@ def render_oe_capacity() -> None:
     if result:
         _render_result(result)
     _render_history(target_id)
+
+
+def _render_external_candidate_review(target_id: str) -> None:
+    review = load_oe_capacity_candidate_review(
+        DEFAULT_OE_CAPACITY_CANDIDATE_ROOT,
+        target_id=target_id,
+    )
+    with st.expander("Round 6A 外部 baseline capacity 候选审核", expanded=False):
+        st.caption(str(review.get("message") or ""))
+        st.code(str(review.get("candidate_root") or DEFAULT_OE_CAPACITY_CANDIDATE_ROOT))
+        if not review.get("available"):
+            st.info("候选 cache 缺失或校验失败时，当前正式容量资产不会改变。")
+            return
+        st.caption(
+            f"candidate manifest SHA-256: {review.get('candidate_manifest_sha256')} · "
+            f"formal asset SHA-256: {review.get('formal_asset_sha256')}"
+        )
+        candidates = list(review.get("candidates") or [])
+        if not candidates:
+            st.warning("当前 target/context 没有适用候选；不会用 1000、最优 flux、固定 1.0 或 fixture 补齐。")
+            return
+        rows = [
+            {
+                "candidate_id": item.get("candidate_id"),
+                "scope": item.get("applicability_scope"),
+                "status": item.get("status"),
+                "confidence": item.get("confidence"),
+                "nominal_capacity": item.get("nominal_capacity"),
+                "unit": item.get("unit"),
+                "gene_id": ((item.get("model_bindings") or [{}])[0]).get("gene_id"),
+                "formation_handle": ((item.get("model_bindings") or [{}])[0]).get(
+                    "formation_or_dilution_reaction_id"
+                ),
+                "conflicts": ", ".join(item.get("conflicts") or []),
+                "missing_information": ", ".join(item.get("missing_information") or []),
+                "promotion_eligible": item.get("promotion_eligible"),
+            }
+            for item in candidates
+        ]
+        st.dataframe(rows, use_container_width=True, hide_index=True)
+        with st.expander("来源、原始单位与转换链", expanded=False):
+            st.json(
+                {
+                    "sources": review.get("sources") or [],
+                    "candidates": candidates,
+                }
+            )
+        eligible_ids = [
+            str(item.get("candidate_id"))
+            for item in candidates
+            if item.get("promotion_eligible")
+        ]
+        previous = [
+            value
+            for value in st.session_state.get(CANDIDATE_WIDGET_KEY, [])
+            if value in eligible_ids
+        ]
+        if previous != st.session_state.get(CANDIDATE_WIDGET_KEY, []):
+            st.session_state[CANDIDATE_WIDGET_KEY] = previous
+            _sync_candidate_selection(target_id)
+        selected = st.multiselect(
+            "选择进入 promotion 预览的候选",
+            eligible_ids,
+            key=CANDIDATE_WIDGET_KEY,
+            on_change=_sync_candidate_selection,
+            args=(target_id,),
+            help="候选仍不是 reviewed anchor；此处只选择审核对象。",
+        )
+        if st.button("生成只读 promotion 预览", disabled=not selected):
+            try:
+                preview = preview_oe_capacity_promotion(
+                    candidate_root=str(review["candidate_root"]),
+                    candidate_ids=tuple(selected),
+                    target_id=target_id,
+                    expected_candidate_manifest_sha256=str(
+                        review["candidate_manifest_sha256"]
+                    ),
+                    expected_asset_sha256=str(review["formal_asset_sha256"]),
+                )
+            except Exception as exc:
+                st.error(f"promotion 预览失败：{exc}")
+            else:
+                previews = dict(st.session_state.get(CANDIDATE_PREVIEWS_KEY) or {})
+                previews[target_id] = preview
+                st.session_state[CANDIDATE_PREVIEWS_KEY] = previews
+        preview = (st.session_state.get(CANDIDATE_PREVIEWS_KEY) or {}).get(target_id)
+        if not preview:
+            return
+        st.json(preview)
+        reviewer = st.text_input(
+            "审核人",
+            key=f"oe_capacity_reviewer_{target_id}",
+            help="正式 promotion 会记录审核人和时间。",
+        )
+        explicit = st.checkbox(
+            "我明确批准以上候选写入正式容量资产",
+            key=f"oe_capacity_explicit_approval_{target_id}",
+        )
+        if st.button(
+            "正式提升为 reviewed capacity anchor",
+            type="primary",
+            disabled=not explicit or not reviewer.strip() or not bool(preview.get("eligible")),
+        ):
+            try:
+                promoted = promote_oe_capacity_candidate_selection(
+                    candidate_root=str(review["candidate_root"]),
+                    candidate_ids=tuple(preview.get("candidate_ids") or ()),
+                    reviewer=reviewer,
+                    expected_candidate_manifest_sha256=str(
+                        preview["candidate_manifest_sha256"]
+                    ),
+                    expected_asset_sha256=str(preview["formal_asset_sha256"]),
+                    explicit_approval=True,
+                )
+            except Exception as exc:
+                st.error(f"正式 promotion 失败：{exc}")
+            else:
+                st.success(
+                    "容量资产已原子更新；正式 acceptance 尚未自动启动，请按 Round 6B runner 重验收。"
+                )
+                st.json(promoted)
 
 
 def _render_preview(preview: dict[str, Any]) -> None:
