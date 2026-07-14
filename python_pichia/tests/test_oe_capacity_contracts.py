@@ -31,6 +31,7 @@ from pcsec_pichia.oe_capacity import (
     build_oe_dose_spec,
     build_oe_capacity_constraints,
 )
+from pcsec_pichia.oe_capacity.schema import CapacityAnchor
 
 
 def test_parameter_estimate_preserves_interval_unit_and_provenance() -> None:
@@ -62,6 +63,79 @@ def test_parameter_estimate_preserves_interval_unit_and_provenance() -> None:
             source_ref="Enzymedata/current",
             source_version="model-v1",
             confidence=ConfidenceLevel.HIGH,
+        ).validate()
+
+
+@pytest.mark.parametrize(
+    "parameter_name",
+    ("kcat", "molecular_weight", "baseline_enzyme_amount", "complex_stoichiometry"),
+)
+def test_capacity_parameters_must_be_strictly_positive(parameter_name: str) -> None:
+    with pytest.raises(OECapacityValidationError, match="positive"):
+        ParameterEstimate(
+            parameter_name=parameter_name,
+            nominal_value=-1.0,
+            lower_bound=-2.0,
+            upper_bound=-0.5,
+            unit="model_flux",
+            source_type=EvidenceSourceType.LOCAL_ENZYME_DATA,
+            source_ref="reviewed-capacity/v1",
+            source_version="v1",
+            confidence=ConfidenceLevel.HIGH,
+        ).validate()
+
+
+def test_capacity_anchor_requires_reviewed_absolute_model_flux() -> None:
+    anchor = CapacityAnchor(
+        anchor_id="anchor-G1",
+        target_id="hLF",
+        context_id="ctx-hlf",
+        gene_id="G1",
+        enzyme_id="R1_complex",
+        formation_or_dilution_reaction_id="R1_complex_formation",
+        model_fingerprint="model-v1",
+        baseline_capacity=2.5,
+        unit="model_flux",
+        source_ref="reviewed-capacity/v1",
+        source_version="v1",
+        reviewed_by="capacity-review-board",
+        reviewed_at="2026-07-14",
+    )
+    anchor.validate()
+    assert anchor.as_parameter_estimate().nominal_value == 2.5
+
+    with pytest.raises(OECapacityValidationError, match="unit=model_flux"):
+        CapacityAnchor(
+            **{**anchor.__dict__, "unit": "relative_capacity"}
+        ).validate()
+
+
+@pytest.mark.parametrize(
+    ("role", "expected"),
+    (
+        (GPRRole.ISOENZYME, "isoenzyme_ambiguous"),
+        (GPRRole.COMPLEX_SUBUNIT, "complex_limited"),
+        (GPRRole.MIXED, "partial_mapping"),
+    ),
+)
+def test_mapping_status_matrix_rejects_manual_executable_roles(
+    role: GPRRole,
+    expected: str,
+) -> None:
+    with pytest.raises(OECapacityValidationError, match=expected):
+        GeneEnzymeReactionMapping(
+            mapping_id=f"map-{role.value}",
+            model_fingerprint="model-v1",
+            gene_id="G1",
+            enzyme_id="R1_complex",
+            reaction_id="R1",
+            gpr_rule="G1",
+            gpr_role=role,
+            enzyme_variable_id="R1_complex_formation",
+            formation_or_dilution_reaction_id="R1_complex_formation",
+            mapping_source=EvidenceSourceType.CURRENT_MODEL,
+            mapping_confidence=ConfidenceLevel.HIGH,
+            execution_status=OEExecutionStatus.GENE_LEVEL_EXECUTABLE,
         ).validate()
 
 
@@ -112,7 +186,7 @@ def test_capacity_spec_and_plan_are_frozen_and_reject_proxy_disguised_as_gene_ca
         1.0,
         0.5,
         1.5,
-        "relative_amount",
+        "model_flux",
         EvidenceSourceType.CURRENT_MODEL,
         "model formation variable",
         "model-v1",
@@ -206,7 +280,7 @@ def test_constraint_bundle_keeps_gene_capacity_changes_separate_from_proxy_bound
         reaction_id="R1",
         old_value=1.0,
         new_value=2.0,
-        unit="relative_capacity",
+        unit="model_flux",
         source_ref="current model formation variable",
         resource_cost_mode=ResourceCostMode.CURRENT_PROTEIN_POOL,
     )
@@ -353,6 +427,41 @@ def test_dose_and_mapping_contracts_keep_proxy_and_gene_capacity_distinct() -> N
         ).validate()
 
 
+def test_mapping_validation_rejects_external_and_complex_status_upgrades() -> None:
+    with pytest.raises(OECapacityValidationError, match="external_evidence_only"):
+        GeneEnzymeReactionMapping(
+            mapping_id="external-G2",
+            model_fingerprint="model-v1",
+            gene_id="G2",
+            enzyme_id="external-enzyme",
+            reaction_id="external-reaction",
+            gpr_rule="G2",
+            gpr_role=GPRRole.SINGLE_GENE,
+            mapping_source=EvidenceSourceType.EXTERNAL_PICHIA_MODEL,
+            mapping_confidence=ConfidenceLevel.LOW,
+            execution_status=OEExecutionStatus.GENE_LEVEL_EXECUTABLE,
+        ).validate()
+
+    with pytest.raises(OECapacityValidationError, match="complex_limited"):
+        GeneEnzymeReactionMapping(
+            mapping_id="complex-G3",
+            model_fingerprint="model-v1",
+            gene_id="G3",
+            enzyme_id="C1",
+            reaction_id="R3",
+            gpr_rule="x(3) & x(4)",
+            gpr_role=GPRRole.COMPLEX_SUBUNIT,
+            complex_id="C1",
+            subunit_ids=("G3", "G4"),
+            subunit_stoichiometry=(("G3", 1.0), ("G4", 1.0)),
+            enzyme_variable_id="C1",
+            formation_or_dilution_reaction_id="C1_formation",
+            mapping_source=EvidenceSourceType.CURRENT_MODEL,
+            mapping_confidence=ConfidenceLevel.HIGH,
+            execution_status=OEExecutionStatus.GENE_LEVEL_EXECUTABLE,
+        ).validate()
+
+
 def _gene_capacity_plan() -> OECapacityPlan:
     mapping = GeneEnzymeReactionMapping(
         mapping_id="map-G1-R1",
@@ -401,7 +510,7 @@ def _gene_capacity_plan() -> OECapacityPlan:
             1.0,
             0.5,
             1.5,
-            "relative_amount",
+            "model_flux",
             EvidenceSourceType.CURRENT_MODEL,
             "model formation variable",
             "model-v1",
@@ -427,52 +536,3 @@ def _gene_capacity_plan() -> OECapacityPlan:
         execution_status=OEExecutionStatus.GENE_LEVEL_EXECUTABLE,
         executable_capacity_specs=(spec,),
     )
-
-    executable = GeneEnzymeReactionMapping(
-        mapping_id="map-G1-R1",
-        model_fingerprint="model-v1",
-        gene_id="G1",
-        enzyme_id="R1_complex",
-        reaction_id="R1",
-        gpr_rule="x(1)",
-        gpr_role=GPRRole.SINGLE_GENE,
-        enzyme_variable_id="R1_complex",
-        formation_or_dilution_reaction_id="R1_complex_formation",
-        mapping_source=EvidenceSourceType.CURRENT_MODEL,
-        mapping_confidence=ConfidenceLevel.HIGH,
-        execution_status=OEExecutionStatus.GENE_LEVEL_EXECUTABLE,
-    )
-    executable.validate()
-
-    with pytest.raises(OECapacityValidationError, match="external_evidence_only"):
-        GeneEnzymeReactionMapping(
-            mapping_id="external-G2",
-            model_fingerprint="model-v1",
-            gene_id="G2",
-            enzyme_id="external-enzyme",
-            reaction_id="external-reaction",
-            gpr_rule="G2",
-            gpr_role=GPRRole.SINGLE_GENE,
-            mapping_source=EvidenceSourceType.EXTERNAL_PICHIA_MODEL,
-            mapping_confidence=ConfidenceLevel.LOW,
-            execution_status=OEExecutionStatus.GENE_LEVEL_EXECUTABLE,
-        ).validate()
-
-    with pytest.raises(OECapacityValidationError, match="assembly_evidence_ref"):
-        GeneEnzymeReactionMapping(
-            mapping_id="complex-G3",
-            model_fingerprint="model-v1",
-            gene_id="G3",
-            enzyme_id="C1",
-            reaction_id="R3",
-            gpr_rule="x(3) & x(4)",
-            gpr_role=GPRRole.COMPLEX_SUBUNIT,
-            complex_id="C1",
-            subunit_ids=("G3", "G4"),
-            subunit_stoichiometry=(("G3", 1.0), ("G4", 1.0)),
-            enzyme_variable_id="C1",
-            formation_or_dilution_reaction_id="C1_formation",
-            mapping_source=EvidenceSourceType.CURRENT_MODEL,
-            mapping_confidence=ConfidenceLevel.HIGH,
-            execution_status=OEExecutionStatus.GENE_LEVEL_EXECUTABLE,
-        ).validate()

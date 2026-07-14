@@ -38,6 +38,9 @@ def build_oe_capacity_constraints(
             "all capacity specs must use one model_fingerprint."
         )
     changes: list[CapacityConstraintChange] = []
+    seen_capacity_handles: dict[
+        tuple[object, str], tuple[float, float, float, float]
+    ] = {}
     for spec in plan.executable_capacity_specs:
         scenario = spec.parameter_scenario
         mapping = spec.mapping
@@ -69,7 +72,7 @@ def build_oe_capacity_constraints(
         expected_units = (
             ("kcat", kcat.unit, "1/h"),
             ("molecular_weight", molecular_weight.unit, "g/mol"),
-            ("baseline_enzyme_amount", baseline.unit, "relative_capacity"),
+            ("baseline_enzyme_amount", baseline.unit, "model_flux"),
         )
         for parameter_name, actual_unit, expected_unit in expected_units:
             if actual_unit != expected_unit:
@@ -77,9 +80,26 @@ def build_oe_capacity_constraints(
                     f"{parameter_name} must use canonical unit {expected_unit}; "
                     f"received {actual_unit}."
                 )
-        baseline_ratio = (
-            baseline.value_for_scenario(scenario) / baseline.nominal_value
+        formation_id = mapping.formation_or_dilution_reaction_id
+        formation_index = reaction_index[formation_id]
+        original_upper_bound = float(model.ub[formation_index])
+        baseline_capacity = baseline.value_for_scenario(scenario)
+        handle_key = (scenario, formation_id)
+        handle_signature = (
+            float(multiplier),
+            float(baseline_capacity),
+            float(kcat.value_for_scenario(scenario)),
+            float(molecular_weight.value_for_scenario(scenario)),
         )
+        existing_signature = seen_capacity_handles.get(handle_key)
+        if existing_signature is not None:
+            if existing_signature != handle_signature:
+                raise OECapacityValidationError(
+                    "conflicting capacity specs for formation handle: "
+                    f"{formation_id} ({scenario.value})"
+                )
+            continue
+        seen_capacity_handles[handle_key] = handle_signature
         metadata = (
             ("mapping_id", mapping.mapping_id),
             ("gene_id", mapping.gene_id),
@@ -92,11 +112,11 @@ def build_oe_capacity_constraints(
                     scenario=scenario,
                     change_kind=ConstraintChangeKind.FORMATION_DILUTION_BOUND,
                     constraint_block="gene_capacity_formation_bound",
-                    variable_id=mapping.formation_or_dilution_reaction_id,
+                    variable_id=formation_id,
                     reaction_id=mapping.reaction_id,
-                    old_value=1.0,
-                    new_value=float(multiplier) * baseline_ratio,
-                    unit="relative_to_baseline_formation_flux",
+                    old_value=original_upper_bound,
+                    new_value=float(multiplier) * baseline_capacity,
+                    unit="model_flux",
                     source_ref=baseline.source_ref,
                     resource_cost_mode=spec.resource_cost_mode,
                     metadata=metadata,
@@ -120,7 +140,7 @@ def build_oe_capacity_constraints(
                     scenario=scenario,
                     change_kind=ConstraintChangeKind.PROTEIN_RESOURCE_COEFFICIENT,
                     constraint_block="protein_mass",
-                    variable_id=mapping.formation_or_dilution_reaction_id,
+                    variable_id=formation_id,
                     reaction_id=mapping.reaction_id,
                     old_value=molecular_weight.nominal_value,
                     new_value=molecular_weight.value_for_scenario(scenario),

@@ -9,6 +9,7 @@ from pcsec_pichia.oe_capacity.constraints import build_oe_capacity_constraints
 from pcsec_pichia.oe_capacity.schema import (
     ConfidenceLevel,
     OECapacityComparisonResult,
+    OECapacityScenarioResult,
     OECapacityPlan,
     OECapacityScreenConfig,
     OECapacityScreenRequest,
@@ -81,6 +82,7 @@ def run_gene_level_oe_comparison(
         counts=baseline_counts,
         mu=mu,
         protein_resource_cost=baseline_cost,
+        attempt_id="legacy_baseline",
     )
     if not baseline_result.success:
         comparison = OECapacityComparisonResult(
@@ -97,40 +99,15 @@ def run_gene_level_oe_comparison(
             skipped_reason="baseline_solve_failed",
             missing_information=plan.missing_information,
             warnings=plan.warnings,
+            scenario_results=(),
+            proxy_attempts=(),
         )
         comparison.validate()
         return comparison
 
-    baseline_formation_fluxes = tuple(
-        (formation_id, float(baseline_result.fluxes[formation_id]))
-        for formation_id in formation_ids
-        if formation_id in baseline_result.fluxes
-    )
-    zero_baseline_formations = tuple(
-        formation_id
-        for formation_id, flux in baseline_formation_fluxes
-        if abs(flux) <= 1e-12
-    )
     result_missing_information = plan.missing_information
     result_warnings = plan.warnings
-    if zero_baseline_formations:
-        result_missing_information = tuple(
-            dict.fromkeys(
-                (*result_missing_information, "nonzero_baseline_formation_flux")
-            )
-        )
-        result_warnings = tuple(
-            dict.fromkeys(
-                (
-                    *result_warnings,
-                    "Relative gene-capacity multipliers cannot create nonzero capacity "
-                    "for formation handles with zero baseline flux: "
-                    + ", ".join(zero_baseline_formations),
-                )
-            )
-        )
-
-    proxy = _run_proxy_snapshot(
+    proxy, proxy_attempts = _run_proxy_snapshots(
         prepared_model,
         plan,
         baseline_result,
@@ -138,6 +115,7 @@ def run_gene_level_oe_comparison(
         time_limit=time_limit,
     )
     scenarios: list[SolverSnapshot] = []
+    scenario_results: list[OECapacityScenarioResult] = []
     for scenario in plan.uncertainty_scenarios:
         scenario_specs = tuple(
             spec
@@ -146,12 +124,12 @@ def run_gene_level_oe_comparison(
         )
         if not scenario_specs:
             continue
-        perturbed_model = _model_with_gene_capacity_bounds(
+        scenario_model = _model_with_gene_capacity_bounds(
             model,
-            baseline_result.fluxes,
             scenario_specs,
+            multiplier=1.0,
         )
-        perturbed_metabolic, perturbed_secretory, perturbed_combined = (
+        scenario_metabolic, scenario_secretory, scenario_combined = (
             _enzyme_data_for_scenario(
                 prepared_model.metabolic,
                 prepared_model.secretory,
@@ -159,18 +137,57 @@ def run_gene_level_oe_comparison(
                 scenario_specs,
             )
         )
-        solved, counts = solve_pcsec_maximize(
-            perturbed_model,
+        scenario_baseline_result, scenario_baseline_counts = solve_pcsec_maximize(
+            scenario_model,
             objective,
-            metabolic=perturbed_metabolic,
-            secretory=perturbed_secretory,
-            combined=perturbed_combined,
+            metabolic=scenario_metabolic,
+            secretory=scenario_secretory,
+            combined=scenario_combined,
             mu=mu,
             key_reactions=key_reactions,
             time_limit_seconds=time_limit,
         )
-        scenarios.append(
-            _snapshot(
+        scenario_baseline = _snapshot(
+            execution_mode=OEExecutionMode.NOT_EXECUTABLE,
+            result=scenario_baseline_result,
+            counts=scenario_baseline_counts,
+            mu=mu,
+            protein_resource_cost=_targeted_resource_cost(
+                scenario_baseline_result.fluxes,
+                plan,
+                scenario,
+            ),
+            parameter_scenario=scenario,
+            attempt_id=f"{scenario.value}:capacity_baseline",
+        )
+        multiplier = scenario_specs[0].dose.expression_multiplier
+        if multiplier is None:
+            raise OECapacityValidationError(
+                "gene capacity scenarios require a numeric expression multiplier."
+            )
+        if abs(float(multiplier) - 1.0) <= 1e-12:
+            perturbed = replace(
+                scenario_baseline,
+                execution_mode=OEExecutionMode.GENE_CAPACITY,
+                attempt_id=f"{scenario.value}:gene_capacity:1x_identity",
+            )
+        else:
+            perturbed_model = _model_with_gene_capacity_bounds(
+                model,
+                scenario_specs,
+                multiplier=float(multiplier),
+            )
+            solved, counts = solve_pcsec_maximize(
+                perturbed_model,
+                objective,
+                metabolic=scenario_metabolic,
+                secretory=scenario_secretory,
+                combined=scenario_combined,
+                mu=mu,
+                key_reactions=key_reactions,
+                time_limit_seconds=time_limit,
+            )
+            perturbed = _snapshot(
                 execution_mode=OEExecutionMode.GENE_CAPACITY,
                 result=solved,
                 counts=counts,
@@ -181,8 +198,31 @@ def run_gene_level_oe_comparison(
                     scenario,
                 ),
                 parameter_scenario=scenario,
+                attempt_id=f"{scenario.value}:gene_capacity:{float(multiplier):g}x",
             )
+        failure_reason = _scenario_failure_reason(
+            scenario,
+            legacy_baseline=baseline,
+            scenario_baseline=scenario_baseline,
+            perturbed=perturbed,
         )
+        scenario_result = OECapacityScenarioResult(
+            parameter_scenario=scenario,
+            baseline=scenario_baseline,
+            perturbed=perturbed,
+            objective_delta=_difference(
+                perturbed.secretion_objective,
+                scenario_baseline.secretion_objective,
+            ),
+            protein_resource_cost_delta=_difference(
+                perturbed.protein_resource_cost,
+                scenario_baseline.protein_resource_cost,
+            ),
+            failure_reason=failure_reason,
+        )
+        scenario_result.validate()
+        scenario_results.append(scenario_result)
+        scenarios.append(perturbed)
 
     nominal = next(
         (
@@ -192,9 +232,34 @@ def run_gene_level_oe_comparison(
         ),
         scenarios[0] if scenarios else None,
     )
-    baseline_objective = baseline.secretion_objective
     nominal_objective = nominal.secretion_objective if nominal else None
     proxy_objective = proxy.secretion_objective if proxy else None
+    nominal_pair = next(
+        (
+            item
+            for item in scenario_results
+            if item.parameter_scenario is ParameterScenario.NOMINAL
+        ),
+        scenario_results[0] if scenario_results else None,
+    )
+    failed_scenarios = tuple(
+        item.parameter_scenario.value
+        for item in scenario_results
+        if item.failure_reason
+    )
+    if failed_scenarios:
+        result_missing_information = tuple(
+            dict.fromkeys((*result_missing_information, "successful_capacity_scenarios"))
+        )
+        result_warnings = tuple(
+            dict.fromkeys(
+                (
+                    *result_warnings,
+                    "Capacity scenario failures were retained: "
+                    + ", ".join(failed_scenarios),
+                )
+            )
+        )
     comparison = OECapacityComparisonResult(
         gene_id=plan.gene_id,
         target_id=plan.target_id,
@@ -204,16 +269,16 @@ def run_gene_level_oe_comparison(
         proxy=proxy,
         gene_capacity_scenarios=tuple(scenarios),
         gene_capacity_vs_baseline_delta=_difference(
-            nominal_objective,
-            baseline_objective,
+            nominal_pair.perturbed.secretion_objective if nominal_pair else None,
+            nominal_pair.baseline.secretion_objective if nominal_pair else None,
         ),
         gene_capacity_vs_proxy_delta=_difference(
             nominal_objective,
             proxy_objective,
         ),
         protein_resource_cost_delta=_difference(
-            nominal.protein_resource_cost if nominal else None,
-            baseline.protein_resource_cost,
+            nominal_pair.perturbed.protein_resource_cost if nominal_pair else None,
+            nominal_pair.baseline.protein_resource_cost if nominal_pair else None,
         ),
         skipped_reason=(
             ""
@@ -231,12 +296,11 @@ def run_gene_level_oe_comparison(
                 str(len(bundle.changes) if bundle is not None else 0),
             ),
             ("solver_backend", "scipy_highs_reference"),
-            *tuple(
-                (f"baseline_formation_flux:{formation_id}", _format_flux(flux))
-                for formation_id, flux in baseline_formation_fluxes
-            ),
+            ("capacity_basis", "reviewed_absolute_model_flux_anchor"),
         ),
         warnings=result_warnings,
+        scenario_results=tuple(scenario_results),
+        proxy_attempts=proxy_attempts,
     )
     comparison.validate()
     return comparison
@@ -405,9 +469,24 @@ def _comparison_succeeded(
 ) -> bool:
     if not comparison.baseline.success:
         return False
-    proxy_success = comparison.proxy is not None and comparison.proxy.success
-    capacity_success = any(
-        snapshot.success for snapshot in comparison.gene_capacity_scenarios
+    proxy_attempts = comparison.proxy_attempts or (
+        ((comparison.proxy,) if comparison.proxy is not None else ())
+    )
+    proxy_success = bool(proxy_attempts) and all(
+        snapshot.success for snapshot in proxy_attempts
+    )
+    capacity_success = (
+        bool(comparison.scenario_results)
+        and all(
+            item.baseline.success
+            and item.perturbed.success
+            and not item.failure_reason
+            for item in comparison.scenario_results
+        )
+    ) or (
+        not comparison.scenario_results
+        and bool(comparison.gene_capacity_scenarios)
+        and all(snapshot.success for snapshot in comparison.gene_capacity_scenarios)
     )
     if plan.execution_mode is OEExecutionMode.REACTION_PROXY:
         return proxy_success
@@ -458,16 +537,17 @@ def _screen_row(
     )
     nominal = None
     if comparison is not None:
-        nominal = next(
+        nominal_pair = next(
             (
-                snapshot
-                for snapshot in comparison.gene_capacity_scenarios
-                if snapshot.parameter_scenario is ParameterScenario.NOMINAL
+                item
+                for item in comparison.scenario_results
+                if item.parameter_scenario is ParameterScenario.NOMINAL
             ),
-            comparison.gene_capacity_scenarios[0]
-            if comparison.gene_capacity_scenarios
+            comparison.scenario_results[0]
+            if comparison.scenario_results
             else None,
         )
+        nominal = nominal_pair.perturbed if nominal_pair is not None else None
     warnings = list(plan.warnings)
     missing = list(plan.missing_information)
     if comparison is not None:
@@ -477,9 +557,10 @@ def _screen_row(
             warnings.extend(comparison.proxy.warnings)
         warnings.extend(
             warning
-            for snapshot in comparison.gene_capacity_scenarios
+            for snapshot in (*comparison.gene_capacity_scenarios, *comparison.proxy_attempts)
             for warning in snapshot.warnings
         )
+    screen_status = _screen_status(plan, comparison)
     return OECapacityScreenRow(
         gene_id=plan.gene_id,
         target_id=plan.target_id,
@@ -519,6 +600,14 @@ def _screen_row(
         ),
         missing_information=tuple(dict.fromkeys(missing)),
         warnings=tuple(dict.fromkeys(warnings)),
+        screen_status=screen_status,
+        scenario_results=(comparison.scenario_results if comparison is not None else ()),
+        proxy_attempts=(comparison.proxy_attempts if comparison is not None else ()),
+        summary_source=(
+            "nominal_scenario_perturbed"
+            if nominal is not None
+            else ("best_successful_proxy" if comparison and comparison.proxy else "none")
+        ),
     )
 
 
@@ -547,7 +636,38 @@ def _request_failure_row(
         protein_resource_cost_delta=None,
         missing_information=("screen_execution",),
         warnings=(reason or "screen request failed",),
+        screen_status="failed",
+        summary_source="none",
     )
+
+
+def _screen_status(
+    plan: OECapacityPlan,
+    comparison: OECapacityComparisonResult | None,
+) -> str:
+    if plan.execution_mode is OEExecutionMode.NOT_EXECUTABLE:
+        return "not_executable"
+    if comparison is None or not comparison.baseline.success:
+        return "failed"
+    scenario_states = tuple(
+        item.baseline.success and item.perturbed.success and not item.failure_reason
+        for item in comparison.scenario_results
+    ) or tuple(item.success for item in comparison.gene_capacity_scenarios)
+    proxy_states = tuple(item.success for item in comparison.proxy_attempts) or (
+        ((comparison.proxy.success,) if comparison.proxy is not None else ())
+    )
+    required_states: tuple[bool, ...]
+    if plan.execution_mode is OEExecutionMode.GENE_CAPACITY:
+        required_states = scenario_states
+    elif plan.execution_mode is OEExecutionMode.REACTION_PROXY:
+        required_states = proxy_states
+    else:
+        required_states = (*scenario_states, *proxy_states)
+    if required_states and all(required_states):
+        return "completed"
+    if any(required_states):
+        return "partial_failure"
+    return "failed"
 
 
 def _lowest_confidence(
@@ -563,17 +683,17 @@ def _lowest_confidence(
     return max(values, key=priority.__getitem__)
 
 
-def _run_proxy_snapshot(
+def _run_proxy_snapshots(
     prepared_model: Any,
     plan: OECapacityPlan,
     baseline_result: Any,
     *,
     mu: float,
     time_limit: float,
-) -> SolverSnapshot | None:
+) -> tuple[SolverSnapshot | None, tuple[SolverSnapshot, ...]]:
     multiplier = plan.requested_dose.expression_multiplier
     if not plan.proxy_reaction_ids or multiplier is None:
-        return None
+        return None, ()
     rows = run_pcsec_oe_screen(
         prepared_model.fixed_model,
         baseline_result,
@@ -586,74 +706,87 @@ def _run_proxy_snapshot(
         factor=float(multiplier),
         time_limit_seconds=time_limit,
     )
-    successful = tuple(row for row in rows if bool(row.get("success")))
+    attempts = tuple(_proxy_snapshot(row) for row in rows)
+    successful = tuple(snapshot for snapshot in attempts if snapshot.success)
     selected = max(
-        successful or tuple(rows),
-        key=lambda row: (
-            float(row.get("objective_value"))
-            if row.get("objective_value") is not None
+        successful or attempts,
+        key=lambda snapshot: (
+            snapshot.secretion_objective
+            if snapshot.secretion_objective is not None
             else float("-inf")
         ),
         default=None,
     )
     if selected is None:
-        return None
-    selected_reaction = str(selected.get("reaction") or "")
-    warnings = [
+        return None, ()
+    summary_warnings = [
+        *selected.warnings,
         "Legacy reaction proxy is reported independently from gene capacity.",
-        f"Selected legacy proxy reaction: {selected_reaction}.",
+        f"Selected legacy proxy reaction: {selected.attempt_id}.",
     ]
-    if len(plan.proxy_reaction_ids) > 1:
-        warnings.append(
-            "Multiple proxy reactions were evaluated independently; this snapshot "
-            "reports the best single-reaction result, not a joint proxy perturbation."
+    if len(attempts) > 1:
+        summary_warnings.append(
+            "Multiple proxy reactions were evaluated independently; all attempts are "
+            "retained and the summary selects the best successful objective."
         )
+    return replace(selected, warnings=tuple(dict.fromkeys(summary_warnings))), attempts
+
+
+def _proxy_snapshot(row: Mapping[str, Any]) -> SolverSnapshot:
+    reaction_id = str(row.get("reaction") or "unknown_proxy")
     return SolverSnapshot(
         execution_mode=OEExecutionMode.REACTION_PROXY,
         backend="scipy_highs_reference",
-        solver_status=str(selected.get("status") or "unknown"),
-        success=bool(selected.get("success")),
-        secretion_objective=_optional_float(selected.get("objective_value")),
+        solver_status=str(row.get("status") or "unknown"),
+        success=bool(row.get("success")),
+        secretion_objective=_optional_float(row.get("objective_value")),
         growth_retention=None,
         max_feasible_growth_rate=None,
         protein_resource_cost=None,
         constraint_counts=tuple(
             sorted(
                 (str(key), int(value))
-                for key, value in dict(selected.get("constraint_counts") or {}).items()
+                for key, value in dict(row.get("constraint_counts") or {}).items()
             )
         ),
         key_fluxes=(),
-        message=str(selected.get("message") or ""),
-        warnings=tuple(warnings),
+        message=str(row.get("message") or ""),
+        warnings=(() if bool(row.get("success")) else (f"Proxy attempt failed: {reaction_id}.",)),
+        attempt_id=reaction_id,
     )
 
 
 def _model_with_gene_capacity_bounds(
     model: Any,
-    baseline_fluxes: Mapping[str, float],
     specs: tuple[Any, ...],
+    *,
+    multiplier: float,
 ) -> Any:
     changes: dict[str, tuple[float | None, float | None]] = {}
     for spec in specs:
         formation_id = spec.mapping.formation_or_dilution_reaction_id
-        if formation_id not in baseline_fluxes:
-            raise OECapacityValidationError(
-                f"baseline solve did not return formation flux: {formation_id}"
-            )
-        baseline_flux = max(0.0, float(baseline_fluxes[formation_id]))
         baseline_amount = spec.baseline_enzyme_amount
-        multiplier = spec.dose.expression_multiplier
-        if baseline_amount is None or multiplier is None:
+        if baseline_amount is None:
             raise OECapacityValidationError(
-                "gene capacity bounds require baseline amount and numeric dose."
+                "gene capacity bounds require a reviewed baseline capacity anchor."
             )
-        relative_capacity = (
-            float(multiplier)
-            * baseline_amount.value_for_scenario(spec.parameter_scenario)
-            / baseline_amount.nominal_value
+        if baseline_amount.unit != "model_flux":
+            raise OECapacityValidationError(
+                "baseline capacity anchor must use canonical unit model_flux."
+            )
+        absolute_capacity = baseline_amount.value_for_scenario(
+            spec.parameter_scenario
         )
-        changes[formation_id] = (None, baseline_flux * relative_capacity)
+        upper_bound = float(multiplier) * absolute_capacity
+        existing = changes.get(formation_id)
+        if existing is not None and not np.isclose(
+            float(existing[1]), upper_bound, rtol=0.0, atol=1e-12
+        ):
+            raise OECapacityValidationError(
+                "conflicting reviewed capacity anchors for formation handle: "
+                f"{formation_id}"
+            )
+        changes[formation_id] = (None, upper_bound)
     return model.with_bounds(changes)
 
 
@@ -716,6 +849,7 @@ def _snapshot(
     mu: float,
     protein_resource_cost: float | None,
     parameter_scenario: ParameterScenario | None = None,
+    attempt_id: str = "",
 ) -> SolverSnapshot:
     biomass = result.fluxes.get("BIOMASS") if result.success else None
     return SolverSnapshot(
@@ -733,6 +867,7 @@ def _snapshot(
         constraint_counts=tuple(sorted((str(key), int(value)) for key, value in counts.items())),
         key_fluxes=tuple(sorted((str(key), float(value)) for key, value in result.fluxes.items())),
         message=str(result.message),
+        attempt_id=attempt_id,
     )
 
 
@@ -746,11 +881,10 @@ def _targeted_resource_cost(
     for spec in plan.executable_capacity_specs:
         if spec.parameter_scenario is not scenario:
             continue
-        mapping_id = spec.mapping.mapping_id
-        if mapping_id in seen or spec.molecular_weight is None:
-            continue
-        seen.add(mapping_id)
         formation_id = spec.mapping.formation_or_dilution_reaction_id
+        if formation_id in seen or spec.molecular_weight is None:
+            continue
+        seen.add(formation_id)
         if formation_id not in fluxes:
             continue
         costs.append(
@@ -759,6 +893,31 @@ def _targeted_resource_cost(
             / 1000.0
         )
     return sum(costs) if costs else None
+
+
+def _scenario_failure_reason(
+    scenario: ParameterScenario,
+    *,
+    legacy_baseline: SolverSnapshot,
+    scenario_baseline: SolverSnapshot,
+    perturbed: SolverSnapshot,
+) -> str:
+    if not scenario_baseline.success:
+        return "scenario_baseline_failed"
+    if not perturbed.success:
+        return "scenario_perturbation_failed"
+    if scenario is ParameterScenario.NOMINAL and not _objectives_close(
+        scenario_baseline.secretion_objective,
+        legacy_baseline.secretion_objective,
+    ):
+        return "capacity_baseline_incompatible_with_legacy"
+    return ""
+
+
+def _objectives_close(left: float | None, right: float | None) -> bool:
+    if left is None or right is None:
+        return False
+    return bool(np.isclose(float(left), float(right), rtol=1e-6, atol=1e-10))
 
 
 def _fixed_growth_rate(model: Any) -> float:

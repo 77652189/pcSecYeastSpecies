@@ -1,7 +1,7 @@
 # pcSecPichia 数据与结果治理策略
 
 状态：active  
-最后更新：2026-07-13
+最后更新：2026-07-14
 
 ## 目录职责
 
@@ -33,11 +33,18 @@
 
 ## OE capacity 参数与映射
 
+- 外部容量原始响应、下载文件和未审核参数进入 `local_runs/oe_capacity/external_sources/`；标准化候选、换算日志、冲突和匹配报告进入 `local_runs/oe_capacity/candidates/`。
+- 正式 gene-level capacity 只能使用 `Enzymedata/oe_capacity_baseline_capacity.json` 中经审核的绝对 formation/dilution capacity；记录必须包含 applicability scope、宿主/菌株/条件、模型指纹、gene/enzyme/formation identity、`model_flux` 单位、low/nominal/high、来源版本/hash/license 和审核信息。
+- `target_specific` 参数必须匹配 target；`host_condition` 可跨 hLF/OPN 复用，但必须匹配宿主、菌株、培养基、碳源和生长状态；`external_model_calibrated` 与 `homolog_transferred` 必须保留对应 warning 和较低置信度。
+- 外部候选提升为正式资产需要独立 promotion manifest，记录候选 ID、转换公式、单位链、条件匹配、冲突处理、reviewer、reviewed_at 和源文件 hash。审核意味着批准外部证据的适用性，不要求研发组提供内部实测值。
+- 空资产或缺少匹配记录时必须返回 `reviewed_baseline_capacity` 缺口并降级，不得从最优 flux、通用上界、fixture 或固定 `1.0` 推断。
+- fixture capacity 仅用于测试 harness，生产 service、Streamlit 和 Phase 2 acceptance runner 必须拒绝。
+
 - gene-enzyme-reaction mapping、kcat、分子量、复合体亚基、基线丰度和剂量映射都必须保留单位、来源、版本、模型指纹、置信度和 warning。
 - 当前 pcSecPichia 模型 GPR 与本地 enzyme data 是“当前模型可执行性”的权威来源；外部 iPichia/ecPichia、UniProt、BRENDA、SABIO-RK 或同源转移只作为候选证据。
 - promoter、copy number、induction mode 等实验标签没有经过审核的 dose mapping 时，只能保留为类别输入，不能自动换算成单一 expression multiplier。
 - 缺失参数使用显式区间和 low/nominal/high 场景；不得用未标注的默认值伪装成测量真值。
-- 外部下载、参数候选、mapping audit 和 Phase 2 screen 输出默认写入 `local_runs/oe_capacity/`。
+- 外部下载、参数候选、mapping audit 和 Phase 2 screen 输出默认写入 `local_runs/oe_capacity/`；联网抓取和正式 screen 求解必须分离，求解只读取冻结的本地资产快照。
 - 只有人工复核 license、provenance、映射和参数后，才能通过独立 checkpoint 提升到稳定科学资产目录。
 
 ## LLM 数据边界

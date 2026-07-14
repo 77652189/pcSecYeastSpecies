@@ -17,6 +17,7 @@ from pcsec_pichia.oe_capacity.schema import (
     GPRRole,
     OECapacityValidationError,
     OEExecutionStatus,
+    derive_mapping_execution_status,
 )
 from pcsec_pichia.screens.gene_interventions import plan_gene_overexpression
 
@@ -96,9 +97,11 @@ def build_gene_enzyme_reaction_catalog(
                 continue
             for enzyme_id in candidates:
                 formation_id = _formation_id_for_enzyme(metabolic, enzyme_id)
+                mapping_role = (
+                    GPRRole.ISOENZYME if len(candidates) > 1 else role
+                )
                 status = _execution_status(
-                    role=role,
-                    candidate_count=len(candidates),
+                    role=mapping_role,
                     formation_available=formation_id in reaction_ids,
                 )
                 missing = ()
@@ -115,7 +118,7 @@ def build_gene_enzyme_reaction_catalog(
                             or rule_payload.get("rule")
                             or ""
                         ),
-                        role=role,
+                        role=mapping_role,
                         status=status,
                         confidence=(
                             ConfidenceLevel.HIGH
@@ -266,18 +269,13 @@ def _mapping(
 def _execution_status(
     *,
     role: GPRRole,
-    candidate_count: int,
     formation_available: bool,
 ) -> OEExecutionStatus:
-    if role is GPRRole.ISOENZYME or candidate_count > 1:
-        return OEExecutionStatus.ISOENZYME_AMBIGUOUS
-    if role is GPRRole.COMPLEX_SUBUNIT:
-        return OEExecutionStatus.COMPLEX_LIMITED
-    if role is GPRRole.MIXED:
-        return OEExecutionStatus.PARTIAL_MAPPING
-    if role is GPRRole.UNRESOLVED or not formation_available:
-        return OEExecutionStatus.PARTIAL_MAPPING
-    return OEExecutionStatus.GENE_LEVEL_EXECUTABLE
+    return derive_mapping_execution_status(
+        role=role,
+        mapping_source=EvidenceSourceType.CURRENT_MODEL,
+        model_mapping_complete=formation_available,
+    )
 
 
 def _unresolved_status(role: GPRRole) -> OEExecutionStatus:
@@ -285,6 +283,8 @@ def _unresolved_status(role: GPRRole) -> OEExecutionStatus:
         return OEExecutionStatus.ISOENZYME_AMBIGUOUS
     if role is GPRRole.COMPLEX_SUBUNIT:
         return OEExecutionStatus.COMPLEX_LIMITED
+    if role is GPRRole.UNRESOLVED:
+        return OEExecutionStatus.UNRESOLVED
     return OEExecutionStatus.PARTIAL_MAPPING
 
 

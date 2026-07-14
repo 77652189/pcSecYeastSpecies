@@ -114,10 +114,38 @@ def run_gene_level_oe_screen(
     return _run(prepared_model, requests, screen_config)
 
 
-def write_oe_capacity_outputs(result: Any, output_dir: Any) -> Any:
+def write_oe_capacity_outputs(
+    result: Any,
+    output_dir: Any,
+    *,
+    run_identity: Mapping[str, Any] | None = None,
+    capacity_asset: Mapping[str, Any] | None = None,
+) -> Any:
     from pcsec_pichia.oe_capacity.reports import write_oe_capacity_outputs as _write
 
-    return _write(result, output_dir)
+    return _write(
+        result,
+        output_dir,
+        run_identity=run_identity,
+        capacity_asset=capacity_asset,
+    )
+
+
+def verify_oe_capacity_run(
+    run_dir: Any,
+    expected_identity: Mapping[str, object] | None = None,
+) -> Any:
+    from pcsec_pichia.oe_capacity.acceptance import verify_oe_capacity_run as _verify
+
+    return _verify(run_dir, expected_identity)
+
+
+def run_phase2_oe_capacity_acceptance(repo_root: Any, output_root: Any) -> Any:
+    from pcsec_pichia.oe_capacity.acceptance import (
+        run_phase2_oe_capacity_acceptance as _run,
+    )
+
+    return _run(repo_root, output_root)
 
 
 __all__ = [
@@ -129,6 +157,8 @@ __all__ = [
     "plan_gene_level_overexpression",
     "run_gene_level_oe_comparison",
     "run_gene_level_oe_screen",
+    "run_phase2_oe_capacity_acceptance",
     "validate_gene_capacity_catalog",
+    "verify_oe_capacity_run",
     "write_oe_capacity_outputs",
 ]

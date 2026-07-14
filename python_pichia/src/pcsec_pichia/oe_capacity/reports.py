@@ -18,6 +18,9 @@ from pcsec_pichia.oe_capacity.schema import (
 def write_oe_capacity_outputs(
     result: OECapacityScreenResult,
     output_dir: str | Path,
+    *,
+    run_identity: Mapping[str, Any] | None = None,
+    capacity_asset: Mapping[str, Any] | None = None,
 ) -> OECapacityOutputs:
     result.validate()
     resolved = Path(output_dir)
@@ -37,7 +40,9 @@ def write_oe_capacity_outputs(
         ):
             for row in rows:
                 payload = _json_ready(asdict(row))
-                payload["screen_status"] = screen_status
+                payload["screen_status"] = str(
+                    getattr(row, "screen_status", "") or screen_status
+                )
                 handle.write(
                     json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n"
                 )
@@ -45,18 +50,85 @@ def write_oe_capacity_outputs(
         _markdown_report(result),
         encoding="utf-8",
     )
+    report_path = Path(outputs.report_path)
+    row_payloads = [
+        {
+            **_json_ready(asdict(row)),
+            "screen_status": str(getattr(row, "screen_status", "") or status),
+        }
+        for status, rows in (("completed", result.rows), ("failed", result.failures))
+        for row in rows
+    ]
+    target_ids = sorted({str(row.get("target_id") or "") for row in row_payloads} - {""})
+    context_ids = sorted({str(row.get("context_id") or "") for row in row_payloads} - {""})
+    gene_ids = sorted({str(row.get("gene_id") or "") for row in row_payloads} - {""})
+    required_scenarios = [scenario.value for scenario in result.config.parameter_scenarios]
+    complete_scenarios = _scenario_evidence_complete(
+        row_payloads,
+        required_scenarios,
+        feature_enabled=result.config.feature_enabled,
+    )
+    identity = {
+        "run_id": resolved.name,
+        "target_ids": target_ids,
+        "context_ids": context_ids,
+        "gene_ids": gene_ids,
+        "case_kind": "screen",
+    }
+    if run_identity:
+        identity.update(_json_ready(dict(run_identity)))
+    asset = {
+        "path": "",
+        "version": "",
+        "sha256": "",
+        "reviewed": False,
+    }
+    if capacity_asset:
+        asset.update(_json_ready(dict(capacity_asset)))
+    state = (
+        "partial_failure"
+        if result.rows and result.failures
+        else "failed"
+        if result.failures
+        else "completed"
+    )
+    execution_status_counts: dict[str, int] = {}
+    for payload in row_payloads:
+        key = str(payload.get("execution_status") or "unknown")
+        execution_status_counts[key] = execution_status_counts.get(key, 0) + 1
     manifest = {
-        "schema_version": 1,
+        "schema_version": 2,
         "generated_at": datetime.now(timezone.utc).isoformat(),
+        "run_identity": identity,
+        "model": {"fingerprint": result.model_fingerprint},
+        "capacity_asset": asset,
         "model_fingerprint": result.model_fingerprint,
         "config": _json_ready(asdict(result.config)),
         "completed_count": len(result.rows),
         "failure_count": len(result.failures),
-        "files": {
-            "rows": Path(outputs.rows_path).name,
-            "report": Path(outputs.report_path).name,
+        "status": {
+            "state": state,
+            "completed_count": len(result.rows),
+            "failure_count": len(result.failures),
         },
-        "rows_sha256": hashlib.sha256(rows_path.read_bytes()).hexdigest(),
+        "files": {
+            "rows": {
+                "path": rows_path.name,
+                "sha256": _sha256(rows_path),
+            },
+            "report": {
+                "path": report_path.name,
+                "sha256": _sha256(report_path),
+            },
+        },
+        "coverage": {
+            "total_rows": len(row_payloads),
+            "by_execution_status": execution_status_counts,
+        },
+        "scenario_completeness": {
+            "required": required_scenarios if result.config.feature_enabled else [],
+            "complete": complete_scenarios,
+        },
         "execution_modes": sorted(
             {row.execution_mode.value for row in (*result.rows, *result.failures)}
         ),
@@ -66,11 +138,61 @@ def write_oe_capacity_outputs(
         "mutates_model_assets": False,
         "warnings": list(result.warnings),
     }
-    Path(outputs.manifest_path).write_text(
+    manifest_path = Path(outputs.manifest_path)
+    temporary_manifest_path = manifest_path.with_name(f".{manifest_path.name}.tmp")
+    temporary_manifest_path.write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+    temporary_manifest_path.replace(manifest_path)
     return outputs
+
+
+def _scenario_evidence_complete(
+    rows: list[dict[str, Any]],
+    required: list[str],
+    *,
+    feature_enabled: bool,
+) -> bool:
+    if not feature_enabled or not required:
+        return True
+    executable = [
+        row
+        for row in rows
+        if row.get("execution_status") == "gene_level_executable"
+        and row.get("screen_status") == "completed"
+    ]
+    if not executable:
+        return False
+    return all(_row_has_scenarios(row, required) for row in executable)
+
+
+def _row_has_scenarios(row: Mapping[str, Any], required: list[str]) -> bool:
+    raw = row.get("scenario_results") or row.get("gene_capacity_scenario_results")
+    if raw is None:
+        # Schema v1 rows expose only scenario labels. Keep the manifest honest: the
+        # labels describe requested scenarios, not solver evidence.
+        return False
+    found: set[str] = set()
+    for item in raw if isinstance(raw, list) else ():
+        if not isinstance(item, Mapping):
+            continue
+        scenario = item.get("scenario") or item.get("parameter_scenario")
+        if isinstance(scenario, Mapping):
+            scenario = scenario.get("value")
+        baseline = item.get("baseline") or item.get("baseline_snapshot")
+        perturbed = item.get("perturbed") or item.get("perturbed_snapshot")
+        if (
+            str(scenario) in required
+            and isinstance(baseline, Mapping)
+            and isinstance(perturbed, Mapping)
+        ):
+            found.add(str(scenario))
+    return set(required).issubset(found)
+
+
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def _markdown_report(result: OECapacityScreenResult) -> str:
@@ -122,6 +244,31 @@ def _markdown_report(result: OECapacityScreenResult) -> str:
                     "",
                 )
             )
+            if row.scenario_results:
+                lines.extend(("#### Scenario solver evidence", ""))
+                for scenario_result in row.scenario_results:
+                    lines.append(
+                        "- "
+                        f"`{scenario_result.parameter_scenario.value}`: "
+                        f"baseline=`{scenario_result.baseline.solver_status}` "
+                        f"(success={scenario_result.baseline.success}); "
+                        f"perturbed=`{scenario_result.perturbed.solver_status}` "
+                        f"(success={scenario_result.perturbed.success}); "
+                        f"failure=`{scenario_result.failure_reason or 'none'}`; "
+                        f"message=`{scenario_result.perturbed.message or scenario_result.baseline.message or 'none'}`"
+                    )
+                lines.append("")
+            if row.proxy_attempts:
+                lines.extend(("#### Reaction proxy attempts", ""))
+                for attempt in row.proxy_attempts:
+                    lines.append(
+                        "- "
+                        f"`{attempt.attempt_id or 'unnamed'}`: "
+                        f"status=`{attempt.solver_status}`, success=`{attempt.success}`, "
+                        f"objective=`{_number(attempt.secretion_objective)}`, "
+                        f"message=`{attempt.message or 'none'}`"
+                    )
+                lines.append("")
     if result.warnings:
         lines.extend(("", "## Screen warnings", ""))
         lines.extend(f"- {warning}" for warning in result.warnings)

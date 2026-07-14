@@ -15,8 +15,75 @@ from app.services.pichia_oe_capacity_service import (
 
 
 TARGET_KEY = "oe_capacity_target_id"
+ACTIVE_TARGET_KEY = "oe_capacity_active_form_target"
+FORM_STATE_KEY = "oe_capacity_form_state_by_target"
 LAST_PREVIEWS_KEY = "oe_capacity_last_previews_by_target"
 LAST_RUNS_KEY = "oe_capacity_last_runs_by_target"
+
+FORM_WIDGET_KEYS = {
+    "gene_id": "oe_capacity_widget_gene_id",
+    "dose_mode": "oe_capacity_widget_dose_mode",
+    "multiplier": "oe_capacity_widget_multiplier",
+    "scenarios": "oe_capacity_widget_scenarios",
+    "compare_proxy": "oe_capacity_widget_compare_proxy",
+    "run_name": "oe_capacity_widget_run_name",
+}
+
+
+def _default_form_state(target_id: str) -> dict[str, Any]:
+    return {
+        "gene_id": "PAS_chr2-1_0047",
+        "dose_mode": "明确倍数",
+        "multiplier": 2.0,
+        "scenarios": ["low", "nominal", "high"],
+        "compare_proxy": True,
+        "run_name": f"oe-{target_id}-{datetime.now().strftime('%Y%m%d-%H%M%S')}",
+    }
+
+
+def _ensure_target_form_state(target_id: str) -> dict[str, Any]:
+    states = dict(st.session_state.get(FORM_STATE_KEY) or {})
+    state = dict(states.get(target_id) or _default_form_state(target_id))
+    states[target_id] = state
+    st.session_state[FORM_STATE_KEY] = states
+    return state
+
+
+def _save_widget_form(target_id: str) -> None:
+    state = _ensure_target_form_state(target_id)
+    for field, widget_key in FORM_WIDGET_KEYS.items():
+        if widget_key in st.session_state:
+            value = st.session_state[widget_key]
+            state[field] = list(value) if field == "scenarios" else value
+    states = dict(st.session_state.get(FORM_STATE_KEY) or {})
+    states[target_id] = state
+    st.session_state[FORM_STATE_KEY] = states
+
+
+def _load_widget_form(target_id: str) -> None:
+    state = _ensure_target_form_state(target_id)
+    for field, widget_key in FORM_WIDGET_KEYS.items():
+        value = state[field]
+        st.session_state[widget_key] = list(value) if field == "scenarios" else value
+    st.session_state[ACTIVE_TARGET_KEY] = target_id
+
+
+def _sync_form_field(target_id: str, field: str) -> None:
+    widget_key = FORM_WIDGET_KEYS[field]
+    states = dict(st.session_state.get(FORM_STATE_KEY) or {})
+    state = dict(states.get(target_id) or _default_form_state(target_id))
+    value = st.session_state.get(widget_key, state[field])
+    state[field] = list(value) if field == "scenarios" else value
+    states[target_id] = state
+    st.session_state[FORM_STATE_KEY] = states
+
+
+def _switch_target_form() -> None:
+    previous_target = st.session_state.get(ACTIVE_TARGET_KEY)
+    if previous_target:
+        _save_widget_form(str(previous_target))
+    target_id = str(st.session_state[TARGET_KEY])
+    _load_widget_form(target_id)
 
 
 def render_oe_capacity() -> None:
@@ -33,33 +100,30 @@ def render_oe_capacity() -> None:
     target_ids = list(labels)
     if st.session_state.get(TARGET_KEY) not in target_ids:
         st.session_state[TARGET_KEY] = target_ids[0]
+    if st.session_state.get(ACTIVE_TARGET_KEY) not in target_ids:
+        _load_widget_form(str(st.session_state[TARGET_KEY]))
     target_id = st.selectbox(
         "目标蛋白",
         target_ids,
         format_func=lambda value: labels[value],
         key=TARGET_KEY,
+        on_change=_switch_target_form,
     )
     st.info(
         "同工酶不会放宽整个反应；单个复合体亚基不会自动提高完整复合体容量；"
         "外部证据不会覆盖当前模型映射。"
     )
     st.caption(
-        "若出现 nonzero_baseline_formation_flux，表示该 formation handle 的基线通量为 0；"
-        "相对倍数不能凭空创建非零容量，该结果只能作为边界说明。"
+        "正式 gene-capacity 需要与当前 target/context/model 精确匹配、使用 model_flux 单位且"
+        "带来源和审核信息的 baseline capacity。缺少 reviewed_baseline_capacity 时只展示"
+        "边界与旧 reaction proxy，不会从最优 flux 或通用上界推断容量。"
     )
 
-    gene_key = f"oe_capacity_gene_id_{target_id}"
-    dose_mode_key = f"oe_capacity_dose_mode_{target_id}"
-    multiplier_key = f"oe_capacity_multiplier_{target_id}"
-    scenarios_key = f"oe_capacity_scenarios_{target_id}"
-    compare_key = f"oe_capacity_compare_proxy_{target_id}"
-    run_name_key = f"oe_capacity_run_name_{target_id}"
-    default_gene = "PAS_chr2-1_0047"
-    if gene_key not in st.session_state:
-        st.session_state[gene_key] = default_gene
     gene_id = st.text_input(
         "模型 gene ID",
-        key=gene_key,
+        key=FORM_WIDGET_KEYS["gene_id"],
+        on_change=_sync_form_field,
+        args=(target_id, "gene_id"),
         help="必须使用当前模型 gene ID；common name 不会自动关联。",
     ).strip()
     left, right = st.columns(2)
@@ -68,31 +132,33 @@ def render_oe_capacity() -> None:
             "OE 剂量输入",
             ("明确倍数", "类别输入（仅解释）"),
             horizontal=True,
-            key=dose_mode_key,
+            key=FORM_WIDGET_KEYS["dose_mode"],
+            on_change=_sync_form_field,
+            args=(target_id, "dose_mode"),
         )
-        if multiplier_key not in st.session_state:
-            st.session_state[multiplier_key] = 2.0
         multiplier = st.number_input(
             "表达容量倍数",
             min_value=0.1,
             max_value=20.0,
             step=0.1,
             disabled=dose_mode != "明确倍数",
-            key=multiplier_key,
+            key=FORM_WIDGET_KEYS["multiplier"],
+            on_change=_sync_form_field,
+            args=(target_id, "multiplier"),
         )
     with right:
-        if scenarios_key not in st.session_state:
-            st.session_state[scenarios_key] = ["low", "nominal", "high"]
         scenarios = st.multiselect(
             "参数不确定性场景",
             ("low", "nominal", "high"),
-            key=scenarios_key,
+            key=FORM_WIDGET_KEYS["scenarios"],
+            on_change=_sync_form_field,
+            args=(target_id, "scenarios"),
         )
-        if compare_key not in st.session_state:
-            st.session_state[compare_key] = True
         compare_proxy = st.checkbox(
             "同时运行旧 reaction proxy 对照",
-            key=compare_key,
+            key=FORM_WIDGET_KEYS["compare_proxy"],
+            on_change=_sync_form_field,
+            args=(target_id, "compare_proxy"),
         )
     if not scenarios:
         st.warning("至少选择一个参数场景。")
@@ -116,11 +182,12 @@ def render_oe_capacity() -> None:
                         previews[target_id] = preview
                         st.session_state[LAST_PREVIEWS_KEY] = previews
     with run_col:
-        if run_name_key not in st.session_state:
-            st.session_state[run_name_key] = (
-                f"oe-{target_id}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
-            )
-        run_name = st.text_input("运行名称", key=run_name_key)
+        run_name = st.text_input(
+            "运行名称",
+            key=FORM_WIDGET_KEYS["run_name"],
+            on_change=_sync_form_field,
+            args=(target_id, "run_name"),
+        )
         if st.button(
             "运行 baseline / proxy / gene-capacity",
             type="primary",
@@ -195,10 +262,11 @@ def _render_preview(preview: dict[str, Any]) -> None:
 
 def _render_result(result: dict[str, Any]) -> None:
     st.markdown("### 最近一次当前目标运行")
-    top = st.columns(3)
+    top = st.columns(4)
     top[0].metric("完成", int(result.get("completed_count") or 0))
     top[1].metric("失败 / 不可执行", int(result.get("failure_count") or 0))
     top[2].metric("目标", str(result.get("target_id") or ""))
+    top[3].metric("运行状态", str(result.get("status") or "completed"))
     rows = result.get("rows") or []
     failures = result.get("failures") or []
     if rows:
@@ -206,6 +274,13 @@ def _render_result(result: dict[str, Any]) -> None:
     if failures:
         st.warning("以下候选未完成 gene-capacity 对照；请查看 missing_information 和 warnings。")
         st.dataframe(failures, use_container_width=True, hide_index=True)
+    solver_evidence = _solver_evidence_rows(result)
+    if solver_evidence:
+        with st.expander(
+            "逐场景与 proxy solver 证据",
+            expanded=any(not bool(row.get("success")) for row in solver_evidence),
+        ):
+            st.dataframe(solver_evidence, use_container_width=True, hide_index=True)
     for warning in result.get("warnings") or []:
         st.warning(str(warning))
     report = export_oe_capacity_report(str(result.get("run_dir") or ""))
@@ -217,6 +292,47 @@ def _render_result(result: dict[str, Any]) -> None:
             mime="text/markdown",
         )
     st.caption("本页不会自动修改 recommendation tier、模型资产或实验结论。")
+
+
+def _solver_evidence_rows(result: dict[str, Any]) -> list[dict[str, Any]]:
+    evidence: list[dict[str, Any]] = []
+    for row in (*(result.get("rows") or []), *(result.get("failures") or [])):
+        identity = {
+            "gene_id": row.get("gene_id"),
+            "screen_status": row.get("screen_status"),
+        }
+        for scenario in row.get("scenario_results") or []:
+            scenario_id = scenario.get("parameter_scenario")
+            for phase in ("baseline", "perturbed"):
+                snapshot = scenario.get(phase) or {}
+                evidence.append(
+                    {
+                        **identity,
+                        "result_type": f"scenario_{phase}",
+                        "candidate": scenario_id,
+                        "success": snapshot.get("success"),
+                        "solver_status": snapshot.get("solver_status"),
+                        "objective": snapshot.get("secretion_objective"),
+                        "message": snapshot.get("message"),
+                        "failure_reason": scenario.get("failure_reason"),
+                    }
+                )
+        for snapshot in row.get("proxy_attempts") or []:
+            evidence.append(
+                {
+                    **identity,
+                    "result_type": "proxy_attempt",
+                    "candidate": snapshot.get("attempt_id"),
+                    "success": snapshot.get("success"),
+                    "solver_status": snapshot.get("solver_status"),
+                    "objective": snapshot.get("secretion_objective"),
+                    "message": snapshot.get("message"),
+                    "failure_reason": (
+                        "" if snapshot.get("success") else snapshot.get("message")
+                    ),
+                }
+            )
+    return evidence
 
 
 def _render_history(target_id: str) -> None:
@@ -232,6 +348,8 @@ def _render_history(target_id: str) -> None:
                 "target_id": row.get("target_id"),
                 "completed_count": row.get("completed_count"),
                 "failure_count": row.get("failure_count"),
+                "status": row.get("status"),
+                "error_message": row.get("error_message"),
                 "run_dir": row.get("run_dir"),
             }
             for row in runs

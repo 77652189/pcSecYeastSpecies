@@ -1,13 +1,13 @@
 # pcSecPichia 下一阶段执行计划
 
 状态：active  
-最后更新：2026-07-13
+最后更新：2026-07-14
 
 ## 当前执行位置
 
 ```yaml
-current_phase: phase_3_secretory_resources
-current_round: round_0_architecture
+current_phase: phase_2_gene_level_oe
+current_round: round_6a_external_capacity_candidates
 round_status: ready
 ```
 
@@ -290,7 +290,7 @@ Phase 1 完成时，研发同事应能在 Streamlit 中：
 
 ## Phase 2：gene-level OE 与酶容量
 
-这是当前实现阶段。Phase 1 已完成并验收；再次复验 Phase 1 不能替代 Phase 2 实现。
+Phase 1 已完成并验收。Phase 2 的求解与门禁修复已经完成，但正式容量资产为空。当前进入 Round 6A，通过外部来源建立候选、审核和提升链路；完成后进入 Round 6B 重跑 hLF/OPN 正式验收，在 `passed=true` 前不得进入 Phase 3。
 
 ### 执行锁
 
@@ -325,7 +325,7 @@ python_pichia/src/pcsec_pichia/oe_capacity/
 
 - `schema.py`：frozen dataclass、枚举、status 和 validation。
 - `mapping.py`：复用当前模型 GPR、gene index 和 enzyme data，生成 mapping catalog。
-- `parameters.py`：dose、kcat、MW、baseline abundance、复合体化学计量和 uncertainty scenario。
+- `parameters.py`：dose、kcat、MW、经审核的绝对 baseline capacity、复合体化学计量和 uncertainty scenario。
 - `constraints.py`：生成 backend-neutral 结构化容量修改，不调用 solver。
 - `simulation.py`：调用现有模型准备和求解路径，执行 baseline/proxy/gene-capacity 对照。
 - `reports.py`：输出 rows、coverage、manifest、parameter trace 和差异报告。
@@ -369,6 +369,8 @@ execution status 至少包括：
 - 优先使用当前 pcSecPichia GPR 和本地 enzyme data；外部 Pichia 模型、数据库、文献、同源转移和 smoke fixture 依次降级。
 - 缺参数使用显式 low/nominal/high scenario，不静默填单值。
 - 如果模型存在 enzyme amount 或 formation/dilution variable，gene-level OE 修改对应容量项并计入资源成本。
+- baseline capacity 必须来自带模型、上下文、来源版本和审核信息的容量资产；不得使用最优 formation flux、通用 reaction 上界或固定相对值补齐。
+- 每个 uncertainty scenario 必须保存使用相同参数的 capacity baseline 与 perturbation；`1.0x` 是该成对模型的恒等变换。
 - 仅把代谢反应 bound 乘以 factor 的路径仍是 reaction proxy。
 - `1.0x` gene-capacity 必须与 baseline 在容差内一致；feature-off 和 proxy-only 必须保持旧结果回归。
 - 放宽容量不保证 secretion 一定提高，必须保留无变化、降低、不可行和资源成本上升结果。
@@ -398,6 +400,41 @@ service/UI 不得绕过这些 API 自行解释 GPR、换算剂量或修改约束
 5. **Round 4 screen 与对照报告**：实现小批量/catalog screen；并列输出 proxy/gene-capacity；写入 `local_runs/oe_capacity/`。
 6. **Round 5 service/Streamlit**：增加薄 facade 和页面工作流；展示 mapping、dose、参数、uncertainty、资源成本和不可执行原因。
 7. **Round 6 hLF/OPN 验收**：分别运行 executable 与边界候选，生成 coverage、数值回归、性能、保护目录和数据泄漏报告。
+
+### Round 6A：外部 baseline capacity 候选与审核提升
+
+本轮是 Round 6 验收阻断后的数据获取补充轮，不重新实现 Round 0-5。
+
+固定执行顺序：
+
+1. 扩展容量候选契约，区分 `target_specific`、`host_condition`、`external_model_calibrated` 和 `homolog_transferred`，并定义条件匹配与来源置信度。
+2. 复用现有 `external_refs` 联网与 cache 边界，接入 Pichia 定量蛋白组、iPichia/ecPichia 和动力学来源；无法稳定自动获取的来源生成明确的人工导入入口，不硬编码网页结果。
+3. 建立 gene/enzyme/formation 当前模型 crosswalk、单位转换、`abundance × kcat -> model_flux capacity` 换算、low/nominal/high 区间和冲突检测。
+4. 生成候选清单和 promotion manifest；默认只写 ignored `local_runs/oe_capacity/`，不得自动修改正式资产。
+5. 在 Streamlit 增加来源、映射、条件、换算和冲突复核界面；只有用户明确批准后，才通过核心 promotion API 原子更新正式容量资产。
+6. 优先为 `PAS_chr2-1_0308 / G6PDH2` 寻找可审核候选，分别评估 hLF 与 OPN 当前 glucose、`mu=0.1` context；宿主条件参数应复用同一 provenance，不复制成虚假的 target-specific 实验。
+7. 重跑 focused tests、联网/离线 cache smoke、无网络回放、Streamlit 浏览器验证和安全检查。
+
+本轮验收标准：
+
+- 至少一个真实外部来源完成 fetch 或可重复人工导入、缓存、版本/hash/license 和解析验证。
+- 外部 gene/protein ID 必须映射到当前模型 gene/enzyme/formation；BLAST/RBH 只能辅助映射，不能单独生成容量。
+- 单位转换链和原始值可追溯，错误单位、缺失 biomass conversion、条件不匹配和冲突不会静默进入正式资产。
+- `host_condition` 与 `target_specific` 的匹配行为有测试，hLF/OPN 不会因复制记录获得虚假 target-specific 证据。
+- 同源转移保持低置信区间，不能单独把正式 Phase 2 门禁提升为通过。
+- promotion 必须由显式批准触发，写入前后均校验 schema、模型指纹和 source hash，并保留旧资产备份或原子替换证据。
+- 没有合格候选时仍保持 `reviewed_baseline_capacity`，不得回退到通用上界、baseline flux 或 fixture。
+
+### Round 6B：hLF/OPN 正式重验收
+
+Round 6A 产生并批准容量资产后，使用正式 runner 新建四个固定 smoke：hLF/OPN 各一个 `PAS_chr2-1_0308` executable case 和一个 `PAS_chr1-4_0458` boundary case。runner 必须自行验证 target、context、gene、资产 hash、scenario/proxy 证据和相关回归；只有 `passed=true` 才能将状态推进到 Phase 3 Round 0。
+
+状态迁移固定为：
+
+- Round 6A 功能完成但没有已批准候选：`round_6a_external_capacity_candidates / awaiting_candidate_review`。
+- 正式容量资产已批准：`round_6b_hlf_opn_acceptance / ready`，立即运行正式验收。
+- Round 6B 未通过：`round_6b_hlf_opn_acceptance / awaiting_acceptance`，保留真实缺口，不回退伪参数。
+- Round 6B `passed=true`：推进到 `phase_3_secretory_resources / round_0_architecture / ready`。
 
 每个 Round 都必须有生产实现、focused tests 和可验证结果。不得跳到后续 Round，也不得反复选择最简单字段。
 
@@ -466,4 +503,4 @@ Phase 2 完成必须满足：
 
 ## 当前下一步
 
-Phase 2 Round 0-6 已完成并通过 hLF/OPN 验收。下一执行位置为 Phase 3 Round 0：先定义分泌资源与蛋白稳态约束的架构、单位、来源、开关和基线回归；本轮不进入 Phase 3 实现。
+执行 Phase 2 Round 6A：建立外部 baseline capacity 候选获取、标准化、审核和提升链路，优先解决 `PAS_chr2-1_0308 / G6PDH2`。完成 Round 6A 后进入 Round 6B 正式重验收；在 runner 得到 `passed=true` 前不得进入 Phase 3，也不得生成 Phase 3 Round 0 提示词。

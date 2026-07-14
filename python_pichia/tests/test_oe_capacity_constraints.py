@@ -52,7 +52,9 @@ def test_constraint_builder_targets_formation_kcat_and_resource_terms_not_reacti
         if change.change_kind is ConstraintChangeKind.FORMATION_DILUTION_BOUND
     )
     assert formation_change.variable_id == "R1_complex_formation"
-    assert formation_change.new_value == 2.0
+    assert formation_change.old_value == 0.0001
+    assert formation_change.new_value == 0.0002
+    assert formation_change.unit == "model_flux"
 
 
 def test_constraint_builder_rejects_mapping_not_present_in_prepared_model() -> None:
@@ -86,6 +88,26 @@ def test_constraint_builder_rejects_noncanonical_parameter_units() -> None:
         build_oe_capacity_constraints(_prepared_tiny_model(), plan)
 
 
+def test_duplicate_formation_handle_requires_identical_capacity_specs() -> None:
+    plan = _plan(expression_multiplier=2.0)
+    spec = plan.executable_capacity_specs[0]
+    duplicate_mapping = replace(spec.mapping, mapping_id="map-G1-R1-duplicate")
+    conflicting = replace(
+        spec,
+        mapping=duplicate_mapping,
+        baseline_enzyme_amount=replace(
+            spec.baseline_enzyme_amount,
+            nominal_value=0.0002,
+            lower_bound=0.0002,
+            upper_bound=0.0002,
+        ),
+    )
+    plan = replace(plan, executable_capacity_specs=(spec, conflicting))
+
+    with pytest.raises(OECapacityValidationError, match="conflicting capacity specs"):
+        build_oe_capacity_constraints(_prepared_tiny_model(), plan)
+
+
 def test_single_candidate_solver_preserves_1x_and_distinguishes_gene_capacity_from_proxy() -> None:
     prepared = _prepared_tiny_model()
 
@@ -99,12 +121,14 @@ def test_single_candidate_solver_preserves_1x_and_distinguishes_gene_capacity_fr
     )
 
     assert one_x.baseline.success is True
-    assert one_x.gene_capacity_scenarios[0].success is True
-    assert one_x.gene_capacity_scenarios[0].secretion_objective == pytest.approx(
-        one_x.baseline.secretion_objective,
+    assert one_x.scenario_results[0].baseline.success is True
+    assert one_x.scenario_results[0].perturbed.success is True
+    assert one_x.scenario_results[0].perturbed.secretion_objective == pytest.approx(
+        one_x.scenario_results[0].baseline.secretion_objective,
         rel=1e-9,
         abs=1e-12,
     )
+    assert one_x.scenario_results[0].perturbed.attempt_id.endswith("1x_identity")
     assert one_x.gene_capacity_vs_baseline_delta == pytest.approx(0.0, abs=1e-12)
 
     assert two_x.proxy is not None and two_x.proxy.success is True
@@ -144,21 +168,19 @@ def test_single_candidate_solver_applies_kcat_to_active_metabolic_coupling() -> 
     )
 
 
-def test_zero_baseline_formation_flux_is_explicitly_reported() -> None:
+def test_capacity_bound_uses_reviewed_anchor_not_baseline_optimal_flux() -> None:
     result = run_gene_level_oe_comparison(
         _prepared_tiny_model(use_direct_target_path=True),
         _plan(expression_multiplier=2.0),
     )
 
     assert result.baseline.success is True
-    assert "nonzero_baseline_formation_flux" in result.missing_information
-    assert any(
-        "zero baseline flux" in warning
-        for warning in result.warnings
+    assert "nonzero_baseline_formation_flux" not in result.missing_information
+    assert dict(result.traceability)["capacity_basis"] == (
+        "reviewed_absolute_model_flux_anchor"
     )
-    assert dict(result.traceability)[
-        "baseline_formation_flux:R1_complex_formation"
-    ] == "0"
+    assert result.scenario_results[0].baseline.success is True
+    assert result.scenario_results[0].perturbed.success is True
 
 
 def test_proxy_only_plan_preserves_legacy_comparison_without_capacity_bundle() -> None:
@@ -231,10 +253,10 @@ def _plan(
         ),
         baseline_enzyme_amount=ParameterEstimate(
             "baseline_enzyme_amount",
-            1.0,
-            1.0,
-            1.0,
-            "relative_capacity",
+            0.0001,
+            0.0001,
+            0.0001,
+            "model_flux",
             EvidenceSourceType.CURRENT_MODEL,
             "R1_complex_formation",
             "model-v1",

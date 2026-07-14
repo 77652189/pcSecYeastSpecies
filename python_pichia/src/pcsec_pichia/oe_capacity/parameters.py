@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any, Mapping
 
 from pcsec_pichia.oe_capacity.schema import (
     ConfidenceLevel,
+    CapacityAnchor,
+    CapacityAnchorCatalog,
     EvidenceSourceType,
     GeneCapacityCatalog,
     GeneCapacityParameterSet,
@@ -144,9 +148,14 @@ def build_current_model_parameter_policy(
     catalog: GeneCapacityCatalog,
     combined: Any,
     *,
+    capacity_anchors: CapacityAnchorCatalog | None = None,
+    target_id: str = "",
+    context_id: str = "",
     relative_uncertainty: float = 0.0,
 ) -> ParameterPolicy:
     catalog.validate()
+    if capacity_anchors is not None:
+        capacity_anchors.validate()
     if (
         isinstance(relative_uncertainty, bool)
         or not isinstance(relative_uncertainty, (int, float))
@@ -159,6 +168,14 @@ def build_current_model_parameter_policy(
     parameter_sets: list[GeneCapacityParameterSet] = []
     for mapping in catalog.mappings:
         if mapping.execution_status is not OEExecutionStatus.GENE_LEVEL_EXECUTABLE:
+            continue
+        anchor = _matching_capacity_anchor(
+            capacity_anchors,
+            mapping=mapping,
+            target_id=target_id,
+            context_id=context_id,
+        )
+        if anchor is None:
             continue
         warnings: list[str] = []
         kcat = _exact_parameter(
@@ -183,17 +200,7 @@ def build_current_model_parameter_policy(
             source_version=catalog.model_fingerprint,
             warnings=warnings,
         )
-        baseline = ParameterEstimate(
-            parameter_name="baseline_enzyme_amount",
-            nominal_value=1.0,
-            lower_bound=1.0,
-            upper_bound=1.0,
-            unit="relative_capacity",
-            source_type=EvidenceSourceType.CURRENT_MODEL,
-            source_ref=mapping.formation_or_dilution_reaction_id,
-            source_version=catalog.model_fingerprint,
-            confidence=ConfidenceLevel.HIGH,
-        )
+        baseline = anchor.as_parameter_estimate()
         parameter_set = GeneCapacityParameterSet(
             parameter_set_id=f"current-{mapping.mapping_id}",
             mapping_id=mapping.mapping_id,
@@ -210,6 +217,74 @@ def build_current_model_parameter_policy(
     policy = ParameterPolicy(parameter_sets=tuple(parameter_sets))
     policy.validate()
     return policy
+
+
+def load_capacity_anchor_catalog(
+    source: str | Path | Mapping[str, Any],
+) -> CapacityAnchorCatalog:
+    source_ref = ""
+    if isinstance(source, Mapping):
+        payload = source
+    else:
+        path = Path(source)
+        source_ref = str(path)
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise OECapacityValidationError(
+                f"failed to load capacity anchor asset: {path}"
+            ) from exc
+        if not isinstance(payload, Mapping):
+            raise OECapacityValidationError(
+                "capacity anchor asset root must be an object."
+            )
+    raw_anchors = payload.get("anchors")
+    if not isinstance(raw_anchors, list):
+        raise OECapacityValidationError(
+            "capacity anchor asset requires an anchors array."
+        )
+    anchors: list[CapacityAnchor] = []
+    for item in raw_anchors:
+        if not isinstance(item, Mapping):
+            raise OECapacityValidationError("capacity anchor entries must be objects.")
+        try:
+            anchors.append(
+                CapacityAnchor(
+                    anchor_id=str(item.get("anchor_id") or ""),
+                    target_id=str(item.get("target_id") or ""),
+                    context_id=str(item.get("context_id") or ""),
+                    gene_id=str(item.get("gene_id") or ""),
+                    enzyme_id=str(item.get("enzyme_id") or ""),
+                    formation_or_dilution_reaction_id=str(
+                        item.get("formation_or_dilution_reaction_id") or ""
+                    ),
+                    model_fingerprint=str(item.get("model_fingerprint") or ""),
+                    baseline_capacity=_required_positive_float(
+                        item.get("baseline_capacity"), "baseline_capacity"
+                    ),
+                    unit=str(item.get("unit") or ""),
+                    source_ref=str(item.get("source_ref") or ""),
+                    source_version=str(item.get("source_version") or ""),
+                    reviewed_by=str(item.get("reviewed_by") or ""),
+                    reviewed_at=str(item.get("reviewed_at") or ""),
+                )
+            )
+        except (TypeError, ValueError) as exc:
+            raise OECapacityValidationError("invalid capacity anchor entry.") from exc
+    try:
+        schema_version = int(payload.get("schema_version", 0))
+    except (TypeError, ValueError) as exc:
+        raise OECapacityValidationError(
+            "capacity anchor schema_version must be an integer."
+        ) from exc
+    catalog = CapacityAnchorCatalog(
+        model_fingerprint=str(payload.get("model_fingerprint") or ""),
+        anchors=tuple(anchors),
+        schema_version=schema_version,
+        source_ref=source_ref,
+    )
+    catalog.validate()
+    return catalog
 
 
 def plan_gene_level_overexpression(
@@ -276,21 +351,38 @@ def plan_gene_level_overexpression(
         if mapping.execution_status is OEExecutionStatus.GENE_LEVEL_EXECUTABLE
     }
     spec_mapping_ids = {spec.mapping.mapping_id for spec in specs}
-    if executable_mapping_ids - spec_mapping_ids:
+    incomplete_expected_mappings = bool(executable_mapping_ids - spec_mapping_ids)
+    if incomplete_expected_mappings:
         missing = tuple(dict.fromkeys((*missing, "capacity_parameters")))
+        for mapping in mappings:
+            if (
+                mapping.mapping_id in spec_mapping_ids
+                or mapping.mapping_id not in executable_mapping_ids
+            ):
+                continue
+            selected = _select_parameter_set(
+                mapping.mapping_id,
+                mapping.gene_id,
+                mapping.enzyme_id,
+                parameter_policy,
+            )
+            if selected is None or selected.baseline_enzyme_amount is None:
+                missing = tuple(
+                    dict.fromkeys((*missing, "reviewed_baseline_capacity"))
+                )
     scenarios = tuple(dict.fromkeys(spec.parameter_scenario for spec in specs))
     if specs and proxy_reactions:
         mode = OEExecutionMode.COMPARISON
         status = (
             OEExecutionStatus.PARTIAL_MAPPING
-            if explain_only
+            if explain_only or incomplete_expected_mappings
             else OEExecutionStatus.GENE_LEVEL_EXECUTABLE
         )
     elif specs:
         mode = OEExecutionMode.GENE_CAPACITY
         status = (
             OEExecutionStatus.PARTIAL_MAPPING
-            if explain_only
+            if explain_only or incomplete_expected_mappings
             else OEExecutionStatus.GENE_LEVEL_EXECUTABLE
         )
     elif proxy_reactions:
@@ -342,6 +434,33 @@ def _reviewed_dose_mapping(
                 return item
             return {"expression_multiplier": item, "mapping_source": f"dose_mapping:{key}"}
     return None
+
+
+def _matching_capacity_anchor(
+    catalog: CapacityAnchorCatalog | None,
+    *,
+    mapping: Any,
+    target_id: str,
+    context_id: str,
+) -> CapacityAnchor | None:
+    if catalog is None or not target_id or not context_id:
+        return None
+    matches = tuple(
+        anchor
+        for anchor in catalog.anchors
+        if anchor.target_id == target_id
+        and anchor.context_id == context_id
+        and anchor.gene_id == mapping.gene_id
+        and anchor.enzyme_id == mapping.enzyme_id
+        and anchor.formation_or_dilution_reaction_id
+        == mapping.formation_or_dilution_reaction_id
+        and anchor.model_fingerprint == mapping.model_fingerprint
+    )
+    if len(matches) > 1:
+        raise OECapacityValidationError(
+            f"multiple capacity anchors match mapping {mapping.mapping_id}."
+        )
+    return matches[0] if matches else None
 
 
 def _optional_float(value: Any, field_name: str) -> float | None:
@@ -408,7 +527,6 @@ def _select_parameter_set(
         item
         for item in policy.parameter_sets
         if item.mapping_id == mapping_id
-        or (item.gene_id == gene_id and item.enzyme_id == enzyme_id)
     )
     if not candidates:
         return None
@@ -493,5 +611,6 @@ __all__ = [
     "build_current_model_parameter_policy",
     "build_gene_capacity_specs",
     "build_oe_dose_spec",
+    "load_capacity_anchor_catalog",
     "plan_gene_level_overexpression",
 ]

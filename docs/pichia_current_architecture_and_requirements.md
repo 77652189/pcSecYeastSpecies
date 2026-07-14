@@ -1,7 +1,7 @@
 # pcSecPichia 当前架构与能力边界
 
 状态：active  
-最后更新：2026-07-13
+最后更新：2026-07-14
 
 ## 原始研发目标
 
@@ -42,7 +42,7 @@
   -> 实验反馈与下一轮排序校准
 ```
 
-实验反馈与排序校准的结构化闭环已经完成；当前核心缺口是把 OE 从反应容量代理提升为具有基因、酶、剂量、复合体和蛋白资源语义的可执行路径。
+实验反馈与排序校准的结构化闭环已经完成；gene-level OE capacity 的契约、约束、求解、报告、Streamlit 和正式门禁也已实现。当前核心缺口是缺少独立于求解结果、带来源和适用条件的 baseline capacity 锚点，因此真实 hLF/OPN gene-capacity 仍保持不可执行。
 
 ## 已有能力
 
@@ -102,7 +102,7 @@
 
 ## 当前主要缺口
 
-1. OE 仍以 reaction proxy 为主，缺少 gene-enzyme-capacity、表达剂量和蛋白资源成本。
+1. gene-level OE capacity 链路已经实现，但缺少可审核的 baseline capacity 锚点，真实 hLF/OPN 候选尚不能通过正式验收。
 2. Phase 1 尚未接入获批真实实验数据，当前只有脱敏回放和数据契约证据。
 3. 分泌、折叠、UPR、ERAD、糖基化和囊泡运输的机制约束仍不完整。
 4. 大量模型外蛋白有序列和注释，但没有可执行 GPR，不能直接进入 KO/OE 求解。
@@ -137,6 +137,26 @@ app/ui
 - `external_refs` 只提供外部 GEM、GPR、kcat、丰度和同源映射候选；未经当前模型 reaction/gene/enzyme 复核不得成为可执行约束。
 - `shadow_lp`、SciPy HiGHS 和现有 reference solve 仍是求解路径；Phase 2 不引入新的默认 solver。
 - gene-level capacity 与旧 reaction proxy 必须作为两个明确模式并行存在，不能通过改名掩盖降级。
+
+### 外部容量候选与正式资产边界
+
+研发组无法提供内部 baseline capacity 时，系统允许从外部来源建立候选，但外部候选不能直接成为可执行约束。来源优先级为：
+
+1. 同宿主、同菌株且培养条件接近的 Pichia 定量蛋白组。
+2. 经版本和许可审计的 iPichia/ecPichia 等酶约束模型。
+3. Pichia 文献以及 BRENDA、SABIO-RK 等动力学来源与蛋白组的组合换算。
+4. 通过 BLAST/RBH 确认的 S. cerevisiae 同源参数转移，仅作为低置信区间。
+
+外部参数分为四种适用范围：
+
+- `target_specific`：同宿主、同条件且针对当前目标蛋白获得的参数。
+- `host_condition`：宿主基础容量，可在宿主、菌株、培养基、碳源和生长状态匹配时供 hLF/OPN 复用。
+- `external_model_calibrated`：来自外部酶约束模型的校准参数，不等同于实测丰度。
+- `homolog_transferred`：由其他物种同源转移，只能生成宽不确定性区间。
+
+匹配优先级固定为 `target_specific > host_condition > external_model_calibrated > homolog_transferred`。候选必须完成单位换算、当前模型 gene/enzyme/formation 映射、条件匹配、来源版本/hash/license、冲突检查和人工审核后，才可提升到 `Enzymedata/oe_capacity_baseline_capacity.json`。`1000` 通用上界、baseline optimal flux、fixture 和未审核同源参数永远不能作为正式锚点。
+
+长期决策见 [ADR-001](adr/001-external-capacity-candidate-promotion.md)。
 
 ## 项目成功标准
 

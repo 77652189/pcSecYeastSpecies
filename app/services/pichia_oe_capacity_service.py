@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from dataclasses import asdict
+from datetime import datetime, timezone
 from enum import Enum
 from functools import lru_cache
 from pathlib import Path
@@ -15,6 +17,7 @@ ensure_python_pichia_on_path()
 
 from pcsec_pichia.loading import load_pcsec_pichia_inputs
 from pcsec_pichia.oe_capacity import (
+    CapacityAnchorCatalog,
     OECapacityScreenConfig,
     OECapacityScreenRequest,
     OEExecutionMode,
@@ -23,6 +26,7 @@ from pcsec_pichia.oe_capacity import (
     build_current_model_parameter_policy,
     build_gene_enzyme_reaction_catalog,
     build_oe_dose_spec,
+    load_capacity_anchor_catalog,
     run_gene_level_oe_screen,
     summarize_gene_capacity_catalog,
     write_oe_capacity_outputs,
@@ -33,6 +37,8 @@ from pcsec_pichia.targets import load_builtin_targets
 
 DEFAULT_OE_CAPACITY_ROOT = Path("local_runs") / "oe_capacity" / "ui_runs"
 DEFAULT_TARGET_IDS = ("hLF", "OPN_ALPHA_FULL_PROJECT")
+OE_CAPACITY_ASSET_PATH = Path("Enzymedata") / "oe_capacity_baseline_capacity.json"
+UI_RUN_STATUS_FILENAME = "ui_run_status.json"
 
 
 def list_oe_capacity_targets() -> list[dict[str, str]]:
@@ -67,6 +73,7 @@ def preview_oe_capacity_candidate(
         float(growth_rate),
         carbon_source_id,
         float(relative_uncertainty),
+        _capacity_asset_version(),
     )
     mappings = [
         mapping
@@ -78,6 +85,25 @@ def preview_oe_capacity_candidate(
         for parameter_set in runtime.parameter_policy.parameter_sets
         if parameter_set.gene_id == normalized_gene
     ]
+    parameter_mapping_ids = {item.mapping_id for item in parameter_sets}
+    mapping_payloads: list[dict[str, Any]] = []
+    for mapping in mappings:
+        payload = _json_ready(asdict(mapping))
+        if (
+            payload.get("execution_status") == "gene_level_executable"
+            and mapping.mapping_id not in parameter_mapping_ids
+        ):
+            payload["execution_status"] = "partial_mapping"
+            payload["missing_information"] = list(
+                dict.fromkeys(
+                    (
+                        *(payload.get("missing_information") or []),
+                        "reviewed_baseline_capacity",
+                        "capacity_parameters",
+                    )
+                )
+            )
+        mapping_payloads.append(payload)
     coverage = summarize_gene_capacity_catalog(runtime.gene_capacity_catalog)
     return {
         "target_id": target_id,
@@ -85,18 +111,15 @@ def preview_oe_capacity_candidate(
         "context_id": _context_id(carbon_source_id, growth_rate),
         "mapping_count": len(mappings),
         "parameter_set_count": len(parameter_sets),
-        "mappings": [_json_ready(asdict(mapping)) for mapping in mappings],
+        "mappings": mapping_payloads,
         "parameter_sets": [
             _json_ready(asdict(parameter_set)) for parameter_set in parameter_sets
         ],
         "coverage": _json_ready(asdict(coverage)),
-        "executable_mapping_count": dict(coverage.by_status).get(
-            "gene_level_executable",
-            0,
-        ),
+        "executable_mapping_count": len(parameter_mapping_ids),
         "execution_boundary": (
-            "Only current-model gene/enzyme/reaction mappings with canonical local "
-            "parameters can execute gene-level capacity scenarios."
+            "Gene-level capacity requires a current-model mapping plus an exact "
+            "target/context/model-matched reviewed baseline capacity anchor."
         ),
     }
 
@@ -115,16 +138,11 @@ def submit_oe_capacity_screen(
     relative_uncertainty: float = 0.2,
     run_name: str = "",
     output_root: str | Path = DEFAULT_OE_CAPACITY_ROOT,
+    case_kind: str = "screen",
 ) -> dict[str, Any]:
     normalized_genes = _dedupe_gene_ids(gene_ids)
     if not normalized_genes:
         raise ValueError("at least one gene_id is required.")
-    runtime = _prepare_runtime(
-        target_id,
-        float(growth_rate),
-        carbon_source_id,
-        float(relative_uncertainty),
-    )
     dose = build_oe_dose_spec(dict(dose_payload))
     try:
         mode = OEExecutionMode(execution_mode)
@@ -151,28 +169,84 @@ def submit_oe_capacity_screen(
     )
     safe_run_name = _safe_run_name(run_name or f"{target_id}-{context_id}")
     run_dir = Path(output_root) / safe_run_name
-    if run_dir.exists():
-        raise FileExistsError(f"OE capacity run already exists: {run_dir}")
-    result = run_gene_level_oe_screen(runtime, requests, config)
-    outputs = write_oe_capacity_outputs(result, run_dir)
-    summary = {
+    run_dir.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        run_dir.mkdir(exist_ok=False)
+    except FileExistsError as exc:
+        raise FileExistsError(f"OE capacity run already exists: {run_dir}") from exc
+    status_base = {
         "run_name": safe_run_name,
         "run_dir": str(run_dir),
         "target_id": target_id,
         "context_id": context_id,
-        "completed_count": len(result.rows),
-        "failure_count": len(result.failures),
-        "rows": [_json_ready(asdict(row)) for row in result.rows],
-        "failures": [_json_ready(asdict(row)) for row in result.failures],
-        "warnings": list(result.warnings),
-        "paths": _json_ready(asdict(outputs)),
-        "model_relative_only": True,
-        "mutates_recommendation_tier": False,
     }
-    (run_dir / "ui_run_summary.json").write_text(
-        json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    _write_run_status(run_dir, status="running", **status_base)
+    try:
+        runtime = _prepare_runtime(
+            target_id,
+            float(growth_rate),
+            carbon_source_id,
+            float(relative_uncertainty),
+            _capacity_asset_version(),
+        )
+        result = run_gene_level_oe_screen(runtime, requests, config)
+        outputs = write_oe_capacity_outputs(
+            result,
+            run_dir,
+            run_identity={
+                "run_id": safe_run_name,
+                "target_ids": [target_id],
+                "context_ids": [context_id],
+                "gene_ids": list(normalized_genes),
+                "case_kind": case_kind,
+            },
+            capacity_asset=runtime.capacity_asset_metadata,
+        )
+    except Exception as exc:
+        _write_run_status(
+            run_dir,
+            status="failed",
+            error_type=type(exc).__name__,
+            error_message=str(exc),
+            **status_base,
+        )
+        raise
+    try:
+        summary = {
+            "run_name": safe_run_name,
+            "run_dir": str(run_dir),
+            "status": "completed",
+            "target_id": target_id,
+            "context_id": context_id,
+            "completed_count": len(result.rows),
+            "failure_count": len(result.failures),
+            "rows": [_json_ready(asdict(row)) for row in result.rows],
+            "failures": [_json_ready(asdict(row)) for row in result.failures],
+            "warnings": list(result.warnings),
+            "paths": _json_ready(asdict(outputs)),
+            "model_relative_only": True,
+            "mutates_recommendation_tier": False,
+        }
+        (run_dir / "ui_run_summary.json").write_text(
+            json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        _write_run_status(
+            run_dir,
+            status="completed",
+            completed_count=len(result.rows),
+            failure_count=len(result.failures),
+            **status_base,
+        )
+    except Exception as exc:
+        _write_run_status(
+            run_dir,
+            status="failed",
+            error_type=type(exc).__name__,
+            error_message=str(exc),
+            **status_base,
+        )
+        raise
     return summary
 
 
@@ -198,16 +272,23 @@ def load_oe_capacity_run(run_dir: str | Path) -> dict[str, Any]:
     root = Path(run_dir)
     summary_path = root / "ui_run_summary.json"
     if not summary_path.is_file():
+        status = _load_run_status(root)
         return {
             "run_name": root.name,
             "run_dir": str(root),
             "available": False,
             "rows": [],
             "failures": [],
+            "status": status.get("status", "unknown"),
+            "error_type": status.get("error_type"),
+            "error_message": status.get("error_message"),
+            "target_id": status.get("target_id"),
+            "context_id": status.get("context_id"),
             "warnings": ["ui_run_summary.json is missing"],
             "paths": {},
         }
     payload = json.loads(summary_path.read_text(encoding="utf-8"))
+    payload["status"] = _load_run_status(root).get("status", "completed")
     payload["available"] = True
     return payload
 
@@ -223,6 +304,7 @@ def _prepare_runtime(
     growth_rate: float,
     carbon_source_id: str,
     relative_uncertainty: float,
+    capacity_asset_version: str,
 ) -> SimpleNamespace:
     targets = _target_lookup()
     try:
@@ -252,9 +334,22 @@ def _prepare_runtime(
         inputs.metabolic,
         prepared["combined"],
     )
+    capacity_asset_path = _repo_root() / OE_CAPACITY_ASSET_PATH
+    anchor_catalog, capacity_asset_metadata = _load_capacity_asset_snapshot(
+        capacity_asset_path
+    )
+    loaded_asset_version = str(capacity_asset_metadata.get("sha256") or "missing")
+    if loaded_asset_version != capacity_asset_version:
+        raise RuntimeError(
+            "OE capacity asset changed during runtime preparation; retry the run."
+        )
+    context_id = _context_id(carbon_source_id, growth_rate)
     parameter_policy = build_current_model_parameter_policy(
         catalog,
         prepared["combined"],
+        capacity_anchors=anchor_catalog,
+        target_id=target_id,
+        context_id=context_id,
         relative_uncertainty=relative_uncertainty,
     )
     return SimpleNamespace(
@@ -270,7 +365,72 @@ def _prepare_runtime(
             scenarios=parameter_policy.scenarios,
             strict_conflicts=parameter_policy.strict_conflicts,
         ),
+        capacity_asset_version=capacity_asset_version,
+        capacity_asset_metadata=capacity_asset_metadata,
+        capacity_anchor_catalog=anchor_catalog,
     )
+
+
+def _capacity_asset_version() -> str:
+    path = _repo_root() / OE_CAPACITY_ASSET_PATH
+    if not path.is_file():
+        return "missing"
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _load_capacity_asset_snapshot(
+    path: Path,
+) -> tuple[CapacityAnchorCatalog, dict[str, Any]]:
+    if not path.is_file():
+        catalog = CapacityAnchorCatalog(
+            model_fingerprint="missing-capacity-asset",
+            anchors=(),
+            source_ref=str(path),
+        )
+        return catalog, {
+            "path": str(path),
+            "version": "missing",
+            "sha256": "",
+            "reviewed": False,
+        }
+    raw = path.read_bytes()
+    payload = json.loads(raw.decode("utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("OE capacity asset root must be a JSON object.")
+    catalog = load_capacity_anchor_catalog(payload)
+    metadata = {
+        "path": str(path),
+        "version": str(payload.get("asset_version") or ""),
+        "sha256": hashlib.sha256(raw).hexdigest(),
+        "reviewed": bool(catalog.anchors),
+    }
+    return catalog, metadata
+
+
+def _write_run_status(directory: Path, *, status: str, **details: Any) -> None:
+    payload = {
+        **details,
+        "status": status,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    destination = directory / UI_RUN_STATUS_FILENAME
+    temporary = directory / f".{UI_RUN_STATUS_FILENAME}.tmp"
+    temporary.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    temporary.replace(destination)
+
+
+def _load_run_status(run_dir: Path) -> dict[str, Any]:
+    path = run_dir / UI_RUN_STATUS_FILENAME
+    if not path.is_file():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
 
 
 @lru_cache(maxsize=1)

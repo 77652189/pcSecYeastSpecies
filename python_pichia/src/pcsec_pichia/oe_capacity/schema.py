@@ -84,6 +84,16 @@ class ConstraintChangeKind(str, Enum):
     REACTION_BOUND_PROXY = "reaction_bound_proxy"
 
 
+_STRICTLY_POSITIVE_PARAMETERS = {
+    "kcat",
+    "molecular_weight",
+    "baseline_enzyme_amount",
+    "baseline_capacity",
+    "complex_stoichiometry",
+    "expression_multiplier",
+}
+
+
 @dataclass(frozen=True)
 class ParameterEstimate:
     parameter_name: str
@@ -114,6 +124,13 @@ class ParameterEstimate:
             raise OECapacityValidationError(
                 "parameter interval must satisfy lower_bound <= nominal_value <= upper_bound."
             )
+        if self.parameter_name in _STRICTLY_POSITIVE_PARAMETERS:
+            for name, value in (
+                ("nominal_value", self.nominal_value),
+                ("lower_bound", self.lower_bound),
+                ("upper_bound", self.upper_bound),
+            ):
+                _require_positive_number(value, name)
         if self.is_transferred and self.source_type is not EvidenceSourceType.HOMOLOGY_TRANSFER:
             raise OECapacityValidationError(
                 "is_transferred parameters must use source_type=homology_transfer."
@@ -125,6 +142,91 @@ class ParameterEstimate:
         if scenario is ParameterScenario.HIGH:
             return float(self.upper_bound)
         return float(self.nominal_value)
+
+
+@dataclass(frozen=True)
+class CapacityAnchor:
+    anchor_id: str
+    target_id: str
+    context_id: str
+    gene_id: str
+    enzyme_id: str
+    formation_or_dilution_reaction_id: str
+    model_fingerprint: str
+    baseline_capacity: float
+    unit: str
+    source_ref: str
+    source_version: str
+    reviewed_by: str
+    reviewed_at: str
+
+    def validate(self) -> None:
+        for field_name, value in (
+            ("anchor_id", self.anchor_id),
+            ("target_id", self.target_id),
+            ("context_id", self.context_id),
+            ("gene_id", self.gene_id),
+            ("enzyme_id", self.enzyme_id),
+            (
+                "formation_or_dilution_reaction_id",
+                self.formation_or_dilution_reaction_id,
+            ),
+            ("model_fingerprint", self.model_fingerprint),
+            ("source_ref", self.source_ref),
+            ("source_version", self.source_version),
+            ("reviewed_by", self.reviewed_by),
+            ("reviewed_at", self.reviewed_at),
+        ):
+            _require_text(value, field_name)
+        _require_positive_number(self.baseline_capacity, "baseline_capacity")
+        if self.unit != "model_flux":
+            raise OECapacityValidationError(
+                "CapacityAnchor requires canonical unit=model_flux."
+            )
+
+    def as_parameter_estimate(self) -> ParameterEstimate:
+        self.validate()
+        return ParameterEstimate(
+            parameter_name="baseline_enzyme_amount",
+            nominal_value=float(self.baseline_capacity),
+            lower_bound=float(self.baseline_capacity),
+            upper_bound=float(self.baseline_capacity),
+            unit=self.unit,
+            source_type=EvidenceSourceType.REVIEWED_PICHIA_MAPPING,
+            source_ref=self.source_ref,
+            source_version=self.source_version,
+            confidence=ConfidenceLevel.HIGH,
+        )
+
+
+@dataclass(frozen=True)
+class CapacityAnchorCatalog:
+    model_fingerprint: str
+    anchors: tuple[CapacityAnchor, ...]
+    schema_version: int = 1
+    source_ref: str = ""
+
+    def validate(self) -> None:
+        if self.schema_version != 1:
+            raise OECapacityValidationError(
+                "CapacityAnchorCatalog requires schema_version=1."
+            )
+        anchor_ids: set[str] = set()
+        identities: set[tuple[str, str, str, str, str, str]] = set()
+        for anchor in self.anchors:
+            anchor.validate()
+            identity = (
+                anchor.model_fingerprint,
+                anchor.target_id,
+                anchor.context_id,
+                anchor.gene_id,
+                anchor.enzyme_id,
+                anchor.formation_or_dilution_reaction_id,
+            )
+            if anchor.anchor_id in anchor_ids or identity in identities:
+                raise OECapacityValidationError("duplicate capacity anchor identity.")
+            anchor_ids.add(anchor.anchor_id)
+            identities.add(identity)
 
 
 @dataclass(frozen=True)
@@ -198,6 +300,24 @@ class GeneEnzymeReactionMapping:
     def validate(self) -> None:
         _require_text(self.mapping_id, "mapping_id")
         _require_text(self.gene_id, "gene_id")
+        expected_status = derive_mapping_execution_status(
+            role=self.gpr_role,
+            mapping_source=self.mapping_source,
+            model_mapping_complete=all(
+                (
+                    self.model_fingerprint,
+                    self.enzyme_id,
+                    self.reaction_id,
+                    self.enzyme_variable_id,
+                    self.formation_or_dilution_reaction_id,
+                )
+            ),
+        )
+        if self.execution_status is not expected_status:
+            raise OECapacityValidationError(
+                f"{self.gpr_role.value} mapping must use "
+                f"execution_status={expected_status.value}."
+            )
         if self.gpr_role is GPRRole.COMPLEX_SUBUNIT:
             if not self.complex_id or not self.subunit_stoichiometry:
                 if self.execution_status is OEExecutionStatus.GENE_LEVEL_EXECUTABLE:
@@ -216,20 +336,6 @@ class GeneEnzymeReactionMapping:
         for subunit_id, coefficient in self.subunit_stoichiometry:
             _require_text(subunit_id, "subunit_id")
             _require_positive_number(coefficient, "subunit_stoichiometry")
-        external_only_sources = {
-            EvidenceSourceType.EXTERNAL_PICHIA_MODEL,
-            EvidenceSourceType.PICHIA_LITERATURE,
-            EvidenceSourceType.HOMOLOGY_TRANSFER,
-            EvidenceSourceType.SMOKE_FIXTURE,
-        }
-        if (
-            self.mapping_source in external_only_sources
-            and self.execution_status is OEExecutionStatus.GENE_LEVEL_EXECUTABLE
-        ):
-            raise OECapacityValidationError(
-                "external evidence must remain external_evidence_only until current-model "
-                "gene, enzyme, and reaction mappings are confirmed."
-            )
         if self.execution_status is OEExecutionStatus.GENE_LEVEL_EXECUTABLE:
             for field_name, value in (
                 ("model_fingerprint", self.model_fingerprint),
@@ -290,6 +396,13 @@ class GeneCapacitySpec:
             raise OECapacityValidationError(
                 "GeneCapacitySpec missing required parameters: " + ", ".join(absent)
             )
+        if (
+            self.baseline_enzyme_amount is not None
+            and self.baseline_enzyme_amount.unit != "model_flux"
+        ):
+            raise OECapacityValidationError(
+                "baseline_enzyme_amount requires canonical unit=model_flux."
+            )
         if self.mapping.gpr_role is GPRRole.COMPLEX_SUBUNIT and self.complex_stoichiometry is None:
             raise OECapacityValidationError(
                 "complex_subunit GeneCapacitySpec requires complex_stoichiometry."
@@ -342,6 +455,19 @@ class GeneCapacityParameterSet:
         )
         return tuple(name for name, value in values if value is None)
 
+    @property
+    def uses_smoke_fixture(self) -> bool:
+        return any(
+            estimate is not None
+            and estimate.source_type is EvidenceSourceType.SMOKE_FIXTURE
+            for estimate in (
+                self.kcat,
+                self.molecular_weight,
+                self.baseline_enzyme_amount,
+                self.complex_stoichiometry,
+            )
+        )
+
 
 @dataclass(frozen=True)
 class ParameterPolicy:
@@ -352,6 +478,7 @@ class ParameterPolicy:
         ParameterScenario.HIGH,
     )
     strict_conflicts: bool = True
+    test_only_allow_smoke_fixture: bool = False
 
     def validate(self) -> None:
         if not self.scenarios or len(set(self.scenarios)) != len(self.scenarios):
@@ -361,6 +488,13 @@ class ParameterPolicy:
         ids: set[str] = set()
         for parameter_set in self.parameter_sets:
             parameter_set.validate()
+            if (
+                not self.test_only_allow_smoke_fixture
+                and parameter_set.uses_smoke_fixture
+            ):
+                raise OECapacityValidationError(
+                    "smoke_fixture parameters are test-only and rejected by production policy."
+                )
             if parameter_set.parameter_set_id in ids:
                 raise OECapacityValidationError(
                     f"duplicate parameter_set_id: {parameter_set.parameter_set_id}"
@@ -597,6 +731,7 @@ class SolverSnapshot:
     key_fluxes: tuple[tuple[str, float], ...] = ()
     message: str = ""
     warnings: tuple[str, ...] = ()
+    attempt_id: str = ""
 
     def validate(self) -> None:
         _require_text(self.backend, "backend")
@@ -622,6 +757,48 @@ class SolverSnapshot:
 
 
 @dataclass(frozen=True)
+class OECapacityScenarioResult:
+    parameter_scenario: ParameterScenario
+    baseline: SolverSnapshot
+    perturbed: SolverSnapshot
+    objective_delta: float | None = None
+    protein_resource_cost_delta: float | None = None
+    failure_reason: str = ""
+
+    def validate(self) -> None:
+        self.baseline.validate()
+        self.perturbed.validate()
+        if self.perturbed.execution_mode is not OEExecutionMode.GENE_CAPACITY:
+            raise OECapacityValidationError(
+                "scenario perturbed snapshot must use execution_mode=gene_capacity."
+            )
+        if self.baseline.parameter_scenario is not self.parameter_scenario:
+            raise OECapacityValidationError(
+                "scenario result must match baseline parameter_scenario."
+            )
+        if self.perturbed.parameter_scenario is not self.parameter_scenario:
+            raise OECapacityValidationError(
+                "scenario result must match perturbed parameter_scenario."
+            )
+        for field_name, value in (
+            ("objective_delta", self.objective_delta),
+            ("protein_resource_cost_delta", self.protein_resource_cost_delta),
+        ):
+            if value is not None and (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+            ):
+                raise OECapacityValidationError(
+                    f"{field_name} must be finite when present."
+                )
+        if (not self.baseline.success or not self.perturbed.success) and not self.failure_reason:
+            raise OECapacityValidationError(
+                "failed scenario result requires failure_reason."
+            )
+
+
+@dataclass(frozen=True)
 class OECapacityComparisonResult:
     gene_id: str
     target_id: str
@@ -637,6 +814,8 @@ class OECapacityComparisonResult:
     missing_information: tuple[str, ...] = ()
     traceability: tuple[tuple[str, str], ...] = ()
     warnings: tuple[str, ...] = ()
+    scenario_results: tuple[OECapacityScenarioResult, ...] = ()
+    proxy_attempts: tuple[SolverSnapshot, ...] = ()
 
     def validate(self) -> None:
         _require_text(self.gene_id, "gene_id")
@@ -676,6 +855,27 @@ class OECapacityComparisonResult:
                 or not math.isfinite(value)
             ):
                 raise OECapacityValidationError(f"{field_name} must be finite when present.")
+        scenario_ids: set[ParameterScenario] = set()
+        for result in self.scenario_results:
+            result.validate()
+            if result.parameter_scenario in scenario_ids:
+                raise OECapacityValidationError(
+                    f"duplicate scenario result: {result.parameter_scenario.value}"
+                )
+            scenario_ids.add(result.parameter_scenario)
+        attempt_ids: set[str] = set()
+        for snapshot in self.proxy_attempts:
+            snapshot.validate()
+            if snapshot.execution_mode is not OEExecutionMode.REACTION_PROXY:
+                raise OECapacityValidationError(
+                    "proxy attempts must use execution_mode=reaction_proxy."
+                )
+            _require_text(snapshot.attempt_id, "proxy attempt_id")
+            if snapshot.attempt_id in attempt_ids:
+                raise OECapacityValidationError(
+                    f"duplicate proxy attempt_id: {snapshot.attempt_id}"
+                )
+            attempt_ids.add(snapshot.attempt_id)
 
 
 @dataclass(frozen=True)
@@ -751,6 +951,10 @@ class OECapacityScreenRow:
     protein_resource_cost_delta: float | None
     missing_information: tuple[str, ...] = ()
     warnings: tuple[str, ...] = ()
+    screen_status: str = "completed"
+    scenario_results: tuple[OECapacityScenarioResult, ...] = ()
+    proxy_attempts: tuple[SolverSnapshot, ...] = ()
+    summary_source: str = ""
 
     def validate(self) -> None:
         for field_name, value in (
@@ -787,6 +991,47 @@ class OECapacityScreenRow:
                 raise OECapacityValidationError(
                     f"{field_name} must be finite when present."
                 )
+        if self.screen_status not in {
+            "completed",
+            "partial_failure",
+            "failed",
+            "skipped",
+            "not_executable",
+        }:
+            raise OECapacityValidationError(
+                "screen_status must be completed, partial_failure, failed, skipped, "
+                "or not_executable."
+            )
+        for result in self.scenario_results:
+            result.validate()
+        for snapshot in self.proxy_attempts:
+            snapshot.validate()
+
+
+def derive_mapping_execution_status(
+    *,
+    role: GPRRole,
+    mapping_source: EvidenceSourceType,
+    model_mapping_complete: bool,
+) -> OEExecutionStatus:
+    if mapping_source in {
+        EvidenceSourceType.EXTERNAL_PICHIA_MODEL,
+        EvidenceSourceType.PICHIA_LITERATURE,
+        EvidenceSourceType.HOMOLOGY_TRANSFER,
+        EvidenceSourceType.SMOKE_FIXTURE,
+    }:
+        return OEExecutionStatus.EXTERNAL_EVIDENCE_ONLY
+    if role is GPRRole.ISOENZYME:
+        return OEExecutionStatus.ISOENZYME_AMBIGUOUS
+    if role is GPRRole.COMPLEX_SUBUNIT:
+        return OEExecutionStatus.COMPLEX_LIMITED
+    if role is GPRRole.MIXED:
+        return OEExecutionStatus.PARTIAL_MAPPING
+    if role is GPRRole.UNRESOLVED:
+        return OEExecutionStatus.UNRESOLVED
+    if not model_mapping_complete:
+        return OEExecutionStatus.PARTIAL_MAPPING
+    return OEExecutionStatus.GENE_LEVEL_EXECUTABLE
 
 
 @dataclass(frozen=True)
@@ -845,6 +1090,8 @@ def _require_positive_number(value: float, field_name: str) -> None:
 
 
 __all__ = [
+    "CapacityAnchor",
+    "CapacityAnchorCatalog",
     "ConfidenceLevel",
     "ConstraintChangeKind",
     "CapacityConstraintChange",
@@ -863,6 +1110,7 @@ __all__ = [
     "OECapacityParameterConflictError",
     "OECapacityConstraintBundle",
     "OECapacityComparisonResult",
+    "OECapacityScenarioResult",
     "OECapacityPlan",
     "OECapacityOutputs",
     "OECapacityScreenConfig",
@@ -877,4 +1125,5 @@ __all__ = [
     "ParameterPolicy",
     "ResourceCostMode",
     "SolverSnapshot",
+    "derive_mapping_execution_status",
 ]

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -13,6 +14,7 @@ from pcsec_pichia.core.pichia_enzymes import (
 )
 from pcsec_pichia.oe_capacity import (
     OECapacityComparisonResult,
+    OECapacityScenarioResult,
     OECapacityScreenConfig,
     OECapacityScreenRequest,
     OEDoseMode,
@@ -22,8 +24,43 @@ from pcsec_pichia.oe_capacity import (
     ParameterScenario,
     SolverSnapshot,
     run_gene_level_oe_screen,
+    verify_oe_capacity_run,
     write_oe_capacity_outputs,
 )
+
+
+def test_real_boundary_manifest_verifies_with_incomplete_scenarios(
+    tmp_path: Path,
+) -> None:
+    result = run_gene_level_oe_screen(
+        _prepared_model(),
+        (_request("missing_gene", OEExecutionMode.COMPARISON),),
+        _config(),
+    )
+    run_dir = tmp_path / "boundary-run"
+    write_oe_capacity_outputs(
+        result,
+        run_dir,
+        run_identity={
+            "run_id": "boundary-run",
+            "target_ids": ["hLF"],
+            "context_ids": ["ctx-missing_gene"],
+            "case_kind": "boundary",
+        },
+        capacity_asset={
+            "path": "Enzymedata/oe_capacity_baseline_capacity.json",
+            "version": "reviewed-v1",
+            "sha256": "b" * 64,
+            "reviewed": True,
+        },
+    )
+
+    verification = verify_oe_capacity_run(
+        run_dir,
+        {"target_id": "hLF", "case_kind": "boundary"},
+    )
+
+    assert verification["passed"] is True
 
 
 def test_small_batch_screen_preserves_completed_and_non_executable_rows(
@@ -50,20 +87,18 @@ def test_small_batch_screen_preserves_completed_and_non_executable_rows(
         ),
         _config(),
     )
-
     result.validate()
-    assert captured_modes == [OEExecutionMode.COMPARISON]
+    assert captured_modes == [OEExecutionMode.REACTION_PROXY]
     assert len(result.rows) == 1
     assert len(result.failures) == 1
     row = result.rows[0]
     assert row.gene_id == "G1"
     assert row.baseline_objective == 1.0
     assert row.proxy_objective == 1.1
-    assert row.gene_capacity_objective == 1.2
-    assert row.gene_capacity_vs_baseline_delta == 0.2
-    assert row.gene_capacity_vs_proxy_delta == 0.1
-    assert row.mapping_ids
-    assert row.parameter_sources
+    assert row.gene_capacity_objective is None
+    assert row.gene_capacity_vs_baseline_delta is None
+    assert row.gene_capacity_vs_proxy_delta is None
+    assert "reviewed_baseline_capacity" in row.missing_information
     assert result.failures[0].execution_mode is OEExecutionMode.NOT_EXECUTABLE
 
 
@@ -103,12 +138,44 @@ def test_screen_outputs_write_jsonl_manifest_and_boundary_report(
 ) -> None:
     monkeypatch.setattr(
         "pcsec_pichia.oe_capacity.simulation.run_gene_level_oe_comparison",
-        lambda _prepared, plan, _options: _comparison(plan),
+        lambda _prepared, plan, _options: _comparison(
+            plan, include_failed_proxy=True
+        ),
     )
     result = run_gene_level_oe_screen(
         _prepared_model(),
         (_request("G1", OEExecutionMode.COMPARISON),),
         _config(),
+    )
+    failed_row = result.failures[0]
+    scenario_baseline = replace(
+        failed_row.proxy_attempts[0],
+        execution_mode=OEExecutionMode.NOT_EXECUTABLE,
+        parameter_scenario=ParameterScenario.NOMINAL,
+        attempt_id="nominal-baseline",
+    )
+    scenario_perturbed = replace(
+        failed_row.proxy_attempts[1],
+        execution_mode=OEExecutionMode.GENE_CAPACITY,
+        parameter_scenario=ParameterScenario.NOMINAL,
+        attempt_id="nominal-perturbed",
+        message="high scenario infeasible",
+    )
+    result = replace(
+        result,
+        failures=(
+            replace(
+                failed_row,
+                scenario_results=(
+                    OECapacityScenarioResult(
+                        parameter_scenario=ParameterScenario.NOMINAL,
+                        baseline=scenario_baseline,
+                        perturbed=scenario_perturbed,
+                        failure_reason="perturbed solve infeasible",
+                    ),
+                ),
+            ),
+        ),
     )
 
     outputs = write_oe_capacity_outputs(result, tmp_path / "oe_capacity")
@@ -120,19 +187,33 @@ def test_screen_outputs_write_jsonl_manifest_and_boundary_report(
     ]
     manifest = json.loads(Path(outputs.manifest_path).read_text(encoding="utf-8"))
     report = Path(outputs.report_path).read_text(encoding="utf-8")
-    assert rows[0]["screen_status"] == "completed"
-    assert rows[0]["execution_mode"] == "comparison"
+    assert rows[0]["screen_status"] == "partial_failure"
+    assert rows[0]["execution_mode"] == "reaction_proxy"
     assert rows[0]["proxy_objective"] == 1.1
-    assert rows[0]["gene_capacity_objective"] == 1.2
-    assert rows[0]["gene_capacity_vs_baseline_delta"] == 0.2
-    assert manifest["completed_count"] == 1
-    assert manifest["failure_count"] == 0
+    assert rows[0]["gene_capacity_objective"] is None
+    assert rows[0]["gene_capacity_vs_baseline_delta"] is None
+    assert rows[0]["proxy_attempts"][1]["success"] is False
+    assert rows[0]["proxy_attempts"][1]["message"] == "infeasible proxy"
+    assert manifest["schema_version"] == 2
+    assert manifest["completed_count"] == 0
+    assert manifest["failure_count"] == 1
     assert manifest["predicts_absolute_yield"] is False
-    assert len(manifest["rows_sha256"]) == 64
+    assert len(manifest["files"]["rows"]["sha256"]) == 64
+    assert len(manifest["files"]["report"]["sha256"]) == 64
+    assert manifest["run_identity"]["target_ids"] == ["hLF"]
+    assert manifest["run_identity"]["context_ids"] == ["ctx-G1"]
+    assert manifest["run_identity"]["gene_ids"] == ["G1"]
+    assert manifest["status"]["state"] == "failed"
+    assert manifest["scenario_completeness"]["required"] == ["nominal"]
+    assert manifest["capacity_asset"]["reviewed"] is False
     assert "does not predict mg/L" in report
     assert "Legacy proxy comparison enabled: True" in report
     assert "Mapping and parameter traceability" in report
-    assert "local_enzyme_data" in report
+    assert "reviewed_baseline_capacity" in report
+    assert "Reaction proxy attempts" in report
+    assert "infeasible proxy" in report
+    assert "Scenario solver evidence" in report
+    assert "high scenario infeasible" in report
 
 
 def _request(gene_id: str, mode: OEExecutionMode) -> OECapacityScreenRequest:
@@ -204,7 +285,9 @@ def _prepared_model() -> SimpleNamespace:
     )
 
 
-def _comparison(plan) -> OECapacityComparisonResult:
+def _comparison(
+    plan, *, include_failed_proxy: bool = False
+) -> OECapacityComparisonResult:
     baseline = SolverSnapshot(
         execution_mode=OEExecutionMode.NOT_EXECUTABLE,
         backend="scipy_highs_reference",
@@ -229,7 +312,26 @@ def _comparison(plan) -> OECapacityComparisonResult:
             growth_retention=None,
             max_feasible_growth_rate=None,
             protein_resource_cost=None,
+            attempt_id="R1",
         )
+    proxy_attempts = ()
+    if proxy is not None:
+        proxy_attempts = (proxy,)
+        if include_failed_proxy:
+            proxy_attempts = proxy_attempts + (
+                SolverSnapshot(
+                execution_mode=OEExecutionMode.REACTION_PROXY,
+                backend="scipy_highs_reference",
+                solver_status="infeasible",
+                success=False,
+                secretion_objective=None,
+                growth_retention=None,
+                max_feasible_growth_rate=None,
+                protein_resource_cost=None,
+                message="infeasible proxy",
+                attempt_id="R2",
+                ),
+            )
     scenarios = ()
     if plan.execution_mode in {
         OEExecutionMode.GENE_CAPACITY,
@@ -261,4 +363,5 @@ def _comparison(plan) -> OECapacityComparisonResult:
         protein_resource_cost_delta=0.1 if scenarios else None,
         missing_information=plan.missing_information,
         warnings=plan.warnings,
+        proxy_attempts=proxy_attempts,
     )

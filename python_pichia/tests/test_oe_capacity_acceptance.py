@@ -1,137 +1,307 @@
 from __future__ import annotations
 
+import hashlib
 import json
-from dataclasses import replace
+from pathlib import Path
 
+import pcsec_pichia.oe_capacity.acceptance as acceptance_module
 from pcsec_pichia.oe_capacity import (
-    OECapacityAcceptanceObservation,
-    OECapacityRegressionCheck,
-    build_oe_capacity_acceptance_summary,
-    write_oe_capacity_acceptance_outputs,
+    run_phase2_oe_capacity_acceptance,
+    verify_oe_capacity_run,
 )
 
 
-def _observation(target_id: str, case_kind: str) -> OECapacityAcceptanceObservation:
-    missing = () if case_kind == "executable" else ("nonzero_baseline_formation_flux",)
-    return OECapacityAcceptanceObservation(
-        target_id=target_id,
-        gene_id="G1" if case_kind == "executable" else "G_BOUNDARY",
-        case_kind=case_kind,
-        elapsed_seconds=12.5,
-        screen_status="completed",
-        execution_status="gene_level_executable",
-        baseline_objective=1.0,
-        proxy_objective=1.0,
-        gene_capacity_objective=1.0,
-        protein_resource_cost_delta=0.0,
-        missing_information=missing,
-        output_dir=f"local_runs/oe_capacity/round6/{target_id}-{case_kind}",
+def test_verify_run_accepts_only_hash_bound_v2_artifacts(tmp_path: Path) -> None:
+    run_dir = _write_run(tmp_path, target_id="hLF", case_kind="executable")
+
+    verification = verify_oe_capacity_run(
+        run_dir,
+        {"target_id": "hLF", "case_kind": "executable"},
     )
 
+    assert verification["passed"] is True
+    assert verification["coverage"]["by_execution_status"]["gene_level_executable"] == 1
+    assert verification["manifest_sha256"]
+    assert verification["errors"] == []
 
-def test_acceptance_requires_executable_and_boundary_smoke_for_each_target() -> None:
-    observations = tuple(
-        _observation(target_id, case_kind)
-        for target_id in ("hLF", "OPN_ALPHA_FULL_PROJECT")
-        for case_kind in ("executable", "boundary")
+
+def test_verify_run_rejects_tampered_rows_even_when_manifest_claims_completed(
+    tmp_path: Path,
+) -> None:
+    run_dir = _write_run(tmp_path, target_id="hLF", case_kind="executable")
+    rows_path = run_dir / "oe_capacity_rows.jsonl"
+    rows_path.write_text(
+        rows_path.read_text(encoding="utf-8").replace("1.2", "999.0"),
+        encoding="utf-8",
     )
-    summary = build_oe_capacity_acceptance_summary(
-        observations,
-        coverage_by_target={
-            "hLF": {"gene_level_executable": 10},
-            "OPN_ALPHA_FULL_PROJECT": {"gene_level_executable": 10},
+
+    verification = verify_oe_capacity_run(
+        run_dir,
+        {"target_id": "hLF", "case_kind": "executable"},
+    )
+
+    assert verification["passed"] is False
+    assert "files.rows.sha256_mismatch" in verification["errors"]
+
+
+def test_verify_run_rejects_v1_and_missing_scenario_evidence(tmp_path: Path) -> None:
+    run_dir = _write_run(tmp_path, target_id="hLF", case_kind="executable")
+    manifest_path = run_dir / "oe_capacity_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["schema_version"] = 1
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    verification = verify_oe_capacity_run(run_dir, {"target_id": "hLF"})
+
+    assert verification["passed"] is False
+    assert "manifest.schema_version" in verification["errors"]
+
+    run_dir = _write_run(
+        tmp_path / "second",
+        target_id="hLF",
+        case_kind="executable",
+        scenario_results=[],
+    )
+    verification = verify_oe_capacity_run(run_dir, {"target_id": "hLF"})
+    assert verification["passed"] is False
+    assert "rows.scenario_evidence_incomplete" in verification["errors"]
+
+
+def test_verify_run_recomputes_coverage_and_model_identity(tmp_path: Path) -> None:
+    run_dir = _write_run(tmp_path, target_id="hLF", case_kind="executable")
+    manifest_path = run_dir / "oe_capacity_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["coverage"] = {"junk": 0}
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    verification = verify_oe_capacity_run(
+        run_dir,
+        {"target_id": "hLF", "model_fingerprint": "c" * 64},
+    )
+
+    assert verification["passed"] is False
+    assert "manifest.coverage" in verification["errors"]
+    assert "identity.model_fingerprint_mismatch" in verification["errors"]
+
+
+def test_verify_run_rejects_wrong_gene_even_when_artifact_hashes_are_valid(
+    tmp_path: Path,
+) -> None:
+    expected_gene = "PAS_chr2-1_0308"
+    run_dir = _write_run(
+        tmp_path,
+        target_id="hLF",
+        case_kind="executable",
+        gene_id=expected_gene,
+    )
+    rows_path = run_dir / "oe_capacity_rows.jsonl"
+    row = json.loads(rows_path.read_text(encoding="utf-8"))
+    row["gene_id"] = "WRONG_GENE"
+    rows_path.write_text(json.dumps(row, sort_keys=True) + "\n", encoding="utf-8")
+    manifest_path = run_dir / "oe_capacity_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["run_identity"]["gene_ids"] = ["WRONG_GENE"]
+    manifest["files"]["rows"]["sha256"] = _sha256(rows_path)
+    manifest_path.write_text(json.dumps(manifest, sort_keys=True), encoding="utf-8")
+
+    verification = verify_oe_capacity_run(
+        run_dir,
+        {
+            "target_id": "hLF",
+            "case_kind": "executable",
+            "gene_id": expected_gene,
         },
-        regression_checks=(
-            OECapacityRegressionCheck("feature_off", True, "focused test passed"),
-            OECapacityRegressionCheck("baseline_1x", True, "focused test passed"),
-            OECapacityRegressionCheck("legacy_proxy", True, "focused test passed"),
-        ),
     )
+
+    assert verification["passed"] is False
+    assert "identity.gene_id_mismatch" in verification["errors"]
+
+
+def test_verify_run_rejects_completed_row_with_failed_solver_evidence(
+    tmp_path: Path,
+) -> None:
+    run_dir = _write_run(
+        tmp_path,
+        target_id="hLF",
+        case_kind="executable",
+        scenario_results=[
+            {
+                "scenario": "nominal",
+                "baseline": {"success": True, "solver_status": "optimal"},
+                "perturbed": {
+                    "success": False,
+                    "solver_status": "infeasible",
+                    "message": "infeasible",
+                },
+                "failure_reason": "scenario_perturbation_failed",
+            }
+        ],
+    )
+
+    verification = verify_oe_capacity_run(run_dir, {"target_id": "hLF"})
+
+    assert verification["passed"] is False
+    assert "rows.completed_scenario_failure" in verification["errors"]
+
+
+def test_phase2_runner_uses_only_fresh_controlled_smokes(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    repo_root = tmp_path / "repo"
+    _write_run(
+        repo_root / "local_runs" / "oe_capacity" / "round6" / "smokes" / "forged",
+        "hLF",
+        "executable",
+    )
+    monkeypatch.setattr(
+        acceptance_module,
+        "_validate_capacity_asset",
+        lambda _path: {
+            "path": "asset.json",
+            "available": True,
+            "valid": True,
+            "version": "v1",
+            "sha256": "b" * 64,
+            "errors": [],
+        },
+    )
+
+    def fake_smokes(_repo: Path, smoke_root: Path):
+        for target_id, case_kind, gene_id in acceptance_module.ACCEPTANCE_CASE_MATRIX:
+            _write_run(
+                smoke_root / f"{target_id}-{case_kind}-{gene_id}",
+                target_id,
+                case_kind,
+                gene_id=gene_id,
+            )
+        return [{"check_id": "controlled_smokes", "exit_code": 0}]
+
+    monkeypatch.setattr(acceptance_module, "_run_smoke_matrix", fake_smokes)
+    monkeypatch.setattr(
+        acceptance_module,
+        "_run_acceptance_commands",
+        lambda _repo: [{"check_id": "focused", "exit_code": 0}],
+    )
+
+    summary = run_phase2_oe_capacity_acceptance(repo_root, tmp_path / "acceptance")
 
     assert summary["passed"] is True
-    assert all(row["executable_passed"] for row in summary["targets"])
-    assert all(row["boundary_passed"] for row in summary["targets"])
-    assert summary["model_relative_only"] is True
-    assert summary["predicts_absolute_yield"] is False
+    assert all(
+        "acceptance_runs" in item["run_dir"]
+        for item in summary["artifact_verifications"]
+    )
+    assert all(case["eligible_artifact_count"] == 1 for case in summary["required_cases"])
+    assert {
+        (case["target_id"], case["case_kind"], case["gene_id"])
+        for case in summary["required_cases"]
+    } == set(acceptance_module.ACCEPTANCE_CASE_MATRIX)
 
 
-def test_acceptance_fails_when_one_target_has_no_clean_executable_case() -> None:
-    observations = (
-        _observation("hLF", "executable"),
-        _observation("hLF", "boundary"),
-        _observation("OPN_ALPHA_FULL_PROJECT", "boundary"),
-    )
-    summary = build_oe_capacity_acceptance_summary(
-        observations,
-        coverage_by_target={},
-        regression_checks=(OECapacityRegressionCheck("feature_off", True, "passed"),),
-    )
+def test_phase2_runner_stably_fails_without_reviewed_capacity_asset(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    smoke_root = repo_root / "local_runs" / "oe_capacity" / "round6" / "smokes"
+    for target_id in ("hLF", "OPN_ALPHA_FULL_PROJECT"):
+        _write_run(smoke_root / f"{target_id}-exec", target_id, "executable")
+        _write_run(smoke_root / f"{target_id}-boundary", target_id, "boundary")
+
+    summary = run_phase2_oe_capacity_acceptance(repo_root, tmp_path / "acceptance")
 
     assert summary["passed"] is False
-    opn = next(row for row in summary["targets"] if row["target_id"] == "OPN_ALPHA_FULL_PROJECT")
-    assert opn["executable_passed"] is False
+    assert summary["phase"] == "phase_2_gene_level_oe"
+    assert "reviewed_baseline_capacity" in summary["missing_information"]
+    assert summary["inputs"]["capacity_asset"]["available"] is False
+    assert (tmp_path / "acceptance" / "phase2_acceptance.json").is_file()
 
 
-def test_acceptance_fails_when_target_coverage_is_missing() -> None:
-    observations = tuple(
-        _observation(target_id, case_kind)
-        for target_id in ("hLF", "OPN_ALPHA_FULL_PROJECT")
-        for case_kind in ("executable", "boundary")
-    )
-    summary = build_oe_capacity_acceptance_summary(
-        observations,
-        coverage_by_target={"hLF": {"gene_level_executable": 10}},
-        regression_checks=(OECapacityRegressionCheck("feature_off", True, "passed"),),
-    )
-
-    assert summary["passed"] is False
-    opn = next(row for row in summary["targets"] if row["target_id"] == "OPN_ALPHA_FULL_PROJECT")
-    assert opn["coverage_present"] is False
-
-
-def test_acceptance_requires_complete_baseline_proxy_capacity_comparison() -> None:
-    incomplete = replace(
-        _observation("hLF", "executable"),
-        proxy_objective=None,
-    )
-    observations = (
-        incomplete,
-        _observation("hLF", "boundary"),
-        _observation("OPN_ALPHA_FULL_PROJECT", "executable"),
-        _observation("OPN_ALPHA_FULL_PROJECT", "boundary"),
-    )
-    summary = build_oe_capacity_acceptance_summary(
-        observations,
-        coverage_by_target={
-            "hLF": {"gene_level_executable": 10},
-            "OPN_ALPHA_FULL_PROJECT": {"gene_level_executable": 10},
-        },
-        regression_checks=(OECapacityRegressionCheck("legacy_proxy", True, "passed"),),
-    )
-
-    assert summary["passed"] is False
-    hlf = next(row for row in summary["targets"] if row["target_id"] == "hLF")
-    assert hlf["executable_passed"] is False
-
-
-def test_acceptance_outputs_are_local_auditable_json_and_markdown(tmp_path) -> None:
-    summary = build_oe_capacity_acceptance_summary(
-        tuple(
-            _observation(target_id, case_kind)
-            for target_id in ("hLF", "OPN_ALPHA_FULL_PROJECT")
-            for case_kind in ("executable", "boundary")
+def _write_run(
+    root: Path,
+    target_id: str,
+    case_kind: str,
+    *,
+    gene_id: str | None = None,
+    scenario_results: list[dict[str, object]] | None = None,
+) -> Path:
+    root.mkdir(parents=True, exist_ok=True)
+    rows_path = root / "oe_capacity_rows.jsonl"
+    report_path = root / "oe_capacity_report.md"
+    scenarios = scenario_results
+    if scenarios is None:
+        scenarios = [
+            {
+                "scenario": "nominal",
+                "baseline": {"success": True, "solver_status": "optimal"},
+                "perturbed": {"success": True, "solver_status": "optimal"},
+            }
+        ]
+    missing = [] if case_kind == "executable" else ["reviewed_baseline_capacity"]
+    row = {
+        "target_id": target_id,
+        "context_id": "glucose_mu_0.1",
+        "gene_id": gene_id or ("G1" if case_kind == "executable" else "G_BOUNDARY"),
+        "screen_status": "completed" if case_kind == "executable" else "failed",
+        "execution_mode": "comparison",
+        "execution_status": (
+            "gene_level_executable" if case_kind == "executable" else "partial_mapping"
         ),
-        coverage_by_target={
-            "hLF": {"gene_level_executable": 10},
-            "OPN_ALPHA_FULL_PROJECT": {"gene_level_executable": 10},
+        "baseline_objective": 1.0,
+        "proxy_objective": 1.1,
+        "gene_capacity_objective": 1.2 if case_kind == "executable" else None,
+        "missing_information": missing,
+        "uncertainty_scenarios": ["nominal"],
+        "scenario_results": scenarios if case_kind == "executable" else [],
+        "proxy_attempts": [
+            {"attempt_id": "R1", "success": True, "solver_status": "optimal"}
+        ],
+    }
+    rows_path.write_text(json.dumps(row, sort_keys=True) + "\n", encoding="utf-8")
+    report_path.write_text("# verified report\n", encoding="utf-8")
+    manifest = {
+        "schema_version": 2,
+        "run_identity": {
+            "run_id": root.name,
+            "target_ids": [target_id],
+            "context_ids": ["glucose_mu_0.1"],
+            "gene_ids": [row["gene_id"]],
+            "case_kind": case_kind,
         },
-        regression_checks=(OECapacityRegressionCheck("protected_paths", True, "empty diff"),),
+        "model": {"fingerprint": "a" * 64},
+        "capacity_asset": {
+            "path": "Enzymedata/oe_capacity_baseline_capacity.json",
+            "version": "fixture-v1",
+            "sha256": "b" * 64,
+            "reviewed": True,
+        },
+        "config": {
+            "feature_enabled": True,
+            "compare_proxy": True,
+            "parameter_scenarios": ["nominal"],
+        },
+        "files": {
+            "rows": {"path": rows_path.name, "sha256": _sha256(rows_path)},
+            "report": {"path": report_path.name, "sha256": _sha256(report_path)},
+        },
+        "status": {
+            "state": "completed" if case_kind == "executable" else "failed",
+            "completed_count": 1 if case_kind == "executable" else 0,
+            "failure_count": 0 if case_kind == "executable" else 1,
+        },
+        "scenario_completeness": {
+            "required": ["nominal"],
+            "complete": bool(scenarios) if case_kind == "executable" else False,
+        },
+        "coverage": {
+            "total_rows": 1,
+            "by_execution_status": {row["execution_status"]: 1},
+        },
+    }
+    (root / "oe_capacity_manifest.json").write_text(
+        json.dumps(manifest, sort_keys=True), encoding="utf-8"
     )
+    return root
 
-    json_path, markdown_path = write_oe_capacity_acceptance_outputs(summary, tmp_path)
 
-    payload = json.loads(json_path.read_text(encoding="utf-8"))
-    assert payload["passed"] is True
-    assert markdown_path.read_text(encoding="utf-8").startswith(
-        "# Phase 2 gene-level OE capacity acceptance"
-    )
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
