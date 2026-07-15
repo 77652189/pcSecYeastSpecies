@@ -23,6 +23,48 @@ LAST_IMPORT_KEY = "experiment_feedback_last_import"
 RUN_NAME_KEY = "experiment_feedback_run_name"
 EXPERIMENT_UPLOAD_KEY = "experiment_feedback_experiment_upload"
 PREDICTION_UPLOAD_KEY = "experiment_feedback_prediction_upload"
+TARGET_METADATA_KEY = "experiment_feedback_target_metadata"
+BATCH_METADATA_KEY = "experiment_feedback_batch_metadata"
+IMPORT_FORM_STATE_KEY = "experiment_feedback_import_form_state"
+PREDICTION_PATH_KEY = "experiment_feedback_prediction_path"
+INCREASE_THRESHOLD_KEY = "experiment_feedback_increase_threshold"
+DECREASE_THRESHOLD_KEY = "experiment_feedback_decrease_threshold"
+BASELINE_HIT_RATE_KEY = "experiment_feedback_baseline_hit_rate"
+TOP_K_KEY = "experiment_feedback_top_k"
+
+
+def _restore_import_form_state() -> None:
+    defaults: dict[str, Any] = {
+        PREDICTION_PATH_KEY: "",
+        TARGET_METADATA_KEY: "",
+        BATCH_METADATA_KEY: "",
+        RUN_NAME_KEY: f"feedback-{datetime.now().strftime('%Y%m%d-%H%M%S')}",
+        INCREASE_THRESHOLD_KEY: 1.05,
+        DECREASE_THRESHOLD_KEY: 0.95,
+        BASELINE_HIT_RATE_KEY: 0.10,
+        TOP_K_KEY: "5,10",
+    }
+    saved = dict(st.session_state.get(IMPORT_FORM_STATE_KEY) or {})
+    for key, default in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = saved.get(key, default)
+
+
+def _sync_import_form_field(key: str) -> None:
+    saved = dict(st.session_state.get(IMPORT_FORM_STATE_KEY) or {})
+    saved[key] = st.session_state.get(key)
+    st.session_state[IMPORT_FORM_STATE_KEY] = saved
+
+
+def _normalize_import_form_options(prediction_paths: list[str]) -> None:
+    valid_options = {
+        PREDICTION_PATH_KEY: {"", *prediction_paths},
+        TARGET_METADATA_KEY: {"", "hLF", "OPN"},
+    }
+    for key, options in valid_options.items():
+        if st.session_state.get(key) not in options:
+            st.session_state[key] = ""
+            _sync_import_form_field(key)
 
 
 def render_experiment_feedback() -> None:
@@ -62,56 +104,83 @@ def render_experiment_feedback() -> None:
 
 
 def _render_import() -> None:
+    _restore_import_form_state()
     st.subheader("导入脱敏实验 bundle")
-    st.caption("支持 canonical JSONL，或 record_type + payload_json 的 CSV/XLSX 导入适配格式。XLSX 优先读取 records 工作表。修正问题后重新上传为新的 run，原 run 不覆盖。")
+    st.caption("支持 canonical envelope 与研发发酵宽表。XLSX 可使用 metadata 工作表；目标蛋白和批次也可由下方表单补齐。修正问题后重新上传为新的 run，原 run 不覆盖。")
     experiment_upload = st.file_uploader(
         "实验文件（CSV / XLSX / JSONL）",
         type=["csv", "xlsx", "jsonl"],
         key=EXPERIMENT_UPLOAD_KEY,
     )
     prediction_paths = list_prediction_fact_packs("local_runs")
+    _normalize_import_form_options(prediction_paths)
     prediction_path = st.selectbox(
         "已有 prediction fact pack（可选）",
         options=[""] + prediction_paths,
         format_func=lambda value: Path(value).parent.name if value else "不选择已有 fact pack",
-        key="experiment_feedback_prediction_path",
+        key=PREDICTION_PATH_KEY,
+        on_change=_sync_import_form_field,
+        args=(PREDICTION_PATH_KEY,),
     )
     prediction_upload = st.file_uploader(
         "或上传 prediction fact_pack.json（可选，优先于已有路径）",
         type=["json"],
         key=PREDICTION_UPLOAD_KEY,
     )
-    if RUN_NAME_KEY not in st.session_state:
-        st.session_state[RUN_NAME_KEY] = f"feedback-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
-    st.text_input("Run 名称", key=RUN_NAME_KEY)
+    metadata_target, metadata_batch = st.columns(2)
+    metadata_target.selectbox(
+        "模板目标蛋白（文件未填写时补齐）",
+        options=["", "hLF", "OPN"],
+        format_func=lambda value: value or "从文件读取",
+        key=TARGET_METADATA_KEY,
+        on_change=_sync_import_form_field,
+        args=(TARGET_METADATA_KEY,),
+    )
+    metadata_batch.text_input(
+        "模板批次（文件未填写时补齐）",
+        key=BATCH_METADATA_KEY,
+        placeholder="例如 B01",
+        on_change=_sync_import_form_field,
+        args=(BATCH_METADATA_KEY,),
+    )
+    st.text_input(
+        "Run 名称",
+        key=RUN_NAME_KEY,
+        on_change=_sync_import_form_field,
+        args=(RUN_NAME_KEY,),
+    )
     with st.expander("Calibration 配置", expanded=False):
         increase_threshold = st.number_input(
             "命中阈值（candidate/control ratio）",
             min_value=1.0001,
-            value=1.05,
             step=0.01,
-            key="experiment_feedback_increase_threshold",
+            key=INCREASE_THRESHOLD_KEY,
+            on_change=_sync_import_form_field,
+            args=(INCREASE_THRESHOLD_KEY,),
         )
         decrease_threshold = st.number_input(
             "降低方向阈值",
             min_value=0.0001,
             max_value=0.9999,
-            value=0.95,
             step=0.01,
-            key="experiment_feedback_decrease_threshold",
+            key=DECREASE_THRESHOLD_KEY,
+            on_change=_sync_import_form_field,
+            args=(DECREASE_THRESHOLD_KEY,),
         )
         baseline_hit_rate = st.number_input(
             "基线命中率",
             min_value=0.0001,
             max_value=1.0,
-            value=0.10,
             step=0.01,
-            key="experiment_feedback_baseline_hit_rate",
+            key=BASELINE_HIT_RATE_KEY,
+            on_change=_sync_import_form_field,
+            args=(BASELINE_HIT_RATE_KEY,),
         )
         top_k_text = st.text_input(
             "Top-K（逗号分隔）",
-            value="5,10",
-            key="experiment_feedback_top_k",
+            key=TOP_K_KEY,
+            on_change=_sync_import_form_field,
+            args=(TOP_K_KEY,),
         )
     if st.button(
         "导入并校验",
@@ -134,6 +203,14 @@ def _render_import() -> None:
                     "decrease_threshold_ratio": float(decrease_threshold),
                     "baseline_hit_rate": float(baseline_hit_rate),
                     "top_k": top_k,
+                },
+                experiment_metadata={
+                    key: value
+                    for key, value in {
+                        "target_id": st.session_state.get(TARGET_METADATA_KEY),
+                        "batch_id": st.session_state.get(BATCH_METADATA_KEY),
+                    }.items()
+                    if str(value or "").strip()
                 },
             )
         except Exception as exc:

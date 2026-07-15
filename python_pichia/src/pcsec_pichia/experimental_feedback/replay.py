@@ -173,7 +173,7 @@ def write_prediction_experiment_report_outputs(
     summary_path = report_dir / "prediction_experiment_summary.json"
     report_path = report_dir / "prediction_experiment_report.md"
     manifest_path = report_dir / "prediction_experiment_manifest.json"
-    summary_payload = _summary_payload(calibration)
+    summary_payload = _summary_payload(calibration, validation)
     summary_path.write_text(
         json.dumps(summary_payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
@@ -210,17 +210,53 @@ def write_prediction_experiment_report_outputs(
     )
 
 
-def _summary_payload(calibration: CalibrationSummary) -> dict[str, Any]:
+def _summary_payload(
+    calibration: CalibrationSummary,
+    validation: ExperimentValidationResult,
+) -> dict[str, Any]:
     status_counts: Counter[str] = Counter()
     targets: dict[str, dict[str, Any]] = {}
+    experiment_roles = _experiment_roles(validation)
+    preserved_experiment_evidence: list[dict[str, Any]] = []
+    measurements_by_experiment: dict[str, list[Any]] = {}
+    for measurement in validation.bundle.measurements:
+        measurements_by_experiment.setdefault(measurement.experiment_id, []).append(measurement)
+        if measurement.status.value != "valid":
+            status_counts[measurement.status.value] += 1
+    for experiment in validation.bundle.experiments:
+        measurements = measurements_by_experiment.get(experiment.experiment_id, [])
+        non_valid_measurements = [item for item in measurements if item.status.value != "valid"]
+        if experiment.fermentation_data_status.value != "normal":
+            status_counts[
+                f"fermentation_data_status:{experiment.fermentation_data_status.value}"
+            ] += 1
+        if experiment.fermentation_data_status.value != "normal" or non_valid_measurements:
+            preserved_experiment_evidence.append(
+                {
+                    "experiment_id": experiment.experiment_id,
+                    "target_id": experiment.target_id,
+                    "role": experiment_roles.get(experiment.experiment_id, "unknown"),
+                    "fermentation_data_status": experiment.fermentation_data_status.value,
+                    "quality_status": experiment.quality_status.value,
+                    "quality_reason": experiment.quality_reason,
+                    "measurements": [
+                        {
+                            "measurement_id": item.measurement_id,
+                            "status": item.status.value,
+                            "status_reason": item.status_reason,
+                            "raw_value": item.raw_value,
+                            "raw_unit": item.raw_unit,
+                        }
+                        for item in measurements
+                    ],
+                }
+            )
     for record in calibration.records:
-        for status in record.measurement_statuses:
-            if status != "valid":
-                status_counts[status] += 1
         if record.eligibility_status == "eligible" and record.hit is False:
             status_counts["negative_observation"] += 1
         for reason in record.ineligibility_reasons:
-            status_counts[reason] += 1
+            if not reason.startswith("fermentation_data_status:"):
+                status_counts[reason] += 1
 
     for target in calibration.targets:
         records = [record for record in calibration.records if record.target_id == target.target_id]
@@ -260,6 +296,7 @@ def _summary_payload(calibration: CalibrationSummary) -> dict[str, Any]:
         "schema_version": SCHEMA_VERSION,
         "targets": targets,
         "preserved_status_counts": dict(sorted(status_counts.items())),
+        "preserved_experiment_evidence": preserved_experiment_evidence,
         "record_count": len(calibration.records),
         "eligible_count": sum(
             record.eligibility_status == "eligible" for record in calibration.records
@@ -274,6 +311,20 @@ def _summary_payload(calibration: CalibrationSummary) -> dict[str, Any]:
     }
 
 
+def _experiment_roles(validation: ExperimentValidationResult) -> dict[str, str]:
+    by_experiment: dict[str, list[str]] = {}
+    for intervention in validation.bundle.interventions:
+        by_experiment.setdefault(intervention.experiment_id, []).append(
+            intervention.intervention_type.value
+        )
+    return {
+        experiment_id: (
+            "control" if types and all(item == "control" for item in types) else "candidate"
+        )
+        for experiment_id, types in by_experiment.items()
+    }
+
+
 def _candidate_payload(record: CalibrationRecord) -> dict[str, Any]:
     return {
         "experiment_id": record.experiment_id,
@@ -285,6 +336,8 @@ def _candidate_payload(record: CalibrationRecord) -> dict[str, Any]:
         "prediction_rank": record.prediction_rank,
         "recommendation_tier": record.recommendation_tier,
         "predicted_direction": record.predicted_direction,
+        "fermentation_data_status": record.fermentation_data_status,
+        "experiment_quality_reason": record.experiment_quality_reason,
         "observed_ratio": record.observed_ratio,
         "observed_direction": record.observed_direction,
         "eligibility_status": record.eligibility_status,
@@ -381,6 +434,37 @@ def _render_report(payload: Mapping[str, Any], *, source_classification: str) ->
         lines.extend(("本次回放未使用真实实验数据，仅使用脱敏 fixture。", ""))
     elif source_classification == "local_unreviewed_input":
         lines.extend(("本次输入仅在本地处理，数据审批与脱敏状态尚未复核。", ""))
+    preserved = payload.get("preserved_experiment_evidence") or []
+    if preserved:
+        lines.extend(
+            (
+                "## 保留的失败与排除实验",
+                "",
+                "| experiment | role | fermentation status | quality | measurement statuses | reason |",
+                "| --- | --- | --- | --- | --- | --- |",
+            )
+        )
+        for item in preserved:
+            measurement_statuses = ", ".join(
+                str(measurement["status"]) for measurement in item["measurements"]
+            ) or "-"
+            reasons = [str(item["quality_reason"])] if item["quality_reason"] else []
+            reasons.extend(
+                str(measurement["status_reason"])
+                for measurement in item["measurements"]
+                if measurement["status_reason"]
+            )
+            lines.append(
+                "| {experiment_id} | {role} | {fermentation} | {quality} | {measurements} | {reason} |".format(
+                    experiment_id=item["experiment_id"],
+                    role=item["role"],
+                    fermentation=item["fermentation_data_status"],
+                    quality=item["quality_status"],
+                    measurements=measurement_statuses,
+                    reason=", ".join(dict.fromkeys(reasons)) or "-",
+                )
+            )
+        lines.append("")
     for target_id in ("hLF", "OPN"):
         target = (payload.get("targets") or {}).get(target_id)
         lines.extend((f"## {target_id}", ""))
@@ -409,6 +493,10 @@ def _render_report(payload: Mapping[str, Any], *, source_classification: str) ->
         )
         for item in candidates:
             reasons = list(item["ineligibility_reasons"])
+            if item["fermentation_data_status"] != "normal":
+                reasons.append(item["fermentation_data_status"])
+            if item["experiment_quality_reason"]:
+                reasons.append(item["experiment_quality_reason"])
             reasons.extend(status for status in item["measurement_statuses"] if status != "valid")
             ratio = "N/A" if item["observed_ratio"] is None else f"{item['observed_ratio']:.3f}"
             lines.append(

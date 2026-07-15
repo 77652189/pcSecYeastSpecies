@@ -14,6 +14,11 @@ from openpyxl import load_workbook
 from openpyxl.utils.exceptions import InvalidFileException
 
 from pcsec_pichia.experimental_feedback.quality import validate_experiment_bundle
+from pcsec_pichia.experimental_feedback.fermentation_template import (
+    FERMENTATION_TEMPLATE_ADAPTER_ID,
+    map_fermentation_template_rows,
+    merge_fermentation_template_metadata,
+)
 from pcsec_pichia.experimental_feedback.schema import (
     SCHEMA_VERSION,
     ConditionContext,
@@ -22,6 +27,7 @@ from pcsec_pichia.experimental_feedback.schema import (
     ExperimentImportManifest,
     ExperimentRecord,
     ExperimentalFeedbackError,
+    FermentationDataStatus,
     HostContext,
     InterventionRecord,
     InterventionType,
@@ -48,23 +54,45 @@ class ExperimentFeedbackOutputs:
     manifest_path: Path
 
 
-def load_experiment_bundle(path: str | Path) -> ExperimentBundle:
+@dataclass(frozen=True)
+class _LoadedExperimentRecords:
+    records: tuple[tuple[str, object], ...]
+    adapter_id: str
+    warnings: tuple[str, ...] = ()
+    metadata: Mapping[str, object] | None = None
+    source_record_count: int | None = None
+
+
+def load_experiment_bundle(
+    path: str | Path,
+    *,
+    metadata: Mapping[str, object] | None = None,
+) -> ExperimentBundle:
     resolved = Path(path)
     if resolved.suffix.lower() == ".csv":
-        records = _load_csv_records(resolved)
+        loaded = _load_csv_records(resolved, metadata=metadata)
     elif resolved.suffix.lower() == ".xlsx":
-        records = _load_xlsx_records(resolved)
+        loaded = _load_xlsx_records(resolved, metadata=metadata)
     elif resolved.suffix.lower() == ".jsonl":
-        records = _load_jsonl_records(resolved)
+        loaded = _load_jsonl_records(resolved, metadata=metadata)
     else:
         raise SchemaValidationError(f"unsupported experiment bundle format: {resolved.suffix}")
-    unique_records, conflicts, warnings = _dedupe_records(records)
+    unique_records, conflicts, dedupe_warnings = _dedupe_records(loaded.records)
+    warnings = tuple(dict.fromkeys((*loaded.warnings, *dedupe_warnings)))
     manifest = ExperimentImportManifest(
         source_file=str(resolved),
         source_sha256=hashlib.sha256(resolved.read_bytes()).hexdigest(),
         imported_at=datetime.now(timezone.utc).isoformat(),
-        record_count=len(records),
-        warnings=tuple(warnings),
+        record_count=(
+            loaded.source_record_count
+            if loaded.source_record_count is not None
+            else len(loaded.records)
+        ),
+        adapter_id=loaded.adapter_id,
+        metadata_json=json.dumps(
+            _json_ready(loaded.metadata or {}), ensure_ascii=False, sort_keys=True
+        ),
+        warnings=warnings,
     )
     manifest.validate()
     return _bundle_from_records(
@@ -76,8 +104,12 @@ def load_experiment_bundle(path: str | Path) -> ExperimentBundle:
     )
 
 
-def _load_jsonl_records(resolved: Path) -> list[tuple[str, object]]:
-    records: list[tuple[str, object]] = []
+def _load_jsonl_records(
+    resolved: Path,
+    *,
+    metadata: Mapping[str, object] | None,
+) -> _LoadedExperimentRecords:
+    payloads: list[tuple[int, Mapping[str, object]]] = []
     with resolved.open(encoding="utf-8-sig") as handle:
         for line_number, line in enumerate(handle, start=1):
             if not line.strip():
@@ -86,17 +118,57 @@ def _load_jsonl_records(resolved: Path) -> list[tuple[str, object]]:
                 payload = json.loads(line)
             except json.JSONDecodeError as exc:
                 raise SchemaValidationError(f"invalid JSONL at line {line_number}: {exc.msg}") from exc
-            records.append(_record_from_envelope(payload, line_number=line_number))
-    return records
+            if not isinstance(payload, Mapping):
+                raise SchemaValidationError(f"JSONL line {line_number} must be an object.")
+            payloads.append((line_number, payload))
+    envelope_markers = tuple(
+        ("record_type" in payload, "record" in payload) for _, payload in payloads
+    )
+    if any(any(markers) for markers in envelope_markers):
+        if not all(all(markers) for markers in envelope_markers):
+            raise SchemaValidationError(
+                "JSONL canonical envelope requires record_type and record on every data line."
+            )
+        return _LoadedExperimentRecords(
+            records=tuple(
+                _record_from_envelope(payload, line_number=line_number)
+                for line_number, payload in payloads
+            ),
+            adapter_id="pcsec_pichia.canonical_envelope.v1",
+            source_record_count=len(payloads),
+        )
+    imported = map_fermentation_template_rows(payloads, metadata=metadata)
+    return _LoadedExperimentRecords(
+        records=imported.records,
+        adapter_id=FERMENTATION_TEMPLATE_ADAPTER_ID,
+        warnings=imported.warnings,
+        metadata=imported.metadata,
+        source_record_count=len(payloads),
+    )
 
 
-def _load_csv_records(resolved: Path) -> list[tuple[str, object]]:
-    records: list[tuple[str, object]] = []
+def _load_csv_records(
+    resolved: Path,
+    *,
+    metadata: Mapping[str, object] | None,
+) -> _LoadedExperimentRecords:
     with resolved.open(encoding="utf-8-sig", newline="") as handle:
         reader = csv.DictReader(handle)
-        if not reader.fieldnames or not {"record_type", "payload_json"}.issubset(reader.fieldnames):
-            raise SchemaValidationError("CSV requires record_type and payload_json columns.")
-        for line_number, row in enumerate(reader, start=2):
+        if not reader.fieldnames:
+            raise SchemaValidationError("CSV experiment bundle requires a header row.")
+        rows = [(line_number, dict(row)) for line_number, row in enumerate(reader, start=2)]
+        is_envelope = _tabular_envelope_headers(reader.fieldnames, format_name="CSV")
+        if not is_envelope:
+            imported = map_fermentation_template_rows(rows, metadata=metadata)
+            return _LoadedExperimentRecords(
+                records=imported.records,
+                adapter_id=FERMENTATION_TEMPLATE_ADAPTER_ID,
+                warnings=imported.warnings,
+                metadata=imported.metadata,
+                source_record_count=len(rows),
+            )
+        records: list[tuple[str, object]] = []
+        for line_number, row in rows:
             try:
                 record_payload = json.loads(row.get("payload_json") or "")
             except json.JSONDecodeError as exc:
@@ -107,28 +179,69 @@ def _load_csv_records(resolved: Path) -> list[tuple[str, object]]:
                     line_number=line_number,
                 )
             )
-    return records
+    return _LoadedExperimentRecords(
+        records=tuple(records),
+        adapter_id="pcsec_pichia.canonical_envelope.v1",
+        source_record_count=len(rows),
+    )
 
 
-def _load_xlsx_records(resolved: Path) -> list[tuple[str, object]]:
+def _load_xlsx_records(
+    resolved: Path,
+    *,
+    metadata: Mapping[str, object] | None,
+) -> _LoadedExperimentRecords:
     try:
         workbook = load_workbook(resolved, read_only=True, data_only=True)
     except (BadZipFile, InvalidFileException, OSError, ValueError) as exc:
         raise SchemaValidationError(f"invalid XLSX experiment bundle: {exc}") from exc
     try:
-        worksheet = workbook["records"] if "records" in workbook.sheetnames else workbook.active
+        worksheet = workbook["records"] if "records" in workbook.sheetnames else next(
+            (sheet for sheet in workbook.worksheets if sheet.title != "metadata"),
+            workbook.active,
+        )
         rows = worksheet.iter_rows(values_only=True)
         header_row = next(rows, None)
         headers = [str(value or "").strip() for value in (header_row or ())]
         required = {"record_type", "payload_json"}
-        if not required.issubset(headers):
-            raise SchemaValidationError("XLSX requires record_type and payload_json columns.")
+        data_rows = [
+            (line_number, row)
+            for line_number, row in enumerate(rows, start=2)
+            if row and any(value not in (None, "") for value in row)
+        ]
+        is_envelope = _tabular_envelope_headers(headers, format_name="XLSX")
+        if not is_envelope:
+            workbook_metadata = _xlsx_metadata(workbook)
+            combined_metadata = merge_fermentation_template_metadata(
+                workbook_metadata, metadata
+            )
+            mapped_rows = (
+                (
+                    line_number,
+                    {
+                        header: (row[index] if index < len(row) else None)
+                        for index, header in enumerate(headers)
+                        if header
+                    },
+                )
+                for line_number, row in data_rows
+            )
+            imported = map_fermentation_template_rows(
+                mapped_rows,
+                metadata=combined_metadata,
+                source_sheet=worksheet.title,
+            )
+            return _LoadedExperimentRecords(
+                records=imported.records,
+                adapter_id=FERMENTATION_TEMPLATE_ADAPTER_ID,
+                warnings=imported.warnings,
+                metadata=imported.metadata,
+                source_record_count=len(data_rows),
+            )
         record_type_index = headers.index("record_type")
         payload_index = headers.index("payload_json")
         records: list[tuple[str, object]] = []
-        for line_number, row in enumerate(rows, start=2):
-            if not row or not any(value not in (None, "") for value in row):
-                continue
+        for line_number, row in data_rows:
             record_type = row[record_type_index] if record_type_index < len(row) else None
             payload_json = row[payload_index] if payload_index < len(row) else None
             try:
@@ -143,7 +256,11 @@ def _load_xlsx_records(resolved: Path) -> list[tuple[str, object]]:
                     line_number=line_number,
                 )
             )
-        return records
+        return _LoadedExperimentRecords(
+            records=tuple(records),
+            adapter_id="pcsec_pichia.canonical_envelope.v1",
+            source_record_count=len(data_rows),
+        )
     finally:
         workbook.close()
 
@@ -205,6 +322,14 @@ def write_experiment_feedback_cache(
                 "source_file": bundle.source_file,
                 "source_sha256": (
                     bundle.import_manifest.source_sha256 if bundle.import_manifest else ""
+                ),
+                "adapter_id": (
+                    bundle.import_manifest.adapter_id if bundle.import_manifest else ""
+                ),
+                "import_metadata": (
+                    json.loads(bundle.import_manifest.metadata_json)
+                    if bundle.import_manifest
+                    else {}
                 ),
                 "validated_record_count": len(records),
                 "conflict_count": len(conflict_rows),
@@ -278,7 +403,7 @@ def _dedupe_records(
     records: Iterable[tuple[str, object]],
 ) -> tuple[list[tuple[str, object]], list[ExperimentImportConflict], list[str]]:
     unique: list[tuple[str, object]] = []
-    seen: dict[tuple[str, str], tuple[object, str]] = {}
+    seen: dict[tuple[str, str], tuple[object, str, str]] = {}
     conflicts: list[ExperimentImportConflict] = []
     warnings: list[str] = []
     for record_type, record in records:
@@ -287,12 +412,18 @@ def _dedupe_records(
         payload_json = json.dumps(
             _json_ready(asdict(record)), ensure_ascii=False, sort_keys=True, separators=(",", ":")
         )
+        comparison_payload_json = json.dumps(
+            _dedupe_payload(record_type, record),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
         previous = seen.get(key)
         if previous is None:
-            seen[key] = (record, payload_json)
+            seen[key] = (record, payload_json, comparison_payload_json)
             unique.append((record_type, record))
             continue
-        if previous[1] == payload_json:
+        if previous[2] == comparison_payload_json:
             warnings.append(f"duplicate_record_ignored:{record_type}:{record_id}")
             continue
         conflicts.append(
@@ -305,6 +436,14 @@ def _dedupe_records(
             )
         )
     return unique, conflicts, warnings
+
+
+def _dedupe_payload(record_type: str, record: object) -> object:
+    payload = _json_ready(asdict(record))
+    if record_type == "measurement" and isinstance(payload, dict):
+        payload.pop("source_row_number", None)
+        payload.pop("source_sheet", None)
+    return payload
 
 
 def _record_id(record_type: str, record: object) -> str:
@@ -349,6 +488,9 @@ def _record_from_dict(record_type: str, payload: Mapping[str, Any]) -> object:
         values["quality_status"] = QualityStatus(
             values.get("quality_status", QualityStatus.VALID.value)
         )
+        values["fermentation_data_status"] = FermentationDataStatus(
+            values.get("fermentation_data_status", FermentationDataStatus.NORMAL.value)
+        )
         return ExperimentRecord(**values)
     if record_type == "intervention":
         values["intervention_type"] = InterventionType(values["intervention_type"])
@@ -362,6 +504,45 @@ def _record_from_dict(record_type: str, payload: Mapping[str, Any]) -> object:
         values["status"] = PredictionLinkStatus(values["status"])
         return PredictionLinkRecord(**values)
     raise SchemaValidationError(f"unsupported record_type: {record_type}")
+
+
+def _xlsx_metadata(workbook: object) -> dict[str, object]:
+    if "metadata" not in workbook.sheetnames:  # type: ignore[attr-defined]
+        return {}
+    worksheet = workbook["metadata"]  # type: ignore[index]
+    values: dict[str, object] = {}
+    for row_number, row in enumerate(worksheet.iter_rows(values_only=True), start=1):
+        key = str(row[0] or "").strip() if row else ""
+        if not key:
+            continue
+        value = row[1] if len(row) > 1 else None
+        if row_number == 1 and key.casefold() in {"key", "field", "字段"}:
+            value_header = str(value or "").strip().casefold()
+            if value_header in {"value", "值"}:
+                continue
+        if key in values and values[key] not in (None, "") and value not in (None, ""):
+            if str(values[key]).strip() != str(value).strip():
+                raise SchemaValidationError(
+                    f"fermentation import metadata conflict in XLSX sheet: {key}"
+                )
+        elif value not in (None, "") or key not in values:
+            values[key] = value
+    return values
+
+
+def _tabular_envelope_headers(
+    headers: Iterable[str],
+    *,
+    format_name: str,
+) -> bool:
+    required = {"record_type", "payload_json"}
+    present = required.intersection(str(item or "").strip() for item in headers)
+    if present and present != required:
+        missing = ", ".join(sorted(required - present))
+        raise SchemaValidationError(
+            f"{format_name} canonical envelope is incomplete; missing columns: {missing}."
+        )
+    return present == required
 
 
 def _bundle_from_records(

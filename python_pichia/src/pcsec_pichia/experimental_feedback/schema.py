@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+import json
 import math
 
 
@@ -68,6 +69,14 @@ class QualityStatus(str, Enum):
     EXCLUDED = "excluded"
 
 
+class FermentationDataStatus(str, Enum):
+    NORMAL = "normal"
+    CONTAMINATION = "contamination"
+    CULTURE_FAILED = "culture_failed"
+    ASSAY_FAILED = "assay_failed"
+    OTHER_EXCLUDED = "other_excluded"
+
+
 @dataclass(frozen=True)
 class HostContext:
     species: str
@@ -110,8 +119,12 @@ class ExperimentRecord:
     target_name: str = ""
     context_id: str = ""
     biological_replicate_id: str = ""
+    clone_id: str = ""
+    parent_control_group_id: str = ""
     operator_id: str = ""
+    fermentation_data_status: FermentationDataStatus = FermentationDataStatus.NORMAL
     quality_status: QualityStatus = QualityStatus.VALID
+    quality_reason: str = ""
     schema_version: int = SCHEMA_VERSION
 
     def validate(self) -> None:
@@ -120,6 +133,16 @@ class ExperimentRecord:
             _require_text(getattr(self, field_name), field_name)
         if not isinstance(self.quality_status, QualityStatus):
             raise SchemaValidationError("quality_status must be a QualityStatus value.")
+        if not isinstance(self.fermentation_data_status, FermentationDataStatus):
+            raise SchemaValidationError(
+                "fermentation_data_status must be a FermentationDataStatus value."
+            )
+        if self.fermentation_data_status is not FermentationDataStatus.NORMAL:
+            if self.quality_status is QualityStatus.VALID:
+                raise SchemaValidationError(
+                    "non-normal fermentation_data_status cannot use quality_status=valid."
+                )
+            _require_text(self.quality_reason, "quality_reason")
         if self.target_id not in {"hLF", "OPN"}:
             _require_text(self.target_name, "target_name")
         self.host.validate()
@@ -132,6 +155,8 @@ class ExperimentImportManifest:
     source_sha256: str
     imported_at: str
     record_count: int
+    adapter_id: str = "pcsec_pichia.canonical_envelope.v1"
+    metadata_json: str = "{}"
     warnings: tuple[str, ...] = ()
     schema_version: int = SCHEMA_VERSION
 
@@ -145,6 +170,13 @@ class ExperimentImportManifest:
             raise SchemaValidationError("source_sha256 must be a 64-character hex digest.")
         if self.record_count < 0:
             raise SchemaValidationError("record_count must be non-negative.")
+        _require_text(self.adapter_id, "adapter_id")
+        try:
+            metadata = json.loads(self.metadata_json)
+        except json.JSONDecodeError as exc:
+            raise SchemaValidationError("metadata_json must contain valid JSON.") from exc
+        if not isinstance(metadata, dict):
+            raise SchemaValidationError("metadata_json must contain a JSON object.")
 
 
 @dataclass(frozen=True)
@@ -181,6 +213,7 @@ class InterventionRecord:
     copy_number: float | None = None
     prediction_run_id: str = ""
     evidence_id: str = ""
+    design_label: str = ""
     warnings: tuple[str, ...] = ()
     schema_version: int = SCHEMA_VERSION
 
@@ -227,6 +260,9 @@ class MeasurementRecord:
     excluded: bool = False
     exclusion_reason: str = ""
     reviewer_id: str = ""
+    source_row_number: int | None = None
+    source_sheet: str = ""
+    raw_fields_json: str = "{}"
     schema_version: int = SCHEMA_VERSION
 
     def validate(self) -> None:
@@ -264,10 +300,10 @@ class MeasurementRecord:
             self.raw_value is None or self.canonical_value is None
         ):
             raise SchemaValidationError("valid measurements require raw_value and canonical_value.")
-        if self.status is not MeasurementStatus.VALID and (
-            self.raw_value == 0 or self.canonical_value == 0
-        ):
-            raise SchemaValidationError("non-valid measurement states must not be encoded as zero.")
+        if self.status is not MeasurementStatus.VALID and self.canonical_value is not None:
+            raise SchemaValidationError(
+                "non-valid measurements may preserve raw_value but cannot define canonical_value."
+            )
         if self.status in {
             MeasurementStatus.BELOW_LOD,
             MeasurementStatus.BELOW_LOQ,
@@ -281,6 +317,18 @@ class MeasurementRecord:
             raise SchemaValidationError("excluded measurements require exclusion_reason.")
         if self.excluded != (self.status is MeasurementStatus.EXCLUDED):
             raise SchemaValidationError("excluded flag and measurement status must agree.")
+        if self.source_row_number is not None and (
+            not isinstance(self.source_row_number, int)
+            or isinstance(self.source_row_number, bool)
+            or self.source_row_number < 1
+        ):
+            raise SchemaValidationError("source_row_number must be a positive integer or None.")
+        try:
+            raw_fields = json.loads(self.raw_fields_json)
+        except json.JSONDecodeError as exc:
+            raise SchemaValidationError("raw_fields_json must contain valid JSON.") from exc
+        if not isinstance(raw_fields, dict):
+            raise SchemaValidationError("raw_fields_json must contain a JSON object.")
 
 
 @dataclass(frozen=True)
@@ -412,6 +460,7 @@ __all__ = [
     "ExperimentImportManifest",
     "ExperimentImportConflict",
     "ExperimentRecord",
+    "FermentationDataStatus",
     "ExperimentalFeedbackError",
     "HostContext",
     "InterventionRecord",

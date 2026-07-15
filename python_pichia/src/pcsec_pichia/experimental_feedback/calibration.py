@@ -16,6 +16,7 @@ from pcsec_pichia.experimental_feedback.quality import (
 )
 from pcsec_pichia.experimental_feedback.schema import (
     ExperimentBundle,
+    FermentationDataStatus,
     InterventionType,
     MeasurementRecord,
     MeasurementStatus,
@@ -85,6 +86,8 @@ class CalibrationRecord:
     evidence_tier: str
     recommendation_tier: str
     predicted_direction: str
+    fermentation_data_status: str
+    experiment_quality_reason: str
     measurement_ids: tuple[str, ...]
     measurement_statuses: tuple[str, ...]
     control_experiment_ids: tuple[str, ...]
@@ -267,6 +270,14 @@ def _build_records(
                 if measurement.assay_type == config.primary_assay_type
             ]
             base = _record_base(experiment, intervention, links, measurements)
+            if experiment.fermentation_data_status is not FermentationDataStatus.NORMAL:
+                records.append(
+                    _ineligible(
+                        base,
+                        f"fermentation_data_status:{experiment.fermentation_data_status.value}",
+                    )
+                )
+                continue
             if experiment.quality_status is not QualityStatus.VALID:
                 records.append(
                     _ineligible(base, f"experiment_quality_status:{experiment.quality_status.value}")
@@ -373,6 +384,8 @@ def _record_base(
         "evidence_tier": link.evidence_tier if link else "",
         "recommendation_tier": link.recommendation_tier if link else "",
         "predicted_direction": link.predicted_direction if link else "",
+        "fermentation_data_status": experiment.fermentation_data_status.value,  # type: ignore[attr-defined]
+        "experiment_quality_reason": experiment.quality_reason,  # type: ignore[attr-defined]
         "measurement_ids": tuple(item.measurement_id for item in measurements),
         "measurement_statuses": tuple(item.status.value for item in measurements),
     }
@@ -399,11 +412,21 @@ def _valid_measurements(measurements: list[MeasurementRecord]) -> list[Measureme
 
 
 def _control_context_matches(candidate: object, control: object) -> bool:
+    candidate_group = str(  # type: ignore[attr-defined]
+        getattr(candidate, "parent_control_group_id", "") or ""
+    )
+    control_group = str(  # type: ignore[attr-defined]
+        getattr(control, "parent_control_group_id", "") or ""
+    )
     return (
         candidate.target_id == control.target_id  # type: ignore[attr-defined]
         and candidate.host == control.host  # type: ignore[attr-defined]
         and candidate.batch_id == control.batch_id  # type: ignore[attr-defined]
         and candidate.condition == control.condition  # type: ignore[attr-defined]
+        and (
+            (not candidate_group and not control_group)
+            or candidate_group == control_group
+        )
     )
 
 

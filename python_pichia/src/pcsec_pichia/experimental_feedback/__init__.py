@@ -12,6 +12,9 @@ from pcsec_pichia.experimental_feedback.quality import (
     validate_experiment_bundle,
 )
 from pcsec_pichia.experimental_feedback.io import ExperimentFeedbackOutputs
+from pcsec_pichia.experimental_feedback.fermentation_template import (
+    FERMENTATION_TEMPLATE_ADAPTER_ID,
+)
 from pcsec_pichia.experimental_feedback.linkage import (
     PredictionIndex,
     PredictionLinkageResult,
@@ -44,6 +47,7 @@ from pcsec_pichia.experimental_feedback.schema import (
     ExperimentImportManifest,
     ExperimentRecord,
     ExperimentalFeedbackError,
+    FermentationDataStatus,
     HostContext,
     InterventionRecord,
     InterventionType,
@@ -70,6 +74,8 @@ __all__ = [
     "ExperimentImportConflict",
     "ExperimentImportManifest",
     "ExperimentRecord",
+    "FermentationDataStatus",
+    "FERMENTATION_TEMPLATE_ADAPTER_ID",
     "ExperimentFeedbackOutputs",
     "ExperimentReplayOutputs",
     "ExperimentReplayResult",

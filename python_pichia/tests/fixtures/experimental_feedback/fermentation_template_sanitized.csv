@@ -1,0 +1,8 @@
+克隆编号,宿主物种,宿主菌株,亲本菌株,培养基,碳源,培养方式,温度_C,pH,转速或供氧,取样时间_h,检测方法,检测值,单位,改造方案,数据状态,亲本对照组编号,重复编号,预测条件ID,预测Run编号,证据编号,状态原因,研发备注
+PARENT-C1,Komagataella phaffii,X33,X33,BMMY,methanol,shake_flask,30,6,250 rpm,72,ELISA,10,mg/L,亲本对照,正常,C1,R1,ctx-hlf-template,,,,脱敏亲本对照
+CLONE-A,Komagataella phaffii,X33,X33,BMMY,methanol,shake_flask,30,6,250 rpm,72,ELISA,15,mg/L,KO:G1,正常,C1,R1,ctx-hlf-template,template-run,HLF-G1,,脱敏正常候选
+CLONE-A,Komagataella phaffii,X33,X33,BMMY,methanol,shake_flask,30,6,250 rpm,72,ELISA,14,mg/L,KO:G1,污染,C1,R2,ctx-hlf-template,template-run,HLF-G1,脱敏污染记录,同克隆独立培养
+CLONE-B,Komagataella phaffii,X33,X33,BMMY,methanol,shake_flask,30,6,250 rpm,72,ELISA,12,mg/L,KO:G2,培养失败,C1,R1,ctx-hlf-template,template-run,HLF-G2,脱敏培养失败,保留失败原值
+CLONE-C,Komagataella phaffii,X33,X33,BMMY,methanol,shake_flask,30,6,250 rpm,72,ELISA,,mg/L,KO:G3,检测失败,C1,R1,ctx-hlf-template,template-run,HLF-G3,脱敏检测失败,无检测值
+CLONE-D,Komagataella phaffii,X33,X33,BMMY,methanol,shake_flask,30,6,250 rpm,72,ELISA,9,mg/L,KO:G4,其他排除,C1,R1,ctx-hlf-template,template-run,HLF-G4,脱敏其他排除,保留排除原值
+CLONE-E,Komagataella phaffii,X33,X33,BMMY,methanol,shake_flask,30,6,250 rpm,72,ELISA,8,mg/L,KO:G5,正常,C1,R1,ctx-hlf-template,template-run,HLF-G5,,脱敏阴性结果

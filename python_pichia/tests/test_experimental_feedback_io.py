@@ -175,6 +175,9 @@ def test_xlsx_import_uses_the_same_record_envelope_contract_as_csv(tmp_path) -> 
             worksheet.append(
                 (record_type, json.dumps(asdict(record), default=_enum_value))
             )
+    metadata = workbook.create_sheet("metadata")
+    metadata.append(("generated_by", "legacy canonical exporter"))
+    metadata.append(("format_version", "2026-01"))
     xlsx_path = tmp_path / "sanitized_import.xlsx"
     workbook.save(xlsx_path)
 
@@ -195,6 +198,32 @@ def test_corrupt_xlsx_is_reported_as_a_schema_validation_error(tmp_path) -> None
     xlsx_path.write_bytes(b"not-an-xlsx-container")
 
     with pytest.raises(SchemaValidationError, match="invalid XLSX experiment bundle"):
+        load_experiment_bundle(xlsx_path)
+
+
+def test_incomplete_canonical_envelopes_are_not_misclassified_as_wide_templates(
+    tmp_path,
+) -> None:
+    jsonl_path = tmp_path / "incomplete.jsonl"
+    jsonl_path.write_text(
+        json.dumps({"record_type": "experiment"}) + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(SchemaValidationError, match="record_type and record"):
+        load_experiment_bundle(jsonl_path)
+
+    csv_path = tmp_path / "incomplete.csv"
+    csv_path.write_text("record_type\nexperiment\n", encoding="utf-8")
+    with pytest.raises(SchemaValidationError, match="missing columns: payload_json"):
+        load_experiment_bundle(csv_path)
+
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.append(("payload_json",))
+    worksheet.append(("{}",))
+    xlsx_path = tmp_path / "incomplete.xlsx"
+    workbook.save(xlsx_path)
+    with pytest.raises(SchemaValidationError, match="missing columns: record_type"):
         load_experiment_bundle(xlsx_path)
 
 

@@ -39,6 +39,7 @@ def submit_experiment_feedback_import(
     run_name: str = "",
     output_root: str | Path = DEFAULT_EXPERIMENT_FEEDBACK_ROOT,
     calibration_config: CalibrationConfig | Mapping[str, Any] | None = None,
+    experiment_metadata: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     safe_run_name = _safe_run_name(run_name)
     run_dir = Path(output_root) / safe_run_name
@@ -60,7 +61,7 @@ def submit_experiment_feedback_import(
         prediction_payload = _read_json_object(resolved_prediction)
         prediction_source = str(resolved_prediction)
 
-    bundle = load_experiment_bundle(experiment_path)
+    bundle = load_experiment_bundle(experiment_path, metadata=experiment_metadata)
     initial_validation = validate_experiment_bundle(bundle)
     prediction_index = build_prediction_index((prediction_payload,)) if prediction_payload else build_prediction_index(())
     linkage = link_experiments_to_predictions(bundle, prediction_index)

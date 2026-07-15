@@ -1,13 +1,15 @@
 # pcSecPichia 当前架构与能力边界
 
 状态：active  
-最后更新：2026-07-14
+最后更新：2026-07-15
 
 ## 原始研发目标
 
 项目要解决的问题是：围绕 hLF、OPN 等目标蛋白，通过 KO、OE 和分泌路径改造，找到更可能提高 Pichia 分泌表现的工程方案，并降低研发同事阅读模型结果和选择实验候选的成本。
 
-当前项目的正确定位是“KO/OE 候选生成、模型验证和证据排序系统”，不是实验产量预测器。
+当前项目的正确定位是“KO/OE 候选生成、模型验证、证据排序和实验反馈系统”，不是实验产量预测器。
+
+OE 产品能力分为两个独立层级：相对、未校准的决策层用于候选比较和风险解释；绝对 gene-capacity 研究层只有在存在经审核的 baseline capacity 时才可执行。两层不能通过默认值或改名相互替代。
 
 ## 当前结论
 
@@ -19,12 +21,14 @@
 - 候选是否存在 essentiality、growth risk、proxy、同源映射或外部证据风险。
 - hLF 和 OPN 是否出现不同的候选优先级。
 - 哪些候选值得进入人工复核和小规模实验。
+- 哪些相对 OE 场景可用于候选比较，哪些只能保持 unavailable。
 
 当前系统不能可靠回答：
 
 - 某个改造会提高多少 mg/L。
 - 某个候选的真实实验成功概率。
 - reaction-level OE proxy 等同于真实 gene-level OE 后的表达变化。
+- 缺少审核 baseline capacity 时的绝对 gene-level OE 容量。
 - 模型外基因、调控网络和全部分泌通路基因的定量作用。
 - 多基因组合的上位性和长期培养稳定性。
 
@@ -37,12 +41,13 @@
   -> 分泌、生长、可行性和资源代价计算
   -> gene/GPR/同源/外部数据库/表型证据合并
   -> recommendation tier 与风险分层
+  -> 相对 OE 决策层 / 绝对容量可用性门禁
   -> fact pack + 程序 validator + LLM writer + Judge
   -> hLF / OPN 实验候选清单
   -> 实验反馈与下一轮排序校准
 ```
 
-实验反馈与排序校准的结构化闭环已经完成；gene-level OE capacity 的契约、约束、求解、报告、Streamlit 和正式门禁也已实现。当前核心缺口是缺少独立于求解结果、带来源和适用条件的 baseline capacity 锚点，因此真实 hLF/OPN gene-capacity 仍保持不可执行。
+实验反馈与排序校准的结构化闭环已经完成；gene-level OE capacity 的契约、约束、求解、报告、Streamlit 和正式门禁也已实现。A0c 已证明现有外部证据不能形成可审核的 baseline capacity，因此绝对 hLF/OPN gene-capacity 保持不可执行；相对场景作为独立、未校准的决策能力继续保留。
 
 ## 已有能力
 
@@ -94,21 +99,44 @@
 | BLAST/RBH | 序列层同源候选 | 当前 GEM 可执行性或功能完全等价 |
 | 模型 GPR | KO 可以在当前模型中执行 | 实验一定可行 |
 | OE reaction proxy | 关联反应容量变化方向 | 启动子、拷贝数和 gene-level 表达量 |
-| gene-level enzyme capacity | 在明确映射和参数场景下比较某基因 OE 的模型内容量与资源代价 | 真实表达倍数、绝对产量或跨条件保证 |
+| 相对 gene-capacity 场景 | 在明确 mapping、剂量和不确定性下比较相对方向与资源代价 | 审核 baseline capacity、真实表达倍数或绝对产量 |
+| 绝对 gene-level capacity | 使用经审核的 baseline capacity 执行绝对容量场景 | 当前没有合格锚点，因此保持 unavailable |
 | curated phenotype | 特定 intervention/context 的已有表型方向 | 通用 mg/L 或跨条件保证 |
 | 实验反馈 | 当前宿主、目标和条件下的观测结果 | 未测试条件的自动外推 |
 
 `experiment_calibrated` 只表示存在严格匹配的高置信表型或内部实验支持，不表示能够预测绝对产量。
 
+## 产品验收分层
+
+### MVP 决策层
+
+- 使用现有 KO、OE reaction proxy、相对 gene-capacity、证据分层和风险拦截生成候选优先级。
+- 每条输出必须声明执行模式、校准状态、证据来源、不确定性和不可用原因。
+- 该层可以支持研发候选选择，但不能声称绝对 capacity、mg/L、真实表达倍数或实验成功概率。
+
+### 绝对容量研究层
+
+- 继续沿用 ADR-001 的候选、审核和 promotion 门禁。
+- 没有匹配的审核资产时返回 unavailable，不允许静默回退到 proxy、最优 flux、通用上界、固定 `1.0` 或 fixture。
+- 新来源只有在开发前即具备明确单位、条件、版本、hash、license 和转换链时才允许启动接入。
+
+### 实验校准层
+
+- 实验反馈只校准候选排序、方向一致性和风险判断，不直接修改代谢矩阵、GPR 或正式容量资产。
+- 没有真实实验数据时，软件阶段仍可通过脱敏 fixture、数值回归和边界测试验收；真实数据到来后再执行独立回填和校准。
+
+分层决策见 [ADR-002](adr/002-relative-oe-and-absolute-capacity-layers.md)。
+
 ## 当前主要缺口
 
-1. gene-level OE capacity 链路已经实现，但缺少可审核的 baseline capacity 锚点，真实 hLF/OPN 候选尚不能通过正式验收。
-2. Phase 1 尚未接入获批真实实验数据，当前只有脱敏回放和数据契约证据。
-3. 分泌、折叠、UPR、ERAD、糖基化和囊泡运输的机制约束仍不完整。
+1. 相对 OE 与绝对容量的产品状态和用户可见门禁尚需按 ADR-002 完成实现收口。
+2. 绝对 gene-level OE capacity 缺少可审核 baseline capacity，当前必须保持 unavailable。
+3. 分泌、折叠、UPR、ERAD、糖基化和囊泡运输的独立资源约束仍不完整。
 4. 大量模型外蛋白有序列和注释，但没有可执行 GPR，不能直接进入 KO/OE 求解。
 5. 筛查以单基因为主，缺少组合改造和上位性分析。
-6. 缺少跨碳源、生长率、氧供和参数扰动的鲁棒性排名。
-7. 尚未用前瞻实验评价 top-K 命中率、富集倍数和排序校准程度。
+6. 缺少跨碳源、生长率、氧供和参数扰动的完整稳定性排名。
+
+研发发酵宽表适配和脱敏回放已经验收；尚未完成获批真实数据回填，但这不再是软件阶段阻塞。
 
 ## 架构边界
 
@@ -156,7 +184,7 @@ app/ui
 
 匹配优先级固定为 `target_specific > host_condition > external_model_calibrated > homolog_transferred`。候选必须完成单位换算、当前模型 gene/enzyme/formation 映射、条件匹配、来源版本/hash/license、冲突检查和人工审核后，才可提升到 `Enzymedata/oe_capacity_baseline_capacity.json`。`1000` 通用上界、baseline optimal flux、fixture 和未审核同源参数永远不能作为正式锚点。
 
-长期决策见 [ADR-001](adr/001-external-capacity-candidate-promotion.md)。
+正式容量 promotion 见 [ADR-001](adr/001-external-capacity-candidate-promotion.md)；相对决策层与绝对容量层的关系见 [ADR-002](adr/002-relative-oe-and-absolute-capacity-layers.md)。
 
 ## 项目成功标准
 
@@ -168,4 +196,4 @@ app/ui
 - 生长风险、不可执行候选和 proxy 结论是否被正确拦截。
 - 每条实验建议是否能追溯到模型结果和证据来源。
 
-下一步固定从[下一阶段执行计划](pichia_next_plan.md)中当前未完成轮次继续。
+当前授权范围以[项目级执行与预算计划](EXECUTION_PLAN.md)为准，实际下一切片只从[当前 handoff](handoff.md)继续。

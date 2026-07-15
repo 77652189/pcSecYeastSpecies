@@ -127,6 +127,8 @@ def evaluate_ecpichia_g6pdh2_provenance(
             "formation_dilution_model_flux_conversion_missing",
             "gecko_brenda_release_missing_from_ecpichia",
             "direct_komagataella_g6pdh2_kcat_missing",
+            "gecko_reference_artifact_not_bound_to_source_cache",
+            "kcat_research_artifact_not_bound_to_source_cache",
         )
     )
     for binding in bindings:
@@ -176,6 +178,8 @@ def evaluate_ecpichia_g6pdh2_provenance(
                 "version": "3.2.5",
                 "commit": "7d09beb6556810147625cac78d411aeace7ac4fe",
                 "license": "MIT",
+                "source_artifact_verified": False,
+                "evidence_status": "research_note_not_replayed_by_source_adapter",
             },
             "kcat_provenance_assessment": {
                 "brenda_release": "2026.1",
@@ -191,6 +195,8 @@ def evaluate_ecpichia_g6pdh2_provenance(
                 "assay": "pH 7.4, 80 C, recombinant enzyme",
                 "applicable_to_komagataella": False,
                 "gecko_max_kcat_sha256": "1e0aa18bb9079cbbe00a8f1b0bb75b949f43d1624ae7464af1236ab4d9e1ceb3",
+                "source_artifact_verified": False,
+                "evidence_status": "research_note_not_replayed_by_source_adapter",
             },
         },
         conditional_unit_trace=(

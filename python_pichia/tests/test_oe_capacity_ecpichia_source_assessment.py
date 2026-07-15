@@ -311,11 +311,22 @@ def test_ecpichia_closure_retains_formula_and_binding_conflicts(tmp_path: Path) 
     assert len(closure.source_artifacts) == 2
     assert all(len(item["raw_sha256"]) == 64 for item in closure.source_artifacts)
     assert closure.coefficient_trace["matches"] is True
+    assert closure.coefficient_trace["gecko_reference"]["source_artifact_verified"] is False
+    assert (
+        closure.coefficient_trace["kcat_provenance_assessment"][
+            "source_artifact_verified"
+        ]
+        is False
+    )
     assert closure.nominal_capacity is None
     assert closure.promotion_preview_available is False
     assert "supplement_table_yaml_gene_conflict" in closure.source_conflicts
     assert "supplement_table_yaml_enzyme_conflict" in closure.source_conflicts
     assert "concentration_unit_conflict_g_per_L_vs_mg_per_gDCW" in closure.missing_information
+    assert (
+        "kcat_research_artifact_not_bound_to_source_cache"
+        in closure.missing_information
+    )
     assert closure.model_bindings[0].context_id == "glucose_mu_0.1"
 
 

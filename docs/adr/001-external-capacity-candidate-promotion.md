@@ -71,6 +71,8 @@ closure 只有两个合法出口：
 
 `architecture_decision_required` 不代表允许降低科学门禁。若后续拆分验收等级，绝对容量校准必须继续保持独立状态；相对 OE 场景也必须明确标为相对、未校准且不能用于绝对产量解释。
 
+该产品分层决策已由 [ADR-002](002-relative-oe-and-absolute-capacity-layers.md) 接受。ADR-001 继续拥有绝对容量候选与 promotion 门禁，未被取代。
+
 ## 模块和调用边界
 
 - `external_refs/capacity_sources.py` 拥有联网获取、许可元数据和原始 cache。

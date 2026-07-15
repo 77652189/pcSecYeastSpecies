@@ -6,42 +6,44 @@
 ## 当前执行位置
 
 ```yaml
-current_phase: phase_2_gene_level_oe
-current_round: round_6a_external_capacity_candidates
-round_status: in_progress
-current_checkpoint: a0c_ecpichia_provenance_closure
-checkpoint_status: architecture_decision_required
+current_program: mvp_directions_1_to_3
+current_slice: direction_2_oe_product_tiering_closure
+slice_status: ready
+direction_1_status: accepted_waiting_for_real_data_replay
+relative_oe_status: authorized_ready_for_product_closure
+absolute_capacity_status: unavailable_waiting_for_qualified_evidence
 ```
 
-## 当前结论
+## 当前状态
 
-- A0c 已通过正式 source/cache/parser/evaluation/audit/CLI 路径完成 ecPichia G6PDH2 provenance closure，并支持无网络 replay。
-- `Supplementary 8.yml` 的 `57689 / (8000 × 3600)` 可严格复算 GECKO coefficient；这只证明模型如何使用该 kcat，不证明 abundance 或当前模型 baseline capacity 成立。
-- `Supplementary 11_V2.docx` 与 YAML 在 gene、enzyme、MW 和 concentration 上冲突；表格单位为 `g/L` 且 G6PDH2 concentration 为 `NaN`，YAML 则未声明单位。
-- `kcat=8000 s^-1` 可追至 Thermotoga maritima、thio-NADP+、80°C 的 BRENDA 记录，不能直接适用于 Komagataella `PAS_chr2-1_0308 / C4R099`。
-- hLF/OPN 已建立正式 `glucose_mu_0.1` current-model crosswalk，精确到 `G6PDH2_no_1_fwd` 和 `G6PDH2_no_1_fwd_complex_formation`；但 catalytic flux 到 formation/dilution `model_flux` 的换算仍无直接证据。
-- 正式产物结论为 `architecture_decision_required`：`candidate_count=0`、`promotion_ready_count=0`、`nominal_capacity=null`、`promotion_preview_available=false`。
-- 正式容量 registry 未修改，formal acceptance 仍因 `reviewed_baseline_capacity` 缺口为 `passed=false`；未进入 Round 6B 或 Phase 3。
+- A0c 已完成，现有 PRIDE/ecPichia 证据不能形成审核后的绝对 baseline capacity；正式 registry 未修改。
+- ADR-002 已接受相对 OE 决策层与绝对容量研究层分离。绝对容量继续保持 unavailable，不再扩大同类低信息来源接入。
+- 方向 1 已通过验收：研发发酵宽表 CSV/XLSX/JSONL 已接入 canonical validation、cache、prediction linkage、calibration eligibility 和报告链路。
+- 脱敏回放覆盖正常、污染、培养失败、检测失败、其他排除、亲本对照、独立培养重复和阴性结果；失败/排除原值保留且不进入校准。
+- 尚未读取获批真实研发数据；真实数据到来后只执行独立回填 checkpoint，不重新开启方向 1 开发。
+- 当前进入方向 2 产品收口。现有 PRIDE/ecPichia 证据不能形成审核后的绝对 baseline capacity，正式 registry 保持不变。
+- ADR-002 已接受 reaction proxy、相对未校准 gene-capacity 与绝对 unavailable 三种产品状态必须分离。
 
-## 下一项决策
+## 已授权切片
 
-先决定是否拆分 Phase 2 验收等级：
+只执行 `direction_2_oe_product_tiering_closure`：让已有 OE 能力按照 ADR-002 形成一致、可审计的核心状态、报告、service 和 Streamlit 产品门禁。
 
-1. 保持现有硬门禁，只接受经审核的绝对 baseline capacity；Round 6A 继续阻塞，等待可闭合的同条件绝对 abundance/direct capacity 与 formation conversion 证据。
-2. 新增独立的“相对、未校准 gene-level OE 场景”产品等级，同时保留绝对容量校准为单独未通过门禁；该等级不得解释为绝对产量或正式 capacity。
-
-在决策完成前，不再增加只重复相对强度、名称或缺单位模型字段的 source adapter，不进入 Round 6B。
+本切片不得新增外部容量来源、伪造绝对容量、进入方向 3 secretory resource layer、组合搜索或完整跨条件排名。
 
 ## 必读材料
 
-1. [ADR-001：证据闭合与停止决策](adr/001-external-capacity-candidate-promotion.md#证据闭合与停止决策)
-2. [执行计划：A0c 与状态迁移](pichia_next_plan.md#a0c-ecpichia-provenance-closure)
-3. [数据与结果治理策略](data_and_results_policy.md#oe-capacity-参数与映射)
-4. ignored 运行产物：`local_runs/oe_capacity/round6a/a0c_ecpichia_provenance/formal_run/g6pdh2_ecpichia_provenance_gap.json`
+1. [项目级执行与预算计划：方向 2 成功条件与授权边界](EXECUTION_PLAN.md#方向-2-成功条件)
+2. [当前架构：实验校准层与产品验收分层](pichia_current_architecture_and_requirements.md#产品验收分层)
+3. [ADR-002：相对 OE 与绝对容量分层](adr/002-relative-oe-and-absolute-capacity-layers.md)
+4. [Phase 2 既有实现与边界](pichia_next_plan.md#phase-2gene-level-oe-与酶容量)
+5. [数据与结果治理策略](data_and_results_policy.md)
 
-## 验证与停止线
+## 验收与停止线
 
-- 重新运行 A0c focused tests、全部 `test_oe_capacity*.py`、service/UI contract、文档边界测试和 CLI offline replay。
-- 运行 `compileall`、`git diff --check`、`local_runs/` ignore、密钥、依赖和保护目录检查。
-- 不得用通用上界、baseline optimal flux、固定 `1.0`、PRIDE iBAQ、未确认单位的 ecPichia 值或 fixture 伪造容量。
-- 不得进入 Round 6B、Phase 3，也不得生成 Phase 3 Round 0 提示词。
+- 必须产生实际产品状态或门禁收口及 focused tests，不能只修改文档或重复外部来源审计。
+- reaction proxy、relative uncalibrated、absolute unavailable 和 not executable 必须由核心层判定并在报告、service、UI 一致透传。
+- 缺少审核 baseline capacity 时不得调用绝对容量求解或生成 nominal capacity；不得用 proxy、最优 flux、通用上界、固定值或 fixture 替代。
+- 保留旧 proxy 数值和 feature-off 回归；hLF/OPN 必须保持 target/context/model version 与风险说明隔离。
+- `app/services` 和 Streamlit 只做 facade/展示，不重新实现模式判断或科学降级逻辑。
+- 完成 review/fix/verify 后更新状态并停止；不得自动进入方向 3。
+- 验证 focused tests、hLF/OPN smoke、相关 service/UI contract、`compileall`、保护目录、依赖、密钥和 ignore 边界。

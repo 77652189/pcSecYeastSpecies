@@ -106,6 +106,49 @@ def test_service_accepts_xlsx_experiment_uploads(tmp_path) -> None:
     assert (run_dir / "report" / "prediction_experiment_report.md").exists()
 
 
+def test_service_passes_form_metadata_to_wide_template_core_adapter(tmp_path) -> None:
+    fixture = (
+        Path(__file__).resolve().parents[1]
+        / "python_pichia"
+        / "tests"
+        / "fixtures"
+        / "experimental_feedback"
+        / "fermentation_template_sanitized.csv"
+    )
+
+    result = submit_experiment_feedback_import(
+        experiment_filename=fixture.name,
+        experiment_bytes=fixture.read_bytes(),
+        run_name="wide-template-contract",
+        output_root=tmp_path / "runs",
+        experiment_metadata={"target_id": "hLF", "batch_id": "B01"},
+    )
+
+    assert result["validation"]["is_valid"] is True
+    assert result["calibration"]["available"] is True
+    assert len(result["calibration"]["records"]) == 6
+    run_dir = tmp_path / "runs" / "wide-template-contract"
+    manifest = json.loads(
+        (run_dir / "validated" / "manifest.json").read_text(encoding="utf-8")
+    )
+    assert manifest["adapter_id"] == "pcsec_pichia.fermentation_template.v1"
+    assert manifest["import_metadata"] == {"batch_id": "B01", "target_id": "hLF"}
+    assert (run_dir / "inbox" / fixture.name).read_bytes() == fixture.read_bytes()
+
+
+def test_service_remains_a_facade_without_template_science_rules() -> None:
+    service_source = (
+        Path(__file__).resolve().parents[1]
+        / "app"
+        / "services"
+        / "pichia_experiment_feedback_service.py"
+    ).read_text(encoding="utf-8")
+
+    assert "experiment_metadata" in service_source
+    for core_rule in ("改造方案", "亲本对照组编号", "培养失败", "contamination"):
+        assert core_rule not in service_source
+
+
 def _experiment_csv_bytes(tmp_path) -> bytes:
     host = HostContext("Komagataella phaffii", "X33", "X33")
     condition = ConditionContext("BMMY", "methanol", "shake_flask", 30.0, 6.0, "250 rpm", 72.0)

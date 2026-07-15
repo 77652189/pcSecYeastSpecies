@@ -6,24 +6,14 @@
 ## 当前执行位置
 
 ```yaml
-current_phase: phase_2_gene_level_oe
-current_round: round_6a_external_capacity_candidates
-round_status: in_progress
-current_checkpoint: a0c_ecpichia_provenance_closure
-checkpoint_status: architecture_decision_required
+current_program: mvp_directions_1_to_3
+current_slice: direction_2_oe_product_tiering_closure
+slice_status: ready
 ```
 
-执行会话必须从这里记录的阶段和轮次继续。完成一轮后，只更新到下一轮；不得在新会话中自动重置为 Phase 1 Round 0。
+执行会话必须从这里和 `docs/handoff.md` 记录的切片继续。历史 Phase/Round 只用于理解既有实现，不得覆盖项目级执行计划的当前授权顺序。
 
-Phase 1 Round 0-5 全部完成并验收后，将状态更新为：
-
-```yaml
-current_phase: phase_2_gene_level_oe
-current_round: round_0_architecture
-round_status: ready
-```
-
-进入 Phase 2 前必须先完成 Phase 1 的端到端验收和 checkpoint，不能在同一轮中越过阶段边界。
+方向 1 的软件闭环和真实发酵模板适配已经通过验收。获批真实数据到来后执行独立回填 checkpoint；当前按项目级顺序进入方向 2 产品层级与门禁收口。
 
 ## 总目标
 
@@ -55,7 +45,7 @@ round_status: ready
 
 每个 Round 必须按以下顺序完成：
 
-1. 读取 `docs/README.md`、当前架构、当前计划和数据治理策略。
+1. 读取 `docs/README.md`、`docs/EXECUTION_PLAN.md`、当前架构、当前计划和数据治理策略；先确认本轮仍在项目级授权范围内。
 2. 确认本轮输入、输出、数据边界和验收标准。
 3. 先实现核心 `python_pichia` 数据契约或科学逻辑。
 4. 增加 focused tests 和 fixture。
@@ -292,14 +282,14 @@ Phase 1 完成时，研发同事应能在 Streamlit 中：
 
 ## Phase 2：gene-level OE 与酶容量
 
-Phase 1 已完成并验收。Phase 2 的求解与门禁修复已经完成，但正式容量资产为空。当前进入 Round 6A，通过外部来源建立候选、审核和提升链路；完成后进入 Round 6B 重跑 hLF/OPN 正式验收，在 `passed=true` 前不得进入 Phase 3。
+Phase 1 和方向 1 模板适配已完成并验收。Phase 2 的 mapping、剂量、约束、求解、报告、UI 和外部候选审计已存在，但正式容量资产为空。当前不再扩大同类来源搜索，而是按 ADR-002 收口 reaction proxy、relative uncalibrated、absolute unavailable 和 not executable 的产品状态与门禁。
 
-### 执行锁
+### 当前执行锁
 
-- 当状态为 `phase_2_gene_level_oe / round_0_architecture / ready` 时，执行任务必须创建 Phase 2 生产代码和测试。
-- Round 0 只有在 `oe_capacity` 包、可执行数据契约、validation、fixtures 和 contract tests 存在并通过后才能完成。
-- 只读审计、清理工作区、重复 Phase 1 测试或只修改文档均不构成 Round 0 交付。
-- 已批准的 Phase 2 active 文档不得被视为“误启动内容”删除；不确定的既有代码只允许保留和审计，不得擅自回滚。
+- 当前只执行 `direction_2_oe_product_tiering_closure`，必须修改实际核心状态/门禁及其测试。
+- 只读审计、继续搜索同类绝对容量来源、重复既有 smoke 或只修改文档均不构成交付。
+- 不删除或重写既有 `oe_capacity` 能力；在当前实现上收口产品语义并保持回归。
+- 验收前不得进入 Phase 3、组合搜索或完整跨条件排名。
 
 ### 目标与边界
 
@@ -427,7 +417,7 @@ service/UI 不得绕过这些 API 自行解释 GPR、换算剂量或修改约束
 - promotion 必须由显式批准触发，写入前后均校验 schema、模型指纹和 source hash，并保留旧资产备份或原子替换证据。
 - 没有合格候选时仍保持 `reviewed_baseline_capacity`，不得回退到通用上界、baseline flux 或 fixture。
 
-A0b 当前结果：已通过正式 adapter/cache/parser 接入 PRIDE `PXD055501`，为 G6PDH2 保留 T0 iBAQ 原始值、CC0 许可、项目版本、原始文件 hash、培养条件、`504/504` sequence crosswalk 和不可转换的单位链；同时增加 ecPichia `Supplementary 8.yml` 的正式文件导入和离线回放，保留 gene/enzyme/reaction、MW、kcat、GECKO coefficient、reported concentration、protein pool、artifact hash 和上游 ZIP hash。PRIDE 只有相对 iBAQ；ecPichia 仍缺可审核的 LFQ→absolute abundance provenance、确定单位、完整条件、可复用许可、直接 kcat provenance 和当前 formation-flux 换算。因此两者均 `promotion_ready=false`，Round 6A 继续 `in_progress`，不得进入 Round 6B。
+A0b 历史结果：已通过正式 adapter/cache/parser 接入 PRIDE `PXD055501`，为 G6PDH2 保留 T0 iBAQ 原始值、CC0 许可、项目版本、原始文件 hash、培养条件、`504/504` sequence crosswalk 和不可转换的单位链；同时增加 ecPichia `Supplementary 8.yml` 的正式文件导入和离线回放，保留 gene/enzyme/reaction、MW、kcat、GECKO coefficient、reported concentration、protein pool、artifact hash 和上游 ZIP hash。PRIDE 只有相对 iBAQ；ecPichia 仍缺可审核的 LFQ→absolute abundance provenance、确定单位、完整条件、可复用许可、直接 kcat provenance 和当前 formation-flux 换算。因此两者均 `promotion_ready=false`。该结果已由 ADR-002 收口，不再驱动同类来源扩张。
 
 #### A0c：ecPichia provenance closure
 
@@ -455,19 +445,19 @@ A0c 验收：
   - `evidence_chain_closed`：生成 promotion preview；明确批准并成功提升后进入 Round 6B `ready`。
   - `architecture_decision_required`：保存 gap report，停止增加同类 source adapter，下一轮先决定是否拆分绝对容量与相对 OE 场景的验收等级。
 
-A0c 当前结果：已完成 ecPichia `Supplementary 8.yml` 与 `Supplementary 11_V2.docx` 的 hash 固定、正式解析、在线导入和离线 replay，并建立 hLF/OPN 的 `glucose_mu_0.1` current-model crosswalk。GECKO coefficient 可严格复算，但表格与 YAML 的 gene/enzyme/MW/concentration 冲突；concentration 的 `g/L`、未声明 YAML 单位和缺失 biomass conversion 无法闭合；`kcat=8000 s^-1` 来自 Thermotoga/thio-NADP+/80°C 记录，不能作为 Komagataella direct kcat；catalytic flux 到 formation/dilution `model_flux` 也缺直接转换证据。因此完成出口固定为 `architecture_decision_required`，不生成 nominal capacity 或 promotion preview，正式 registry 不变，Round 6A 保持 `in_progress`。
+A0c 历史结果：已完成 ecPichia `Supplementary 8.yml` 与 `Supplementary 11_V2.docx` 的 hash 固定、正式解析、在线导入和离线 replay，并建立 hLF/OPN 的 `glucose_mu_0.1` current-model crosswalk。GECKO coefficient 可严格复算，但表格与 YAML 的 gene/enzyme/MW/concentration 冲突；concentration 的 `g/L`、未声明 YAML 单位和缺失 biomass conversion 无法闭合；本地研究记录将 `kcat=8000 s^-1` 指向 Thermotoga/thio-NADP+/80°C，但该记录尚未绑定可 replay 的 source artifact，且不能作为 Komagataella direct kcat；catalytic flux 到 formation/dilution `model_flux` 也缺直接转换证据。因此出口为 `architecture_decision_required`，不生成 nominal capacity 或 promotion preview，正式 registry 不变。ADR-002 随后将绝对容量研究层与相对决策层分离。
 
-### Round 6B：hLF/OPN 正式重验收
+### Round 6B：hLF/OPN 绝对容量重验收（条件路径）
 
-Round 6A 产生并批准容量资产后，使用正式 runner 新建四个固定 smoke：hLF/OPN 各一个 `PAS_chr2-1_0308` executable case 和一个 `PAS_chr1-4_0458` boundary case。runner 必须自行验证 target、context、gene、资产 hash、scenario/proxy 证据和相关回归；只有 `passed=true` 才能将状态推进到 Phase 3 Round 0。
+只有未来获得并批准合格绝对容量资产时，才重新启用本路径。正式 runner 新建四个固定 smoke：hLF/OPN 各一个 `PAS_chr2-1_0308` executable case 和一个 `PAS_chr1-4_0458` boundary case，并验证 target、context、gene、资产 hash、scenario/proxy 证据和相关回归。该条件路径是否通过不再阻塞相对 OE 产品收口或方向 3 Round 0。
 
-状态迁移固定为：
+绝对容量研究层的条件状态迁移为：
 
 - Round 6A 功能完成但没有已批准候选：`round_6a_external_capacity_candidates / awaiting_candidate_review`。
 - A0c 证据链无法闭合：`round_6a_external_capacity_candidates / architecture_decision_required`，不得继续堆叠同类来源。
 - 正式容量资产已批准：`round_6b_hlf_opn_acceptance / ready`，立即运行正式验收。
 - Round 6B 未通过：`round_6b_hlf_opn_acceptance / awaiting_acceptance`，保留真实缺口，不回退伪参数。
-- Round 6B `passed=true`：推进到 `phase_3_secretory_resources / round_0_architecture / ready`。
+- Round 6B `passed=true`：仅表示绝对容量研究层通过，不替代当前项目级方向状态。
 
 每个 Round 都必须有生产实现、focused tests 和可验证结果。不得跳到后续 Round，也不得反复选择最简单字段。
 
@@ -477,16 +467,18 @@ Round 6A 产生并批准容量资产后，使用正式 runner 新建四个固定
 
 screen rows 并行保留旧字段，并新增 execution mode/status、dose、expression multiplier、mapping、parameter source/confidence、uncertainty scenarios、gene-capacity objective、proxy objective、差异、resource cost、missing information 和 warnings。
 
-Phase 2 完成必须满足：
+当前方向 2 产品收口必须满足：
 
 - single gene、isoenzyme、complex、mixed、missing parameter 和 external-only 都有测试。
-- gene-level capacity 是真实结构化约束，不是 proxy 改名。
-- 旧 proxy 可逐候选比较且兼容模式数值不变。
-- 1x baseline、feature-off 和 proxy 回归通过。
-- hLF/OPN 分别完成 smoke。
+- reaction proxy、relative uncalibrated、absolute unavailable 和 not executable 可区分，且由核心层统一判定。
+- relative gene-capacity 是结构化相对场景，不是 proxy 改名，也不声称绝对 capacity。
+- 旧 proxy 可逐候选比较且兼容模式数值不变；feature-off 回归通过。
+- 缺审核 baseline capacity 时不调用绝对容量求解、不生成 nominal capacity，并明确返回 unavailable。
+- hLF/OPN 分别完成产品状态 smoke，保留 target、context、model version 和风险说明。
+- service/UI 只透传和展示核心判断。
 - 输出进入 ignored `local_runs/oe_capacity/`。
 - `Code/Model/Enzymedata/Results` 和依赖声明没有非预期 diff。
-- 状态推进到 `phase_3_secretory_resources / round_0_architecture / ready` 后停止。
+- 状态推进到 `direction_3_secretory_resource_round_0 / ready` 后停止。
 
 ## Phase 3：分泌资源与蛋白稳态约束
 
@@ -536,4 +528,4 @@ Phase 2 完成必须满足：
 
 ## 当前下一步
 
-处理 A0c 的 `architecture_decision_required`：决定是否继续保持“审核绝对 baseline capacity”作为唯一 Phase 2 门禁，或新增独立且明确未校准的相对 OE 场景验收等级。决策前停止增加同类 source adapter，保持 `round_6a_external_capacity_candidates / in_progress`，不得进入 Round 6B 或 Phase 3，也不得生成 Phase 3 Round 0 提示词。
+执行 `direction_2_oe_product_tiering_closure`。具体成功条件和预算边界读取 `docs/EXECUTION_PLAN.md`，产品分层读取架构文档与 ADR-002，当前切片和验证方式读取 `docs/handoff.md`；验收完成前不得进入方向 3。

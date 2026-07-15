@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
+from types import SimpleNamespace
 
 from app.ui.common import EXPERIMENT_FEEDBACK_PAGE
+from app.ui.views import experiment_feedback as experiment_feedback_view
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -36,6 +38,12 @@ def test_experiment_feedback_view_uses_service_only_and_stable_session_keys() ->
     assert "experiment_feedback_last_import" in source
     assert "experiment_feedback_experiment_upload" in source
     assert "experiment_feedback_prediction_upload" in source
+    assert "experiment_feedback_target_metadata" in source
+    assert "experiment_feedback_batch_metadata" in source
+    assert "experiment_feedback_import_form_state" in source
+    assert "_restore_import_form_state()" in source
+    assert "on_change=_sync_import_form_field" in source
+    assert "experiment_metadata=" in source
     assert 'type=["csv", "xlsx", "jsonl"]' in source
     assert "st.cache_data" not in source
     assert "st.cache_resource" not in source
@@ -68,3 +76,29 @@ def test_experiment_feedback_view_exposes_all_required_states_and_exports() -> N
     ):
         assert text in source
     assert ".read_bytes()" not in source
+
+
+def test_experiment_feedback_import_form_state_survives_widget_cleanup(monkeypatch) -> None:
+    session_state: dict[str, object] = {}
+    monkeypatch.setattr(
+        experiment_feedback_view,
+        "st",
+        SimpleNamespace(session_state=session_state),
+    )
+
+    experiment_feedback_view._restore_import_form_state()
+    session_state[experiment_feedback_view.TARGET_METADATA_KEY] = "hLF"
+    session_state[experiment_feedback_view.BATCH_METADATA_KEY] = "B01"
+    experiment_feedback_view._sync_import_form_field(
+        experiment_feedback_view.TARGET_METADATA_KEY
+    )
+    experiment_feedback_view._sync_import_form_field(
+        experiment_feedback_view.BATCH_METADATA_KEY
+    )
+
+    del session_state[experiment_feedback_view.TARGET_METADATA_KEY]
+    del session_state[experiment_feedback_view.BATCH_METADATA_KEY]
+    experiment_feedback_view._restore_import_form_state()
+
+    assert session_state[experiment_feedback_view.TARGET_METADATA_KEY] == "hLF"
+    assert session_state[experiment_feedback_view.BATCH_METADATA_KEY] == "B01"
