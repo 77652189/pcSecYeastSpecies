@@ -69,6 +69,7 @@ def test_obsolete_migration_plans_are_deleted_not_kept_as_active_debt() -> None:
 def test_next_plan_runs_external_capacity_candidates_before_final_acceptance() -> None:
     text = (REPO_ROOT / "docs" / "pichia_next_plan.md").read_text(encoding="utf-8")
     current_state = text.split("```yaml", 1)[1].split("```", 1)[0]
+    current_next_step = text.split("## 当前下一步", 1)[1]
 
     assert "current_phase: phase_2_gene_level_oe" in current_state
     assert "current_round: round_6a_external_capacity_candidates" in current_state
@@ -78,6 +79,8 @@ def test_next_plan_runs_external_capacity_candidates_before_final_acceptance() -
     assert "Round 6B：hLF/OPN 正式重验收" in text
     assert "不得进入 Phase 3" in text
     assert "不得生成 Phase 3 Round 0 提示词" in text
+    assert "A0b 真实定量来源接入 checkpoint" in current_next_step
+    assert "执行 Round 6A 的 A0a" not in current_next_step
 
 
 def test_handoff_points_to_quantitative_source_checkpoint() -> None:

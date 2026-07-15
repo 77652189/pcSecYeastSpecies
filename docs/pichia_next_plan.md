@@ -503,4 +503,4 @@ Phase 2 完成必须满足：
 
 ## 当前下一步
 
-执行 Round 6A 的 A0a 结构收束 checkpoint：拆分当前多职责 `external_candidates.py`，把联网来源归还 `external_refs`，并提供 CLI/service 共用的公开 audit API。完成并提交 A0a 后，再单独执行 A0b 真实定量来源接入。当前仅有 UniProt identity 和人工导入流程，不构成真实外部容量来源完成，也不得把任务默认交回研发组。Round 6B 正式验收通过前，不得进入 Phase 3，也不得生成 Phase 3 Round 0 提示词。
+执行 Round 6A 的 A0b 真实定量来源接入 checkpoint：在 A0a 已拆分好的 source、schema、IO、evaluation、promotion 和 audit 边界上，接入至少一个可审计的公开定量来源或正式文件解析路径，并为 `PAS_chr2-1_0308 / G6PDH2` 生成带原始值、版本、hash、license、条件和单位链的候选。当前仅有 UniProt identity 和人工导入流程，不构成真实外部容量来源完成，也不得把任务默认交回研发组。Round 6B 正式验收通过前，不得进入 Phase 3，也不得生成 Phase 3 Round 0 提示词。
