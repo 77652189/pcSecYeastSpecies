@@ -30,6 +30,18 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         help="Existing UniProt identity cache to reuse for offline replay.",
     )
+    parser.add_argument(
+        "--quantitative-cache-dir",
+        type=Path,
+        help="Existing PRIDE quantitative cache to reuse for offline replay.",
+    )
+    parser.add_argument(
+        "--pride-pxd055501",
+        action="store_true",
+        help="Parse the reviewed PXD055501 G6PDH2 iBAQ evidence profile.",
+    )
+    parser.add_argument("--growth-rate", type=float, default=0.1)
+    parser.add_argument("--carbon-source-id", default="glucose")
     parser.add_argument("--measurement-file", type=Path)
     parser.add_argument("--source-id", default="")
     parser.add_argument(
@@ -55,6 +67,8 @@ def main() -> int:
             output_dir=args.output_dir,
             offline_replay=args.offline_replay,
             identity_cache_dir=args.identity_cache_dir,
+            quantitative_cache_dir=args.quantitative_cache_dir,
+            pride_pxd055501=args.pride_pxd055501,
             measurement_file=args.measurement_file,
             source_id=args.source_id,
             source_type=ExternalCapacitySourceType(args.source_type),
@@ -65,6 +79,8 @@ def main() -> int:
             query=args.query,
             expected_sha256=args.expected_sha256,
             terms_reviewed=args.terms_reviewed,
+            growth_rate=args.growth_rate,
+            carbon_source_id=args.carbon_source_id,
         )
     )
     print(json.dumps(outputs.summary()))

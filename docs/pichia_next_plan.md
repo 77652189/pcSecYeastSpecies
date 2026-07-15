@@ -425,6 +425,8 @@ service/UI 不得绕过这些 API 自行解释 GPR、换算剂量或修改约束
 - promotion 必须由显式批准触发，写入前后均校验 schema、模型指纹和 source hash，并保留旧资产备份或原子替换证据。
 - 没有合格候选时仍保持 `reviewed_baseline_capacity`，不得回退到通用上界、baseline flux 或 fixture。
 
+A0b 当前结果：已通过正式 adapter/cache/parser 接入 PRIDE `PXD055501`，为 G6PDH2 保留 T0 iBAQ 原始值、CC0 许可、项目版本、原始文件 hash、培养条件、`504/504` sequence crosswalk 和不可转换的单位链。该来源只有相对 iBAQ，条件为 `mu=0.075 h^-1`，缺 absolute abundance、biomass normalization、配对 kcat 及正式 `mu=0.1` 匹配，因此 `promotion_ready=false`。Round 6A 继续 `in_progress`，不得进入 Round 6B。
+
 ### Round 6B：hLF/OPN 正式重验收
 
 Round 6A 产生并批准容量资产后，使用正式 runner 新建四个固定 smoke：hLF/OPN 各一个 `PAS_chr2-1_0308` executable case 和一个 `PAS_chr1-4_0458` boundary case。runner 必须自行验证 target、context、gene、资产 hash、scenario/proxy 证据和相关回归；只有 `passed=true` 才能将状态推进到 Phase 3 Round 0。
@@ -503,4 +505,4 @@ Phase 2 完成必须满足：
 
 ## 当前下一步
 
-执行 Round 6A 的 A0b 真实定量来源接入 checkpoint：在 A0a 已拆分好的 source、schema、IO、evaluation、promotion 和 audit 边界上，接入至少一个可审计的公开定量来源或正式文件解析路径，并为 `PAS_chr2-1_0308 / G6PDH2` 生成带原始值、版本、hash、license、条件和单位链的候选。当前仅有 UniProt identity 和人工导入流程，不构成真实外部容量来源完成，也不得把任务默认交回研发组。Round 6B 正式验收通过前，不得进入 Phase 3，也不得生成 Phase 3 Round 0 提示词。
+继续 Round 6A 的 A0b quantitative source acquisition：现有 PRIDE `PXD055501` 已提供真实可审计 iBAQ candidate，但它不是 absolute baseline capacity。下一步应继续获取 Pichia absolute abundance、可审核的 ecPichia/iPichia conversion provenance，或 condition-matched abundance + kcat 组合，使单位链能够闭合到 `model_flux`；在此之前保持 `reviewed_baseline_capacity` 缺口和 `round_status: in_progress`。不得进入 Round 6B 或 Phase 3，也不得生成 Phase 3 Round 0 提示词。

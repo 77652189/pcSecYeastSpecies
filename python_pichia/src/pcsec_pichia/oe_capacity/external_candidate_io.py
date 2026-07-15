@@ -6,11 +6,12 @@ import json
 import math
 import os
 import shutil
+import statistics
 import tempfile
 from dataclasses import asdict, dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable, Mapping, Sequence
 
 from pcsec_pichia.external_refs.schema import utc_now_iso
 from pcsec_pichia.oe_capacity.external_candidate_schema import (
@@ -46,6 +47,18 @@ class ExternalCapacityCandidateOutputs:
 class ExternalCapacityCandidateSnapshot:
     bundle: ExternalCapacityCandidateBundle
     manifest_sha256: str
+
+
+@dataclass(frozen=True)
+class PrideMaxQuantEvidence:
+    source: ExternalCapacitySource
+    measurement: RawCapacityMeasurement
+    raw_values: tuple[float, ...]
+    sample_ids: tuple[str, ...]
+    mapping_evidence: tuple[str, ...]
+    source_bundle_sha256: str
+    artifact_sha256s: Mapping[str, str]
+    quantitative_boundary: Mapping[str, Any]
 
 
 def write_external_capacity_candidate_cache(
@@ -215,9 +228,236 @@ def import_capacity_measurements(
     source.validate()
     return source, measurements
 
+
+def parse_pride_maxquant_g6pdh2_evidence(
+    source: ExternalCapacitySource,
+) -> PrideMaxQuantEvidence:
+    """Parse a cached PRIDE MaxQuant bundle without treating iBAQ as absolute."""
+
+    source.validate()
+    if source.source_type is not ExternalCapacitySourceType.QUANTITATIVE_PROTEOMICS:
+        raise OECapacityValidationError(
+            "PRIDE MaxQuant parsing requires a quantitative_proteomics source."
+        )
+    if source.adapter_id != "pcsec_pichia.pride.maxquant":
+        raise OECapacityValidationError("unsupported PRIDE quantitative adapter_id.")
+    bundle_path = Path(source.cache_path)
+    payload, bundle_sha256 = _load_json_object_snapshot_with_sha256(
+        bundle_path,
+        expected_sha256=source.raw_sha256,
+        label="PRIDE source bundle",
+    )
+    target = _as_object(payload.get("target"), "PRIDE target")
+    condition_payload = _as_object(payload.get("condition"), "PRIDE condition")
+    artifacts = _as_object(payload.get("artifacts"), "PRIDE artifacts")
+    protein_groups_path = _resolve_source_bundle_artifact(
+        bundle_path,
+        _as_object(artifacts.get("protein_groups"), "PRIDE protein_groups"),
+    )
+    sample_map_path = _resolve_source_bundle_artifact(
+        bundle_path,
+        _as_object(artifacts.get("sample_map"), "PRIDE sample_map"),
+    )
+    database_fasta_path = _resolve_source_bundle_artifact(
+        bundle_path,
+        _as_object(artifacts.get("database_fasta"), "PRIDE database_fasta"),
+    )
+    query_fasta_path = _resolve_source_bundle_artifact(
+        bundle_path,
+        _as_object(artifacts.get("query_fasta"), "PRIDE query_fasta"),
+    )
+    sample_ids = tuple(str(value) for value in target.get("sample_ids") or ())
+    if not sample_ids:
+        raise OECapacityValidationError("PRIDE target requires sample_ids.")
+    metric_name = str(target.get("metric_name") or "")
+    external_protein_id = str(target.get("external_protein_id") or "")
+    query_protein_id = str(target.get("query_protein_id") or "")
+    external_gene_id = str(target.get("external_gene_id") or "")
+    for value, name in (
+        (metric_name, "metric_name"),
+        (external_protein_id, "external_protein_id"),
+        (query_protein_id, "query_protein_id"),
+    ):
+        if not value:
+            raise OECapacityValidationError(f"PRIDE target requires {name}.")
+    _validate_pride_sample_map(sample_map_path, sample_ids)
+    row = _find_maxquant_protein_row(protein_groups_path, external_protein_id)
+    raw_values = _maxquant_metric_values(row, metric_name, sample_ids)
+    query_header, query_sequence = _fasta_record_by_accession(
+        query_fasta_path,
+        query_protein_id,
+    )
+    external_header, external_sequence = _fasta_record_by_accession(
+        database_fasta_path,
+        external_protein_id,
+    )
+    if query_sequence != external_sequence:
+        raise OECapacityValidationError(
+            "PRIDE external protein is not an exact sequence match for the query protein."
+        )
+    condition = _condition_from_dict(condition_payload)
+    nominal = float(statistics.median(raw_values))
+    measurement = RawCapacityMeasurement(
+        measurement_id=(
+            f"{source.source_id}:{external_protein_id}:"
+            f"{condition.oxygen_condition}:{metric_name}"
+        ),
+        source_id=source.source_id,
+        parameter_kind=CapacityParameterKind.ABUNDANCE,
+        nominal_value=nominal,
+        lower_bound=min(raw_values),
+        upper_bound=max(raw_values),
+        unit=f"{metric_name.strip().lower()}_intensity",
+        condition=condition,
+        external_gene_id=external_gene_id,
+        external_protein_id=external_protein_id,
+        biomass_basis=condition.biomass_basis,
+        notes=json.dumps(
+            {
+                "aggregation": "median_positive_replicates",
+                "raw_values": list(raw_values),
+                "sample_ids": list(sample_ids),
+                "query_fasta_header": query_header,
+                "external_fasta_header": external_header,
+                "absolute_abundance": False,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        ),
+    )
+    measurement.validate()
+    quantitative_boundary = _as_object(
+        payload.get("quantitative_boundary"),
+        "PRIDE quantitative_boundary",
+    )
+    artifact_sha256s = {
+        role: str(_as_object(record, f"PRIDE {role}").get("sha256") or "")
+        for role, record in artifacts.items()
+    }
+    for role, sha256 in artifact_sha256s.items():
+        _require_sha256(sha256, f"PRIDE {role} sha256")
+    return PrideMaxQuantEvidence(
+        source=source,
+        measurement=measurement,
+        raw_values=raw_values,
+        sample_ids=sample_ids,
+        mapping_evidence=(
+            f"pride:{payload.get('project_accession')}",
+            f"uniprot:{query_protein_id}",
+            f"pride_protein:{external_protein_id}",
+            f"exact_sequence_identity:{len(query_sequence)}/{len(query_sequence)}",
+        ),
+        source_bundle_sha256=bundle_sha256,
+        artifact_sha256s=artifact_sha256s,
+        quantitative_boundary=quantitative_boundary,
+    )
+
 def _source_artifact_matches(source: ExternalCapacitySource) -> bool:
     path = Path(source.cache_path)
     return path.is_file() and _sha256_file(path) == source.raw_sha256
+
+
+def _resolve_source_bundle_artifact(
+    bundle_path: Path,
+    record: Mapping[str, Any],
+) -> Path:
+    filename = str(record.get("filename") or "")
+    if not filename or Path(filename).name != filename:
+        raise OECapacityValidationError(
+            "PRIDE source artifact filename must be a basename."
+        )
+    root = bundle_path.parent.resolve()
+    path = (root / filename).resolve()
+    if path.parent != root or not path.is_file():
+        raise OECapacityValidationError(
+            "PRIDE source artifact is missing or outside the source bundle."
+        )
+    expected_sha256 = str(record.get("sha256") or "")
+    _require_sha256(expected_sha256, "PRIDE source artifact sha256")
+    if _sha256_file(path) != expected_sha256.lower():
+        raise OECapacityValidationError("PRIDE source artifact sha256 mismatch.")
+    return path
+
+
+def _validate_pride_sample_map(path: Path, sample_ids: Sequence[str]) -> None:
+    with path.open("r", encoding="utf-8-sig", newline="") as handle:
+        rows = tuple(csv.DictReader(handle, delimiter="\t"))
+    available = {str(row.get("protein groups.txt") or "") for row in rows}
+    missing = tuple(sample_id for sample_id in sample_ids if sample_id not in available)
+    if missing:
+        raise OECapacityValidationError(
+            "PRIDE sample map is missing selected sample IDs: " + ", ".join(missing)
+        )
+
+
+def _find_maxquant_protein_row(
+    path: Path,
+    external_protein_id: str,
+) -> Mapping[str, Any]:
+    matches: list[Mapping[str, Any]] = []
+    with path.open("r", encoding="utf-8-sig", newline="") as handle:
+        for row in csv.DictReader(handle, delimiter="\t"):
+            identifiers = {
+                identifier.strip()
+                for field_name in ("Protein IDs", "Majority protein IDs")
+                for identifier in str(row.get(field_name) or "").split(";")
+                if identifier.strip()
+            }
+            if external_protein_id in identifiers:
+                matches.append(row)
+    if len(matches) != 1:
+        raise OECapacityValidationError(
+            "PRIDE MaxQuant table requires exactly one target protein row."
+        )
+    return matches[0]
+
+
+def _maxquant_metric_values(
+    row: Mapping[str, Any],
+    metric_name: str,
+    sample_ids: Sequence[str],
+) -> tuple[float, ...]:
+    values: list[float] = []
+    for sample_id in sample_ids:
+        column = f"{metric_name} {sample_id}"
+        raw = row.get(column)
+        if raw in (None, ""):
+            raise OECapacityValidationError(
+                f"PRIDE MaxQuant table is missing quantitative column {column}."
+            )
+        value = _float(raw, column)
+        if value <= 0:
+            raise OECapacityValidationError(
+                f"PRIDE quantitative value must be positive for selected sample {sample_id}."
+            )
+        values.append(value)
+    return tuple(values)
+
+
+def _fasta_record_by_accession(path: Path, accession: str) -> tuple[str, str]:
+    records: list[tuple[str, str]] = []
+    header = ""
+    sequence: list[str] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.startswith(">"):
+            if header:
+                records.append((header, "".join(sequence)))
+            header = line[1:].strip()
+            sequence = []
+        elif header:
+            sequence.append(line.strip())
+    if header:
+        records.append((header, "".join(sequence)))
+    matches = tuple(
+        (item_header, item_sequence)
+        for item_header, item_sequence in records
+        if accession in item_header.split()[0].split("|")
+    )
+    if len(matches) != 1 or not matches[0][1]:
+        raise OECapacityValidationError(
+            f"FASTA requires exactly one non-empty record for {accession}."
+        )
+    return matches[0]
 
 def _measurement_from_import_row(row: Mapping[str, Any], *, source_id: str) -> RawCapacityMeasurement:
     condition_payload = row.get("condition") if isinstance(row.get("condition"), Mapping) else row

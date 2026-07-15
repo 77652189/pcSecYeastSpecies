@@ -2,16 +2,18 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Callable, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 from pcsec_pichia.external_refs.capacity_sources import (
     ExternalCapacitySourceType,
+    PXD055501_G6PDH2_PROFILE,
     RetrievalMode,
+    cache_pride_maxquant_source,
     cache_uniprot_identity_source,
 )
 from pcsec_pichia.loading import load_pcsec_pichia_inputs
@@ -24,6 +26,7 @@ from pcsec_pichia.oe_capacity.external_candidate_io import (
     import_capacity_measurements,
     load_external_capacity_candidate_bundle,
     load_external_capacity_candidate_snapshot,
+    parse_pride_maxquant_g6pdh2_evidence,
     write_external_capacity_candidate_cache,
 )
 from pcsec_pichia.oe_capacity.external_candidate_promotion import (
@@ -62,6 +65,8 @@ class ExternalCapacityAuditRequest:
     output_dir: Path
     offline_replay: bool = False
     identity_cache_dir: Path | None = None
+    quantitative_cache_dir: Path | None = None
+    pride_pxd055501: bool = False
     measurement_file: Path | None = None
     source_id: str = ""
     source_type: ExternalCapacitySourceType = (
@@ -423,6 +428,10 @@ def run_external_capacity_candidate_audit(
 ) -> ExternalCapacityAuditOutputs:
     output_dir = Path(request.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    if request.pride_pxd055501 and request.measurement_file is not None:
+        raise ValueError(
+            "pride_pxd055501 and measurement_file are mutually exclusive source paths."
+        )
     identity_source = cache_uniprot_identity_source(
         G6PDH2_GENE_ID,
         request.identity_cache_dir or (output_dir / "identity_source"),
@@ -432,6 +441,64 @@ def run_external_capacity_candidate_audit(
             else RetrievalMode.ONLINE
         ),
     )
+    capacity_sources = []
+    measurements = ()
+    source_assessments: list[dict[str, Any]] = []
+    pride_evidence = None
+    if request.pride_pxd055501:
+        pride_source = cache_pride_maxquant_source(
+            PXD055501_G6PDH2_PROFILE,
+            request.quantitative_cache_dir
+            or (output_dir / "quantitative_source"),
+            retrieval_mode=(
+                RetrievalMode.OFFLINE_REPLAY
+                if request.offline_replay
+                else RetrievalMode.ONLINE
+            ),
+        )
+        pride_evidence = parse_pride_maxquant_g6pdh2_evidence(pride_source)
+        capacity_sources.append(pride_source)
+        measurements = (pride_evidence.measurement,)
+        runtime_condition = pride_evidence.measurement.condition
+        source_assessments.append(
+            {
+                "source_id": pride_source.source_id,
+                "project_accession": PXD055501_G6PDH2_PROFILE.project_accession,
+                "raw_metric": PXD055501_G6PDH2_PROFILE.metric_name,
+                "raw_values": list(pride_evidence.raw_values),
+                "raw_unit": pride_evidence.measurement.unit,
+                "sample_ids": list(pride_evidence.sample_ids),
+                "source_bundle_sha256": pride_evidence.source_bundle_sha256,
+                "artifact_sha256s": dict(pride_evidence.artifact_sha256s),
+                "source_version": pride_source.source_version,
+                "source_url": pride_source.source_url,
+                "license_id": pride_source.license_id,
+                "license_url": pride_source.license_url,
+                "mapping_evidence": list(pride_evidence.mapping_evidence),
+                "condition": asdict(pride_evidence.measurement.condition),
+                "condition_source_ref": PXD055501_G6PDH2_PROFILE.condition_source,
+                "quantitative_boundary": dict(pride_evidence.quantitative_boundary),
+                "formal_context_id": _context_id(
+                    request.carbon_source_id, request.growth_rate
+                ),
+                "source_context_id": _context_id(
+                    runtime_condition.carbon_source,
+                    runtime_condition.growth_rate_per_h,
+                ),
+                "formal_context_match": (
+                    runtime_condition.carbon_source.strip().lower()
+                    == request.carbon_source_id.strip().lower()
+                    and abs(
+                        runtime_condition.growth_rate_per_h - request.growth_rate
+                    )
+                    <= 1e-12
+                ),
+                "promotion_ready": False,
+                "assessment": "quantitative_relative_only",
+            }
+        )
+    else:
+        runtime_condition = _default_host_condition(request)
     asset_sha = capacity_asset_version(request.repo_root)
     bindings = []
     fingerprints = []
@@ -440,33 +507,82 @@ def run_external_capacity_candidate_audit(
         runtime = prepare_external_candidate_runtime(
             request.repo_root,
             target_id=target_id,
-            growth_rate=request.growth_rate,
-            carbon_source_id=request.carbon_source_id,
+            growth_rate=runtime_condition.growth_rate_per_h,
+            carbon_source_id=runtime_condition.carbon_source,
             relative_uncertainty=request.relative_uncertainty,
             expected_asset_sha256=asset_sha,
         )
         binding = build_capacity_model_binding(
             runtime.gene_capacity_catalog,
             target_id=target_id,
-            context_id=_context_id(request.carbon_source_id, request.growth_rate),
+            context_id=_context_id(
+                runtime_condition.carbon_source,
+                runtime_condition.growth_rate_per_h,
+            ),
             gene_id=G6PDH2_GENE_ID,
-            external_gene_id=G6PDH2_GENE_ID,
-            external_protein_id="C4R099",
+            external_gene_id=(
+                pride_evidence.measurement.external_gene_id
+                if pride_evidence is not None
+                else G6PDH2_GENE_ID
+            ),
+            external_protein_id=(
+                pride_evidence.measurement.external_protein_id
+                if pride_evidence is not None
+                else "C4R099"
+            ),
             mapping_evidence=(
                 "uniprot:C4R099",
                 "ncbi_gene:8198996",
                 "kegg:ppa:PAS_chr2-1_0308",
                 "refseq:XP_002491203.1",
                 "ec:1.1.1.49",
+                *(
+                    pride_evidence.mapping_evidence
+                    if pride_evidence is not None
+                    else ()
+                ),
             ),
         )
         bindings.append(binding)
         fingerprints.append(binding.model_fingerprint)
         catalogs[target_id] = runtime.gene_capacity_catalog
-    capacity_sources = []
-    measurements = ()
     candidates = ()
-    if request.measurement_file is not None:
+    if pride_evidence is not None:
+        candidate = build_capacity_candidate(
+            candidate_id="g6pdh2-pride-pxd055501-t0-ibaq",
+            applicability_scope=CapacityApplicabilityScope.HOST_CONDITION,
+            model_bindings=tuple(bindings),
+            catalogs=catalogs,
+            sources=tuple(capacity_sources),
+            condition=pride_evidence.measurement.condition,
+            abundance=pride_evidence.measurement,
+            confidence=CapacityConfidence.LOW,
+        )
+        formal_context_matches = source_assessments[0]["formal_context_match"] is True
+        if not formal_context_matches:
+            candidate = replace(
+                candidate,
+                status=CapacityCandidateStatus.REVIEW_REQUIRED,
+                missing_information=tuple(
+                    dict.fromkeys(
+                        (
+                            *candidate.missing_information,
+                            "formal_glucose_mu_0.1_condition_match",
+                        )
+                    )
+                ),
+                warnings=tuple(
+                    dict.fromkeys(
+                        (
+                            *candidate.warnings,
+                            "source_context_glucose_mu_0.075_not_formal_glucose_mu_0.1",
+                        )
+                    )
+                ),
+            )
+            candidate.validate()
+        candidates = (candidate,)
+    elif request.measurement_file is not None:
         if not request.source_id.strip():
             raise ValueError("source_id is required with measurement_file.")
         capacity_source, measurements = import_capacity_measurements(
@@ -547,6 +663,7 @@ def run_external_capacity_candidate_audit(
         measurements=measurements,
         candidates=candidates,
         bindings=bindings,
+        source_assessments=source_assessments,
         candidate_manifest=candidate_outputs.manifest_path,
         candidate_manifest_sha256=candidate_outputs.bundle_sha256,
     )
@@ -564,7 +681,7 @@ def run_external_capacity_candidate_audit(
     )
     audit_markdown_path = output_dir / "g6pdh2_capacity_candidate_audit.md"
     audit_markdown_path.write_text(
-        _render_audit_markdown(candidates), encoding="utf-8"
+        _render_audit_markdown(candidates, source_assessments), encoding="utf-8"
     )
     return ExternalCapacityAuditOutputs(
         audit_json_path=audit_json_path,
@@ -583,6 +700,7 @@ def _build_audit_payload(
     measurements: Sequence[Any],
     candidates: Sequence[Any],
     bindings: Sequence[Any],
+    source_assessments: Sequence[Mapping[str, Any]],
     candidate_manifest: Path,
     candidate_manifest_sha256: str,
 ) -> dict[str, Any]:
@@ -594,6 +712,7 @@ def _build_audit_payload(
         "formation_handle": G6PDH2_FORMATION_HANDLE,
         "targets": list(request.target_ids),
         "context_id": _context_id(request.carbon_source_id, request.growth_rate),
+        "source_assessments": [dict(item) for item in source_assessments],
         "sources_checked": [
             {
                 **asdict(identity_source),
@@ -602,7 +721,12 @@ def _build_audit_payload(
             },
             {
                 "source": "same-host quantitative Pichia proteomics",
-                "status": "manual_import_required",
+                "status": (
+                    "parsed_relative_quantitative_evidence"
+                    if source_assessments
+                    else "manual_import_required"
+                ),
+                "quantitative_value_available": bool(source_assessments),
                 "capacity_value_available": False,
             },
             {
@@ -670,7 +794,10 @@ def _build_audit_payload(
     }
 
 
-def _render_audit_markdown(candidates: Sequence[Any]) -> str:
+def _render_audit_markdown(
+    candidates: Sequence[Any],
+    source_assessments: Sequence[Mapping[str, Any]],
+) -> str:
     ready_count = sum(
         1 for item in candidates if item.status is CapacityCandidateStatus.REVIEW_READY
     )
@@ -679,12 +806,33 @@ def _render_audit_markdown(candidates: Sequence[Any]) -> str:
         if candidates and candidates[0].status is CapacityCandidateStatus.REVIEW_READY
         else "- Missing: reviewed condition-matched abundance/direct capacity and conversion metadata.\n"
     )
+    assessment_lines = ""
+    if source_assessments:
+        assessment = source_assessments[0]
+        assessment_lines = (
+            f"- Quantitative source: {assessment.get('project_accession')} "
+            f"({assessment.get('raw_metric')}, unit={assessment.get('raw_unit')}).\n"
+            f"- Source version/license: {assessment.get('source_version')}; "
+            f"{assessment.get('license_id')} ({assessment.get('license_url')}).\n"
+            f"- Source URL: {assessment.get('source_url')}.\n"
+            f"- Source bundle SHA-256: {assessment.get('source_bundle_sha256')}.\n"
+            f"- Protein-groups SHA-256: "
+            f"{dict(assessment.get('artifact_sha256s') or {}).get('protein_groups')}.\n"
+            f"- Raw replicate values: {assessment.get('raw_values')}.\n"
+            f"- Source condition: {assessment.get('condition')}.\n"
+            f"- Condition source: {assessment.get('condition_source_ref')}.\n"
+            "- Unit chain: iBAQ intensity -> retained raw quantitative evidence; "
+            "model_flux unavailable.\n"
+            "- Boundary: relative quantitative evidence only; absolute abundance, "
+            "biomass normalization, paired kcat, and formal glucose mu=0.1 match are missing.\n"
+        )
     return (
         "# G6PDH2 external capacity candidate audit\n\n"
         f"- Candidate count: {len(candidates)}.\n"
         f"- Promotion-ready count: {ready_count}.\n"
         "- UniProt: C4R099 confirms PAS_chr2-1_0308 identity only.\n"
         "- hLF and OPN retain separate current-model fingerprints and bindings.\n"
+        + assessment_lines
         + missing_line
         + "- Promotion: not performed.\n"
         + "- Forbidden fallbacks: 1000 upper bound, optimal flux, fixed 1.0, fixture were not used.\n"

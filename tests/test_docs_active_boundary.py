@@ -79,7 +79,9 @@ def test_next_plan_runs_external_capacity_candidates_before_final_acceptance() -
     assert "Round 6B：hLF/OPN 正式重验收" in text
     assert "不得进入 Phase 3" in text
     assert "不得生成 Phase 3 Round 0 提示词" in text
-    assert "A0b 真实定量来源接入 checkpoint" in current_next_step
+    assert "继续 Round 6A 的 A0b quantitative source acquisition" in current_next_step
+    assert "PXD055501" in current_next_step
+    assert "不是 absolute baseline capacity" in current_next_step
     assert "执行 Round 6A 的 A0a" not in current_next_step
 
 
@@ -89,7 +91,9 @@ def test_handoff_points_to_quantitative_source_checkpoint() -> None:
     assert "current_round: round_6a_external_capacity_candidates" in text
     assert "round_status: in_progress" in text
     assert "current_checkpoint: a0b_quantitative_source" in text
-    assert "checkpoint_status: ready" in text
+    assert "checkpoint_status: in_progress_absolute_capacity_gap" in text
     assert "A0a 结构收束已完成" in text
-    assert "尚未接入真实定量来源" in text
+    assert "PXD055501" in text
+    assert "promotion_ready=false" in text
+    assert "Round 6A 保持 `in_progress`" in text
     assert "未开始 Round 6B 或 Phase 3" in text

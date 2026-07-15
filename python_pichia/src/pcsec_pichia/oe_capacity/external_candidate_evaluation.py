@@ -180,6 +180,30 @@ def build_capacity_candidate(
     else:
         missing.append("baseline_capacity_or_abundance_and_kcat")
         low = nominal = high = None
+        raw_evidence = abundance or kcat
+        if raw_evidence is not None:
+            missing_metadata = (
+                (
+                    "absolute_abundance_calibration",
+                    "biomass_normalization",
+                    "paired_condition_matched_kcat",
+                )
+                if raw_evidence is abundance
+                else ("condition_matched_absolute_abundance",)
+            )
+            steps.append(
+                CapacityConversionStep(
+                    step_id=f"retain-raw-{raw_evidence.parameter_kind.value}-evidence",
+                    input_value=raw_evidence.nominal_value,
+                    input_unit=raw_evidence.unit,
+                    output_value=raw_evidence.nominal_value,
+                    output_unit=raw_evidence.unit,
+                    formula="identity; retain quantitative evidence without canonical conversion",
+                    factor=1.0,
+                    source_ref=raw_evidence.measurement_id,
+                    missing_metadata=missing_metadata,
+                )
+            )
     resolved_bindings = tuple(model_bindings)
     for binding in resolved_bindings:
         _validate_binding_against_catalog(binding, catalogs.get(binding.target_id))

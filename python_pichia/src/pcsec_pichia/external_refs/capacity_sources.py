@@ -7,7 +7,7 @@ import tempfile
 from dataclasses import asdict, dataclass, replace
 from enum import Enum
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 from pcsec_pichia.external_refs.clients import (
     ExternalFetchConfig,
@@ -15,6 +15,7 @@ from pcsec_pichia.external_refs.clients import (
     default_http_get,
 )
 from pcsec_pichia.external_refs.queries import ExternalReferenceQuery
+from pcsec_pichia.external_refs.schema import utc_now_iso
 from pcsec_pichia.external_refs.uniprot import build_uniprot_url, fetch_uniprot_reference
 from pcsec_pichia.errors import OECapacityValidationError
 
@@ -34,6 +35,56 @@ class RetrievalMode(str, Enum):
     ONLINE = "online"
     MANUAL_IMPORT = "manual_import"
     OFFLINE_REPLAY = "offline_replay"
+
+
+@dataclass(frozen=True)
+class PrideMaxQuantSourceProfile:
+    project_accession: str
+    protein_groups_filename: str
+    sample_map_filename: str
+    database_fasta_filename: str
+    query_fasta_url: str
+    query_protein_id: str
+    external_gene_id: str
+    external_protein_id: str
+    sample_ids: tuple[str, ...]
+    metric_name: str
+    species: str
+    strain: str
+    medium: str
+    carbon_source: str
+    culture_mode: str
+    growth_rate_per_h: float
+    temperature_c: float
+    ph: float
+    oxygen_condition: str
+    biomass_basis: str
+    condition_source: str
+
+
+PXD055501_G6PDH2_PROFILE = PrideMaxQuantSourceProfile(
+    project_accession="PXD055501",
+    protein_groups_filename="lfq_proteinGroups_PRIDE.txt",
+    sample_map_filename="sample_names.txt",
+    database_fasta_filename="database.fasta",
+    query_fasta_url="https://rest.uniprot.org/uniprotkb/C4R099.fasta",
+    query_protein_id="C4R099",
+    external_gene_id="ZWF1",
+    external_protein_id="F2QTE5",
+    sample_ids=("WT_T1_ft2", "WT_T1_ft3", "WT_T1_ft4"),
+    metric_name="iBAQ",
+    species="Komagataella phaffii",
+    strain="CBS7435 wild-type",
+    medium="glucose-limited defined chemostat medium",
+    carbon_source="glucose",
+    culture_mode="chemostat",
+    growth_rate_per_h=0.075,
+    temperature_c=25.0,
+    ph=5.5,
+    oxygen_condition="normoxic T0",
+    biomass_basis="relative_iBAQ_intensity_not_biomass_normalized",
+    condition_source="PXD055501; doi:10.1111/1751-7915.70106",
+)
 
 
 @dataclass(frozen=True)
@@ -157,6 +208,406 @@ def cache_uniprot_identity_source(
     return source
 
 
+def cache_pride_maxquant_source(
+    profile: PrideMaxQuantSourceProfile,
+    output_dir: str | Path,
+    *,
+    http_get: Any = None,
+    retrieval_mode: RetrievalMode = RetrievalMode.ONLINE,
+) -> ExternalCapacitySource:
+    """Cache one reviewed PRIDE MaxQuant source without interpreting its values."""
+
+    _validate_pride_profile(profile)
+    root = Path(output_dir)
+    raw_dir = root / "raw"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    safe_accession = _safe_name(profile.project_accession)
+    bundle_path = raw_dir / f"pride-{safe_accession}.bundle.json"
+    metadata_path = root / f"pride-{safe_accession}.source.json"
+    if retrieval_mode is RetrievalMode.OFFLINE_REPLAY:
+        if not bundle_path.is_file() or not metadata_path.is_file():
+            raise _validation_error(
+                f"offline PRIDE cache is incomplete for {profile.project_accession}."
+            )
+        cached = _source_from_dict(_load_json_object(metadata_path))
+        cached.validate()
+        if _sha256_file(bundle_path) != cached.raw_sha256:
+            raise _validation_error("offline PRIDE source bundle sha256 mismatch.")
+        _validate_pride_bundle(bundle_path, profile)
+        replayed = replace(
+            cached,
+            retrieval_mode=RetrievalMode.OFFLINE_REPLAY,
+            cache_path=str(bundle_path),
+            raw_sha256=_sha256_file(bundle_path),
+        )
+        _validate_pride_source_coherence(replayed, bundle_path, profile)
+        return replayed
+
+    config = ExternalFetchConfig(sources=("pride",), timeout_seconds=60.0)
+    getter = http_get or default_http_get
+    project_url = _pride_project_url(profile.project_accession)
+    files_url = _pride_files_url(profile.project_accession)
+    project_response = _fetch_text(project_url, getter, config, "PRIDE project")
+    files_response = _fetch_text(files_url, getter, config, "PRIDE files")
+    project_payload = _as_mapping_json(project_response.text, "PRIDE project")
+    files_payload = _as_sequence_json(files_response.text, "PRIDE files")
+    if str(project_payload.get("accession") or "") != profile.project_accession:
+        raise _validation_error("PRIDE project accession mismatch.")
+
+    project_path = raw_dir / f"{safe_accession}.project.json"
+    files_path = raw_dir / f"{safe_accession}.files.json"
+    _atomic_write_text(project_path, project_response.text)
+    _atomic_write_text(files_path, files_response.text)
+    selected: dict[str, dict[str, object]] = {}
+    file_roles = {
+        "protein_groups": profile.protein_groups_filename,
+        "sample_map": profile.sample_map_filename,
+        "database_fasta": profile.database_fasta_filename,
+    }
+    for role, filename in file_roles.items():
+        entry = _pride_file_entry(files_payload, filename)
+        download_url = _pride_https_download_url(entry)
+        response = _fetch_text(download_url, getter, config, f"PRIDE {role}")
+        destination = raw_dir / _safe_name(filename)
+        _atomic_write_text(destination, response.text)
+        expected_size = int(entry.get("fileSizeBytes") or 0)
+        if expected_size and destination.stat().st_size != expected_size:
+            raise _validation_error(f"PRIDE {role} file size mismatch.")
+        selected[role] = {
+            "filename": destination.name,
+            "download_url": download_url,
+            "sha256": _sha256_file(destination),
+            "file_size_bytes": destination.stat().st_size,
+            "pride_file_accession": str(entry.get("accession") or ""),
+        }
+    query_response = _fetch_text(
+        profile.query_fasta_url,
+        getter,
+        config,
+        "UniProt query FASTA",
+    )
+    query_path = raw_dir / f"{_safe_name(profile.query_protein_id)}.fasta"
+    _atomic_write_text(query_path, query_response.text)
+    selected["query_fasta"] = {
+        "filename": query_path.name,
+        "download_url": profile.query_fasta_url,
+        "sha256": _sha256_file(query_path),
+        "file_size_bytes": query_path.stat().st_size,
+    }
+
+    raw_license = str(project_payload.get("license") or "")
+    license_id, license_url, terms_reviewed = _normalize_pride_license(raw_license)
+    publication_date = str(project_payload.get("publicationDate") or "").split("T", 1)[0]
+    warnings = [
+        "relative_ibaq_not_absolute_abundance",
+        "source_growth_rate_0.075_not_formal_growth_rate_0.1",
+    ]
+    if not publication_date:
+        warnings.append("source_version_review_required")
+    if not terms_reviewed:
+        warnings.append("license_review_required")
+    condition = {
+        "species": profile.species,
+        "strain": profile.strain,
+        "medium": profile.medium,
+        "carbon_source": profile.carbon_source,
+        "culture_mode": profile.culture_mode,
+        "growth_rate_per_h": profile.growth_rate_per_h,
+        "temperature_c": profile.temperature_c,
+        "ph": profile.ph,
+        "oxygen_condition": profile.oxygen_condition,
+        "biomass_basis": profile.biomass_basis,
+        "source_ref": profile.condition_source,
+    }
+    bundle = {
+        "schema_version": 1,
+        "adapter_id": "pcsec_pichia.pride.maxquant",
+        "adapter_version": "1",
+        "project_accession": profile.project_accession,
+        "project_title": str(project_payload.get("title") or ""),
+        "project_publication_date": publication_date,
+        "project_license_raw": raw_license,
+        "project_metadata": {
+            "filename": project_path.name,
+            "sha256": _sha256_file(project_path),
+            "source_url": project_url,
+        },
+        "files_metadata": {
+            "filename": files_path.name,
+            "sha256": _sha256_file(files_path),
+            "source_url": files_url,
+        },
+        "artifacts": selected,
+        "target": {
+            "query_protein_id": profile.query_protein_id,
+            "external_gene_id": profile.external_gene_id,
+            "external_protein_id": profile.external_protein_id,
+            "metric_name": profile.metric_name,
+            "sample_ids": list(profile.sample_ids),
+        },
+        "condition": condition,
+        "quantitative_boundary": {
+            "raw_value_available": True,
+            "absolute_abundance_available": False,
+            "model_flux_conversion_available": False,
+            "missing": [
+                "absolute abundance calibration",
+                "biomass-normalized enzyme amount",
+                "paired condition-matched kcat",
+                "formal glucose_mu_0.1 condition match",
+            ],
+        },
+    }
+    _atomic_write_json(bundle_path, bundle)
+    source = ExternalCapacitySource(
+        source_id=f"pride:{profile.project_accession}",
+        source_type=ExternalCapacitySourceType.QUANTITATIVE_PROTEOMICS,
+        source_version=(
+            f"{profile.project_accession}:{publication_date}"
+            if publication_date
+            else "unversioned"
+        ),
+        source_url=project_url,
+        retrieved_at=utc_now_iso(),
+        query=json.dumps(
+            {
+                "project_accession": profile.project_accession,
+                "query_protein_id": profile.query_protein_id,
+                "external_gene_id": profile.external_gene_id,
+                "external_protein_id": profile.external_protein_id,
+                "metric_name": profile.metric_name,
+                "sample_ids": list(profile.sample_ids),
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        ),
+        raw_sha256=_sha256_file(bundle_path),
+        license_id=license_id,
+        license_url=license_url,
+        retrieval_mode=RetrievalMode.ONLINE,
+        cache_path=str(bundle_path),
+        adapter_id="pcsec_pichia.pride.maxquant",
+        adapter_version="1",
+        terms_reviewed=terms_reviewed,
+        warnings=tuple(warnings),
+    )
+    source.validate()
+    _atomic_write_json(metadata_path, _json_ready(asdict(source)))
+    _validate_pride_bundle(bundle_path, profile)
+    _validate_pride_source_coherence(source, bundle_path, profile)
+    return source
+
+
+def _validate_pride_profile(profile: PrideMaxQuantSourceProfile) -> None:
+    for field_name in (
+        "project_accession",
+        "protein_groups_filename",
+        "sample_map_filename",
+        "database_fasta_filename",
+        "query_fasta_url",
+        "query_protein_id",
+        "external_gene_id",
+        "external_protein_id",
+        "metric_name",
+        "species",
+        "strain",
+        "medium",
+        "carbon_source",
+        "culture_mode",
+        "biomass_basis",
+        "condition_source",
+    ):
+        _require_text(getattr(profile, field_name), field_name)
+    if not profile.sample_ids:
+        raise _validation_error("PRIDE profile requires sample_ids.")
+    if profile.growth_rate_per_h <= 0 or profile.temperature_c <= 0 or profile.ph <= 0:
+        raise _validation_error("PRIDE profile condition values must be positive.")
+
+
+def _pride_project_url(accession: str) -> str:
+    return f"https://www.ebi.ac.uk/pride/ws/archive/v2/projects/{accession}"
+
+
+def _pride_files_url(accession: str) -> str:
+    return f"{_pride_project_url(accession)}/files"
+
+
+def _fetch_text(
+    url: str,
+    getter: Any,
+    config: ExternalFetchConfig,
+    label: str,
+) -> ExternalHttpResponse:
+    response = getter(url, config)
+    if not 200 <= response.status_code < 300:
+        raise _validation_error(
+            f"{label} fetch failed with HTTP {response.status_code}."
+        )
+    if not response.text:
+        raise _validation_error(f"{label} response is empty.")
+    return response
+
+
+def _as_mapping_json(text: str, label: str) -> Mapping[str, Any]:
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise _validation_error(f"{label} response is not valid JSON.") from exc
+    if not isinstance(payload, Mapping):
+        raise _validation_error(f"{label} response must be an object.")
+    return payload
+
+
+def _as_sequence_json(text: str, label: str) -> Sequence[Mapping[str, Any]]:
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise _validation_error(f"{label} response is not valid JSON.") from exc
+    if not isinstance(payload, list) or any(
+        not isinstance(item, Mapping) for item in payload
+    ):
+        raise _validation_error(f"{label} response must be an array of objects.")
+    return payload
+
+
+def _pride_file_entry(
+    files: Sequence[Mapping[str, Any]],
+    filename: str,
+) -> Mapping[str, Any]:
+    matches = tuple(item for item in files if item.get("fileName") == filename)
+    if len(matches) != 1:
+        raise _validation_error(
+            f"PRIDE project must contain exactly one file named {filename}."
+        )
+    return matches[0]
+
+
+def _pride_https_download_url(entry: Mapping[str, Any]) -> str:
+    locations = entry.get("publicFileLocations")
+    if not isinstance(locations, list):
+        raise _validation_error("PRIDE file has no public locations.")
+    for location in locations:
+        if not isinstance(location, Mapping):
+            continue
+        value = str(location.get("value") or "")
+        if value.startswith("ftp://ftp.pride.ebi.ac.uk/"):
+            return "https://ftp.pride.ebi.ac.uk/" + value.split(
+                "ftp://ftp.pride.ebi.ac.uk/", 1
+            )[1]
+    raise _validation_error("PRIDE file has no supported HTTPS download URL.")
+
+
+def _normalize_pride_license(raw_license: str) -> tuple[str, str, bool]:
+    if "CC0" in raw_license.upper() or "PUBLIC DOMAIN" in raw_license.upper():
+        return (
+            "CC0-1.0",
+            "https://creativecommons.org/publicdomain/zero/1.0/",
+            True,
+        )
+    return "unreviewed", "", False
+
+
+def _validate_pride_bundle(
+    bundle_path: Path,
+    profile: PrideMaxQuantSourceProfile,
+) -> None:
+    bundle = _load_json_object(bundle_path)
+    if bundle.get("schema_version") != 1:
+        raise _validation_error("PRIDE source bundle requires schema_version=1.")
+    if bundle.get("project_accession") != profile.project_accession:
+        raise _validation_error("PRIDE source bundle project mismatch.")
+    root = bundle_path.parent.resolve()
+    records: list[Mapping[str, Any]] = []
+    for key in ("project_metadata", "files_metadata"):
+        value = bundle.get(key)
+        if not isinstance(value, Mapping):
+            raise _validation_error(f"PRIDE source bundle is missing {key}.")
+        records.append(value)
+    artifacts = bundle.get("artifacts")
+    if not isinstance(artifacts, Mapping):
+        raise _validation_error("PRIDE source bundle is missing artifacts.")
+    for role in ("protein_groups", "sample_map", "database_fasta", "query_fasta"):
+        value = artifacts.get(role)
+        if not isinstance(value, Mapping):
+            raise _validation_error(f"PRIDE source bundle is missing {role}.")
+        records.append(value)
+    for record in records:
+        filename = str(record.get("filename") or "")
+        if not filename or Path(filename).name != filename:
+            raise _validation_error("PRIDE source artifact filename must be a basename.")
+        path = (root / filename).resolve()
+        if path.parent != root or not path.is_file():
+            raise _validation_error("PRIDE source artifact is missing or outside cache.")
+        expected_sha256 = str(record.get("sha256") or "")
+        _require_sha256(expected_sha256, "PRIDE source artifact sha256")
+        if _sha256_file(path) != expected_sha256.lower():
+            raise _validation_error("PRIDE source artifact sha256 mismatch.")
+
+
+def _validate_pride_source_coherence(
+    source: ExternalCapacitySource,
+    bundle_path: Path,
+    profile: PrideMaxQuantSourceProfile,
+) -> None:
+    bundle = _load_json_object(bundle_path)
+    raw_license = str(bundle.get("project_license_raw") or "")
+    license_id, license_url, terms_reviewed = _normalize_pride_license(raw_license)
+    publication_date = str(bundle.get("project_publication_date") or "")
+    expected_version = (
+        f"{profile.project_accession}:{publication_date}"
+        if publication_date
+        else "unversioned"
+    )
+    expected = {
+        "source_id": f"pride:{profile.project_accession}",
+        "source_type": ExternalCapacitySourceType.QUANTITATIVE_PROTEOMICS,
+        "source_version": expected_version,
+        "source_url": _pride_project_url(profile.project_accession),
+        "license_id": license_id,
+        "license_url": license_url,
+        "adapter_id": "pcsec_pichia.pride.maxquant",
+        "adapter_version": "1",
+        "terms_reviewed": terms_reviewed,
+    }
+    for field_name, expected_value in expected.items():
+        if getattr(source, field_name) != expected_value:
+            raise _validation_error(
+                f"PRIDE source metadata does not match bundle field {field_name}."
+            )
+
+    target = bundle.get("target")
+    if not isinstance(target, Mapping):
+        raise _validation_error("PRIDE source bundle is missing target metadata.")
+    expected_target = {
+        "query_protein_id": profile.query_protein_id,
+        "external_gene_id": profile.external_gene_id,
+        "external_protein_id": profile.external_protein_id,
+        "metric_name": profile.metric_name,
+        "sample_ids": list(profile.sample_ids),
+    }
+    if dict(target) != expected_target:
+        raise _validation_error("PRIDE source bundle target metadata mismatch.")
+
+    condition = bundle.get("condition")
+    if not isinstance(condition, Mapping):
+        raise _validation_error("PRIDE source bundle is missing condition metadata.")
+    expected_condition = {
+        "species": profile.species,
+        "strain": profile.strain,
+        "medium": profile.medium,
+        "carbon_source": profile.carbon_source,
+        "culture_mode": profile.culture_mode,
+        "growth_rate_per_h": profile.growth_rate_per_h,
+        "temperature_c": profile.temperature_c,
+        "ph": profile.ph,
+        "oxygen_condition": profile.oxygen_condition,
+        "biomass_basis": profile.biomass_basis,
+        "source_ref": profile.condition_source,
+    }
+    if dict(condition) != expected_condition:
+        raise _validation_error("PRIDE source bundle condition metadata mismatch.")
+
+
 def _source_from_dict(item: Mapping[str, Any]) -> ExternalCapacitySource:
     return ExternalCapacitySource(
         source_id=str(item.get("source_id") or ""),
@@ -267,6 +718,9 @@ __all__ = [
     "ExternalCapacitySource",
     "ExternalCapacitySourceValidationError",
     "ExternalCapacitySourceType",
+    "PXD055501_G6PDH2_PROFILE",
+    "PrideMaxQuantSourceProfile",
     "RetrievalMode",
+    "cache_pride_maxquant_source",
     "cache_uniprot_identity_source",
 ]
