@@ -14,6 +14,10 @@ from pcsec_pichia.core.pichia_enzymes import (
     SecretoryEnzymeData,
 )
 from pcsec_pichia.oe_capacity import (
+    AbsoluteCapacityAvailability,
+    CapacityAnchorBinding,
+    CapacityAnchor,
+    CapacityAnchorCatalog,
     ConfidenceLevel,
     ConstraintChangeKind,
     EvidenceSourceType,
@@ -26,10 +30,15 @@ from pcsec_pichia.oe_capacity import (
     OECapacityValidationError,
     OEExecutionMode,
     OEExecutionStatus,
+    OECalibrationStatus,
+    OEProductMode,
+    OEProductState,
     ParameterEstimate,
     ParameterScenario,
     ResourceCostMode,
+    RelativeOEScenarioSpec,
     build_oe_capacity_constraints,
+    fingerprint_oe_capacity_model,
     run_gene_level_oe_comparison,
 )
 from pcsec_pichia.probe import CobraModel
@@ -65,11 +74,23 @@ def test_constraint_builder_rejects_mapping_not_present_in_prepared_model() -> N
         spec.mapping,
         formation_or_dilution_reaction_id="missing_formation",
     )
-    plan = replace(plan, executable_capacity_specs=(replace(spec, mapping=missing_mapping),))
+    plan = replace(
+        plan,
+        executable_capacity_specs=(
+            replace(
+                spec,
+                mapping=missing_mapping,
+                capacity_anchor_binding=replace(
+                    spec.capacity_anchor_binding,
+                    formation_or_dilution_reaction_id="missing_formation",
+                ),
+            ),
+        ),
+    )
 
     with pytest.raises(
         OECapacityValidationError,
-        match="formation/dilution reaction is missing",
+        match="not present in the runtime reviewed catalog",
     ):
         build_oe_capacity_constraints(prepared, plan)
 
@@ -104,7 +125,7 @@ def test_duplicate_formation_handle_requires_identical_capacity_specs() -> None:
     )
     plan = replace(plan, executable_capacity_specs=(spec, conflicting))
 
-    with pytest.raises(OECapacityValidationError, match="conflicting capacity specs"):
+    with pytest.raises(OECapacityValidationError, match="baseline capacity values"):
         build_oe_capacity_constraints(_prepared_tiny_model(), plan)
 
 
@@ -192,6 +213,13 @@ def test_proxy_only_plan_preserves_legacy_comparison_without_capacity_bundle() -
         executable_capacity_specs=(),
         uncertainty_scenarios=(),
         missing_information=("capacity_parameters",),
+        product_mode=OEProductMode.REACTION_PROXY,
+        product_state=OEProductState.REACTION_PROXY,
+        absolute_capacity_availability=(
+            AbsoluteCapacityAvailability.AVAILABLE_REVIEWED
+        ),
+        calibration_status=OECalibrationStatus.PROXY_ONLY,
+        absolute_solver_allowed=False,
     )
 
     result = run_gene_level_oe_comparison(_prepared_tiny_model(), plan)
@@ -199,8 +227,116 @@ def test_proxy_only_plan_preserves_legacy_comparison_without_capacity_bundle() -
     assert result.baseline.success is True
     assert result.proxy is not None and result.proxy.success is True
     assert result.gene_capacity_scenarios == ()
-    assert result.skipped_reason == "gene_capacity_not_executable"
+    assert result.skipped_reason == ""
     assert dict(result.traceability)["constraint_change_count"] == "0"
+
+
+def test_relative_gene_capacity_uses_independent_enzyme_coupling_and_1x_identity(
+    monkeypatch,
+) -> None:
+    absolute = _plan(expression_multiplier=2.0)
+    spec = absolute.executable_capacity_specs[0]
+
+    def relative_plan(factor: float) -> OECapacityPlan:
+        dose = replace(spec.dose, expression_multiplier=factor, dose_id=f"{factor:g}x")
+        relative = RelativeOEScenarioSpec(
+            mapping=spec.mapping,
+            dose=dose,
+            parameter_scenario=ParameterScenario.NOMINAL,
+            relative_capacity_factor=factor,
+            kcat=spec.kcat,
+            molecular_weight=spec.molecular_weight,
+            parameter_sources=(
+                "mapping:current_model:tiny",
+                "kcat:local_enzyme_data:tiny",
+                "dose:explicit_user_input",
+            ),
+            warnings=("relative uncalibrated",),
+            limitations=("no_absolute_capacity",),
+        )
+        return replace(
+            absolute,
+            requested_dose=dose,
+            execution_mode=OEExecutionMode.RELATIVE_GENE_CAPACITY,
+            executable_capacity_specs=(),
+            proxy_reaction_ids=(),
+            relative_scenario_specs=(relative,),
+            product_mode=OEProductMode.RELATIVE_UNCALIBRATED,
+            product_state=OEProductState.RELATIVE_UNCALIBRATED,
+            absolute_capacity_availability=(
+                AbsoluteCapacityAvailability.UNAVAILABLE_MISSING_REVIEWED_ANCHOR
+            ),
+            calibration_status=OECalibrationStatus.RELATIVE_UNCALIBRATED,
+            absolute_solver_allowed=False,
+        )
+
+    monkeypatch.setattr(
+        "pcsec_pichia.oe_capacity.simulation._model_with_gene_capacity_bounds",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("relative path must not use absolute formation bounds")
+        ),
+    )
+    one_x = run_gene_level_oe_comparison(_prepared_tiny_model(), relative_plan(1.0))
+    two_x = run_gene_level_oe_comparison(_prepared_tiny_model(), relative_plan(2.0))
+
+    assert one_x.relative_scenario_results[0].objective_delta == pytest.approx(0.0)
+    assert "1x_identity" in one_x.relative_scenarios[0].attempt_id
+    assert two_x.relative_scenarios[0].execution_mode is (
+        OEExecutionMode.RELATIVE_GENE_CAPACITY
+    )
+    assert "2x" in two_x.relative_scenarios[0].attempt_id
+    assert two_x.relative_scenario_results[0].perturbed.key_fluxes != (
+        two_x.relative_scenario_results[0].baseline.key_fluxes
+    )
+
+
+def test_absolute_solver_rejects_fake_runtime_binding_before_solver(monkeypatch) -> None:
+    prepared = _prepared_tiny_model()
+    plan = _plan(expression_multiplier=2.0)
+    spec = plan.executable_capacity_specs[0]
+    forged = replace(
+        plan,
+        executable_capacity_specs=(
+            replace(
+                spec,
+                capacity_anchor_binding=replace(
+                    spec.capacity_anchor_binding,
+                    asset_sha256="b" * 64,
+                ),
+            ),
+        ),
+    )
+    calls = {"solver": 0}
+
+    def forbidden(*args, **kwargs):
+        calls["solver"] += 1
+        raise AssertionError("forged binding must fail before solver")
+
+    monkeypatch.setattr(
+        "pcsec_pichia.oe_capacity.simulation.solve_pcsec_maximize",
+        forbidden,
+    )
+    with pytest.raises(OECapacityValidationError, match="runtime asset provenance"):
+        run_gene_level_oe_comparison(prepared, forged)
+    assert calls["solver"] == 0
+
+
+def test_absolute_solver_requires_runtime_anchor_catalog_before_solver(monkeypatch) -> None:
+    prepared = _prepared_tiny_model()
+    del prepared.capacity_anchor_catalog
+    calls = {"solver": 0}
+
+    def forbidden(*args, **kwargs):
+        calls["solver"] += 1
+        raise AssertionError("missing runtime catalog must fail before solver")
+
+    monkeypatch.setattr(
+        "pcsec_pichia.oe_capacity.simulation.solve_pcsec_maximize",
+        forbidden,
+    )
+    with pytest.raises(OECapacityValidationError, match="runtime capacity anchor catalog"):
+        run_gene_level_oe_comparison(prepared, _plan(expression_multiplier=2.0))
+    assert calls["solver"] == 0
 
 
 def _plan(
@@ -208,9 +344,12 @@ def _plan(
     expression_multiplier: float,
     kcat_nominal: float = 100.0,
 ) -> OECapacityPlan:
+    model_fingerprint = fingerprint_oe_capacity_model(
+        _prepared_tiny_model().fixed_model
+    )
     mapping = GeneEnzymeReactionMapping(
         mapping_id="map-G1-R1",
-        model_fingerprint="model-v1",
+        model_fingerprint=model_fingerprint,
         gene_id="G1",
         enzyme_id="R1_complex",
         reaction_id="R1",
@@ -258,14 +397,28 @@ def _plan(
             0.0001,
             "model_flux",
             EvidenceSourceType.CURRENT_MODEL,
-            "R1_complex_formation",
-            "model-v1",
+            "reviewed-capacity/v1",
+            "v1",
             ConfidenceLevel.HIGH,
         ),
         complex_stoichiometry=None,
         dose=dose,
         parameter_scenario=ParameterScenario.NOMINAL,
         resource_cost_mode=ResourceCostMode.CURRENT_PROTEIN_POOL,
+        capacity_anchor_binding=CapacityAnchorBinding(
+            anchor_id="anchor-G1-R1",
+            target_id="hLF",
+            context_id="tiny",
+            gene_id="G1",
+            enzyme_id="R1_complex",
+            formation_or_dilution_reaction_id="R1_complex_formation",
+            model_fingerprint=model_fingerprint,
+            asset_version="v1",
+            asset_sha256="a" * 64,
+            source_ref="reviewed-capacity/v1",
+            reviewed_by="capacity-review-board",
+            reviewed_at="2026-07-14",
+        ),
     )
     return OECapacityPlan(
         gene_id="G1",
@@ -277,6 +430,13 @@ def _plan(
         executable_capacity_specs=(spec,),
         proxy_reaction_ids=("R1",),
         uncertainty_scenarios=(ParameterScenario.NOMINAL,),
+        product_mode=OEProductMode.ABSOLUTE_CAPACITY,
+        product_state=OEProductState.ABSOLUTE_AVAILABLE,
+        absolute_capacity_availability=AbsoluteCapacityAvailability.AVAILABLE_REVIEWED,
+        calibration_status=OECalibrationStatus.REVIEWED_ABSOLUTE,
+        absolute_solver_allowed=True,
+        model_fingerprint=model_fingerprint,
+        limitations=("model_relative_only", "no_mg_per_litre_prediction"),
     )
 
 
@@ -344,6 +504,30 @@ def _prepared_tiny_model(*, use_direct_target_path: bool = False) -> SimpleNames
         protein_length=np.array([]),
         protein_mw=np.array([]),
     )
+    model_fingerprint = fingerprint_oe_capacity_model(model)
+    anchor_catalog = CapacityAnchorCatalog(
+        model_fingerprint=model_fingerprint,
+        anchors=(
+            CapacityAnchor(
+                anchor_id="anchor-G1-R1",
+                target_id="hLF",
+                context_id="tiny",
+                gene_id="G1",
+                enzyme_id="R1_complex",
+                formation_or_dilution_reaction_id="R1_complex_formation",
+                model_fingerprint=model_fingerprint,
+                baseline_capacity=0.0001,
+                unit="model_flux",
+                source_ref="reviewed-capacity/v1",
+                source_version="v1",
+                reviewed_by="capacity-review-board",
+                reviewed_at="2026-07-14",
+            ),
+        ),
+        source_ref="Enzymedata/oe_capacity_baseline_capacity.json",
+        asset_version="v1",
+        source_sha256="a" * 64,
+    )
     return SimpleNamespace(
         target_id="hLF",
         fixed_model=model,
@@ -351,4 +535,10 @@ def _prepared_tiny_model(*, use_direct_target_path: bool = False) -> SimpleNames
         metabolic=metabolic,
         secretory=secretory,
         combined=combined,
+        capacity_anchor_catalog=anchor_catalog,
+        capacity_asset_metadata={
+            "version": "v1",
+            "sha256": "a" * 64,
+            "reviewed": True,
+        },
     )

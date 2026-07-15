@@ -54,9 +54,40 @@ class OEExecutionStatus(str, Enum):
 
 class OEExecutionMode(str, Enum):
     GENE_CAPACITY = "gene_capacity"
+    RELATIVE_GENE_CAPACITY = "relative_gene_capacity"
     REACTION_PROXY = "reaction_proxy"
     COMPARISON = "comparison"
     NOT_EXECUTABLE = "not_executable"
+
+
+class OEProductMode(str, Enum):
+    REACTION_PROXY = "reaction_proxy"
+    RELATIVE_UNCALIBRATED = "relative_uncalibrated"
+    ABSOLUTE_CAPACITY = "absolute_capacity"
+    NOT_EXECUTABLE = "not_executable"
+
+
+class OEProductState(str, Enum):
+    REACTION_PROXY = "reaction_proxy"
+    RELATIVE_UNCALIBRATED = "relative_uncalibrated"
+    ABSOLUTE_AVAILABLE = "absolute_available"
+    ABSOLUTE_UNAVAILABLE = "absolute_unavailable"
+    NOT_EXECUTABLE = "not_executable"
+
+
+class AbsoluteCapacityAvailability(str, Enum):
+    AVAILABLE_REVIEWED = "available_reviewed"
+    UNAVAILABLE_MISSING_REVIEWED_ANCHOR = "unavailable_missing_reviewed_anchor"
+    UNAVAILABLE_INCOMPATIBLE_ANCHOR = "unavailable_incompatible_anchor"
+    NOT_APPLICABLE = "not_applicable"
+
+
+class OECalibrationStatus(str, Enum):
+    PROXY_ONLY = "proxy_only"
+    RELATIVE_UNCALIBRATED = "relative_uncalibrated"
+    REVIEWED_ABSOLUTE = "reviewed_absolute"
+    UNAVAILABLE = "unavailable"
+    NOT_APPLICABLE = "not_applicable"
 
 
 class ParameterScenario(str, Enum):
@@ -192,6 +223,72 @@ class CapacityAnchor:
             confidence=ConfidenceLevel.HIGH,
         )
 
+    def binding(
+        self,
+        *,
+        asset_version: str,
+        asset_sha256: str,
+    ) -> "CapacityAnchorBinding":
+        self.validate()
+        binding = CapacityAnchorBinding(
+            anchor_id=self.anchor_id,
+            target_id=self.target_id,
+            context_id=self.context_id,
+            gene_id=self.gene_id,
+            enzyme_id=self.enzyme_id,
+            formation_or_dilution_reaction_id=self.formation_or_dilution_reaction_id,
+            model_fingerprint=self.model_fingerprint,
+            asset_version=asset_version,
+            asset_sha256=asset_sha256,
+            source_ref=self.source_ref,
+            reviewed_by=self.reviewed_by,
+            reviewed_at=self.reviewed_at,
+        )
+        binding.validate()
+        return binding
+
+
+@dataclass(frozen=True)
+class CapacityAnchorBinding:
+    anchor_id: str
+    target_id: str
+    context_id: str
+    gene_id: str
+    enzyme_id: str
+    formation_or_dilution_reaction_id: str
+    model_fingerprint: str
+    asset_version: str
+    asset_sha256: str
+    source_ref: str
+    reviewed_by: str
+    reviewed_at: str
+
+    def validate(self) -> None:
+        for field_name, value in (
+            ("anchor_id", self.anchor_id),
+            ("target_id", self.target_id),
+            ("context_id", self.context_id),
+            ("gene_id", self.gene_id),
+            ("enzyme_id", self.enzyme_id),
+            (
+                "formation_or_dilution_reaction_id",
+                self.formation_or_dilution_reaction_id,
+            ),
+            ("model_fingerprint", self.model_fingerprint),
+            ("asset_version", self.asset_version),
+            ("source_ref", self.source_ref),
+            ("reviewed_by", self.reviewed_by),
+            ("reviewed_at", self.reviewed_at),
+        ):
+            _require_text(value, field_name)
+        if len(self.asset_sha256) != 64 or any(
+            character not in "0123456789abcdef"
+            for character in self.asset_sha256.lower()
+        ):
+            raise OECapacityValidationError(
+                "capacity anchor binding asset_sha256 must be a 64-character hex digest."
+            )
+
 
 @dataclass(frozen=True)
 class CapacityAnchorCatalog:
@@ -199,6 +296,8 @@ class CapacityAnchorCatalog:
     anchors: tuple[CapacityAnchor, ...]
     schema_version: int = 1
     source_ref: str = ""
+    asset_version: str = ""
+    source_sha256: str = ""
 
     def validate(self) -> None:
         if self.schema_version != 1:
@@ -221,6 +320,16 @@ class CapacityAnchorCatalog:
                 raise OECapacityValidationError("duplicate capacity anchor identity.")
             anchor_ids.add(anchor.anchor_id)
             identities.add(identity)
+        if self.anchors:
+            _require_text(self.source_ref, "capacity anchor catalog source_ref")
+            _require_text(self.asset_version, "capacity anchor catalog asset_version")
+            if len(self.source_sha256) != 64 or any(
+                character not in "0123456789abcdef"
+                for character in self.source_sha256.lower()
+            ):
+                raise OECapacityValidationError(
+                    "capacity anchor catalog source_sha256 must be a 64-character hex digest."
+                )
 
 
 @dataclass(frozen=True)
@@ -362,6 +471,7 @@ class GeneCapacitySpec:
     dose: OEDoseSpec
     parameter_scenario: ParameterScenario
     resource_cost_mode: ResourceCostMode
+    capacity_anchor_binding: CapacityAnchorBinding | None = None
     warnings: tuple[str, ...] = ()
     missing_information: tuple[str, ...] = ()
 
@@ -397,6 +507,22 @@ class GeneCapacitySpec:
             raise OECapacityValidationError(
                 "baseline_enzyme_amount requires canonical unit=model_flux."
             )
+        if self.capacity_anchor_binding is None:
+            raise OECapacityValidationError(
+                "absolute GeneCapacitySpec requires reviewed capacity_anchor_binding."
+            )
+        self.capacity_anchor_binding.validate()
+        binding = self.capacity_anchor_binding
+        if (
+            binding.gene_id != self.mapping.gene_id
+            or binding.enzyme_id != self.mapping.enzyme_id
+            or binding.formation_or_dilution_reaction_id
+            != self.mapping.formation_or_dilution_reaction_id
+            or binding.model_fingerprint != self.mapping.model_fingerprint
+        ):
+            raise OECapacityValidationError(
+                "capacity anchor binding does not match the GeneCapacitySpec mapping."
+            )
         if self.mapping.gpr_role is GPRRole.COMPLEX_SUBUNIT and self.complex_stoichiometry is None:
             raise OECapacityValidationError(
                 "complex_subunit GeneCapacitySpec requires complex_stoichiometry."
@@ -417,6 +543,7 @@ class GeneCapacityParameterSet:
     molecular_weight: ParameterEstimate | None
     baseline_enzyme_amount: ParameterEstimate | None
     complex_stoichiometry: ParameterEstimate | None = None
+    capacity_anchor_binding: CapacityAnchorBinding | None = None
     warnings: tuple[str, ...] = ()
 
     def validate(self) -> None:
@@ -439,6 +566,12 @@ class GeneCapacityParameterSet:
                 raise OECapacityValidationError(
                     f"{expected_name} estimate must use parameter_name={expected_name}."
                 )
+        if self.capacity_anchor_binding is not None:
+            self.capacity_anchor_binding.validate()
+        if self.baseline_enzyme_amount is None and self.capacity_anchor_binding is not None:
+            raise OECapacityValidationError(
+                "capacity_anchor_binding requires baseline_enzyme_amount."
+            )
 
     @property
     def missing_information(self) -> tuple[str, ...]:
@@ -447,7 +580,10 @@ class GeneCapacityParameterSet:
             ("molecular_weight", self.molecular_weight),
             ("baseline_enzyme_amount", self.baseline_enzyme_amount),
         )
-        return tuple(name for name, value in values if value is None)
+        missing = [name for name, value in values if value is None]
+        if self.baseline_enzyme_amount is not None and self.capacity_anchor_binding is None:
+            missing.append("reviewed_baseline_capacity")
+        return tuple(missing)
 
     @property
     def uses_smoke_fixture(self) -> bool:
@@ -497,6 +633,46 @@ class ParameterPolicy:
 
 
 @dataclass(frozen=True)
+class RelativeOEScenarioSpec:
+    mapping: GeneEnzymeReactionMapping
+    dose: OEDoseSpec
+    parameter_scenario: ParameterScenario
+    relative_capacity_factor: float
+    kcat: ParameterEstimate | None = None
+    molecular_weight: ParameterEstimate | None = None
+    parameter_sources: tuple[str, ...] = ()
+    warnings: tuple[str, ...] = ()
+    limitations: tuple[str, ...] = ()
+
+    def validate(self) -> None:
+        self.mapping.validate()
+        self.dose.validate()
+        if self.mapping.execution_status is not OEExecutionStatus.GENE_LEVEL_EXECUTABLE:
+            raise OECapacityValidationError(
+                "RelativeOEScenarioSpec requires a complete current-model mapping."
+            )
+        if self.dose.expression_multiplier is None:
+            raise OECapacityValidationError(
+                "RelativeOEScenarioSpec requires a numeric dimensionless dose."
+            )
+        _require_positive_number(
+            self.relative_capacity_factor,
+            "relative_capacity_factor",
+        )
+        for estimate in (self.kcat, self.molecular_weight):
+            if estimate is not None:
+                estimate.validate()
+        if not self.parameter_sources:
+            raise OECapacityValidationError(
+                "RelativeOEScenarioSpec requires auditable parameter_sources."
+            )
+        if not self.limitations:
+            raise OECapacityValidationError(
+                "RelativeOEScenarioSpec requires explicit limitations."
+            )
+
+
+@dataclass(frozen=True)
 class OECapacityPlan:
     gene_id: str
     target_id: str
@@ -511,6 +687,18 @@ class OECapacityPlan:
     uncertainty_scenarios: tuple[ParameterScenario, ...] = ()
     missing_information: tuple[str, ...] = ()
     warnings: tuple[str, ...] = ()
+    structural_mappings: tuple[GeneEnzymeReactionMapping, ...] = ()
+    available_relative_scenario_specs: tuple[RelativeOEScenarioSpec, ...] = ()
+    relative_scenario_specs: tuple[RelativeOEScenarioSpec, ...] = ()
+    product_mode: OEProductMode = OEProductMode.RELATIVE_UNCALIBRATED
+    product_state: OEProductState = OEProductState.NOT_EXECUTABLE
+    absolute_capacity_availability: AbsoluteCapacityAvailability = (
+        AbsoluteCapacityAvailability.UNAVAILABLE_MISSING_REVIEWED_ANCHOR
+    )
+    calibration_status: OECalibrationStatus = OECalibrationStatus.UNAVAILABLE
+    absolute_solver_allowed: bool = False
+    model_fingerprint: str = ""
+    limitations: tuple[str, ...] = ()
 
     def validate(self) -> None:
         _require_text(self.gene_id, "gene_id")
@@ -525,6 +713,23 @@ class OECapacityPlan:
                 )
         for mapping in self.explain_only_mappings:
             mapping.validate()
+        for mapping in self.structural_mappings:
+            mapping.validate()
+        for spec in self.available_relative_scenario_specs:
+            spec.validate()
+            if spec.mapping.gene_id != self.gene_id:
+                raise OECapacityValidationError(
+                    "available relative scenario specs must match plan gene_id."
+                )
+        for spec in self.relative_scenario_specs:
+            spec.validate()
+            if spec.mapping.gene_id != self.gene_id:
+                raise OECapacityValidationError(
+                    "relative scenario specs must match plan gene_id."
+                )
+        _require_text(self.model_fingerprint, "model_fingerprint")
+        if not self.limitations:
+            raise OECapacityValidationError("OE product plan requires explicit limitations.")
         if self.execution_mode is OEExecutionMode.GENE_CAPACITY:
             if self.execution_status is OEExecutionStatus.PROXY_ONLY:
                 raise OECapacityValidationError(
@@ -543,9 +748,21 @@ class OECapacityPlan:
                 raise OECapacityValidationError(
                     "reaction_proxy mode requires proxy_reaction_ids."
                 )
-            if self.execution_status is not OEExecutionStatus.PROXY_ONLY:
+            if (
+                self.product_state is OEProductState.REACTION_PROXY
+                and self.execution_status is not OEExecutionStatus.PROXY_ONLY
+            ):
                 raise OECapacityValidationError(
                     "reaction_proxy mode must use execution_status=proxy_only."
+                )
+        elif self.execution_mode is OEExecutionMode.RELATIVE_GENE_CAPACITY:
+            if not self.relative_scenario_specs:
+                raise OECapacityValidationError(
+                    "relative_gene_capacity requires relative scenario specs."
+                )
+            if self.executable_capacity_specs or self.absolute_solver_allowed:
+                raise OECapacityValidationError(
+                    "relative_gene_capacity cannot contain absolute capacity specs."
                 )
         elif self.execution_mode is OEExecutionMode.COMPARISON:
             if not self.executable_capacity_specs or not self.proxy_reaction_ids:
@@ -561,6 +778,126 @@ class OECapacityPlan:
             if self.executable_capacity_specs or self.constraint_changes:
                 raise OECapacityValidationError(
                     "not_executable plan cannot contain executable specs or constraint changes."
+                )
+        if self.absolute_solver_allowed:
+            if self.product_state is not OEProductState.ABSOLUTE_AVAILABLE:
+                raise OECapacityValidationError(
+                    "absolute_solver_allowed requires product_state=absolute_available."
+                )
+            if not self.executable_capacity_specs:
+                raise OECapacityValidationError(
+                    "absolute_solver_allowed requires executable capacity specs."
+                )
+            for spec in self.executable_capacity_specs:
+                binding = spec.capacity_anchor_binding
+                if binding is None:
+                    raise OECapacityValidationError(
+                        "absolute solver requires reviewed capacity anchor bindings."
+                    )
+                if (
+                    binding.target_id != self.target_id
+                    or binding.context_id != self.context_id
+                    or binding.model_fingerprint != self.model_fingerprint
+                ):
+                    raise OECapacityValidationError(
+                        "capacity anchor binding does not match plan target/context/model."
+                    )
+        elif self.executable_capacity_specs:
+            raise OECapacityValidationError(
+                "executable capacity specs require absolute_solver_allowed=True."
+            )
+        if self.product_state is OEProductState.RELATIVE_UNCALIBRATED:
+            if not self.relative_scenario_specs:
+                raise OECapacityValidationError(
+                    "relative_uncalibrated requires relative scenario specs."
+                )
+            if self.calibration_status is not OECalibrationStatus.RELATIVE_UNCALIBRATED:
+                raise OECapacityValidationError(
+                    "relative_uncalibrated requires matching calibration_status."
+                )
+            if self.executable_capacity_specs or self.absolute_solver_allowed:
+                raise OECapacityValidationError(
+                    "relative_uncalibrated cannot contain absolute executable specs."
+                )
+            if self.execution_mode is not OEExecutionMode.RELATIVE_GENE_CAPACITY:
+                raise OECapacityValidationError(
+                    "relative_uncalibrated requires relative_gene_capacity execution."
+                )
+            if self.product_mode is not OEProductMode.RELATIVE_UNCALIBRATED:
+                raise OECapacityValidationError(
+                    "relative_uncalibrated requires matching product_mode."
+                )
+        if self.product_state is OEProductState.REACTION_PROXY:
+            if self.relative_scenario_specs:
+                raise OECapacityValidationError(
+                    "reaction_proxy cannot retain relative scenario specs."
+                )
+            if self.execution_mode is not OEExecutionMode.REACTION_PROXY:
+                raise OECapacityValidationError(
+                    "reaction_proxy product state requires reaction_proxy execution."
+                )
+            if self.calibration_status is not OECalibrationStatus.PROXY_ONLY:
+                raise OECapacityValidationError(
+                    "reaction_proxy requires proxy_only calibration status."
+                )
+        if self.product_state is OEProductState.ABSOLUTE_AVAILABLE:
+            if self.relative_scenario_specs:
+                raise OECapacityValidationError(
+                    "absolute_available cannot retain relative scenario specs."
+                )
+            if not self.absolute_solver_allowed:
+                raise OECapacityValidationError(
+                    "absolute_available requires the reviewed absolute solver gate."
+                )
+            if self.calibration_status is not OECalibrationStatus.REVIEWED_ABSOLUTE:
+                raise OECapacityValidationError(
+                    "absolute_available requires reviewed_absolute calibration status."
+                )
+            if self.absolute_capacity_availability is not AbsoluteCapacityAvailability.AVAILABLE_REVIEWED:
+                raise OECapacityValidationError(
+                    "absolute_available requires available_reviewed availability."
+                )
+            if self.product_mode is not OEProductMode.ABSOLUTE_CAPACITY:
+                raise OECapacityValidationError(
+                    "absolute_available requires absolute_capacity product_mode."
+                )
+        if self.product_state is OEProductState.ABSOLUTE_UNAVAILABLE:
+            if self.relative_scenario_specs:
+                raise OECapacityValidationError(
+                    "absolute_unavailable cannot retain relative scenario specs."
+                )
+            if self.execution_mode is not OEExecutionMode.NOT_EXECUTABLE:
+                raise OECapacityValidationError(
+                    "absolute_unavailable must not execute a solver mode."
+                )
+            if self.absolute_solver_allowed:
+                raise OECapacityValidationError(
+                    "absolute_unavailable cannot allow the absolute solver."
+                )
+            if self.absolute_capacity_availability is AbsoluteCapacityAvailability.AVAILABLE_REVIEWED:
+                raise OECapacityValidationError(
+                    "absolute_unavailable requires an unavailable capacity state."
+                )
+            if self.calibration_status is not OECalibrationStatus.UNAVAILABLE:
+                raise OECapacityValidationError(
+                    "absolute_unavailable requires unavailable calibration status."
+                )
+            if self.product_mode is not OEProductMode.ABSOLUTE_CAPACITY:
+                raise OECapacityValidationError(
+                    "absolute_unavailable requires absolute_capacity product_mode."
+                )
+        if self.product_state is OEProductState.NOT_EXECUTABLE:
+            if self.relative_scenario_specs:
+                raise OECapacityValidationError(
+                    "not_executable cannot retain relative scenario specs."
+                )
+            if self.execution_mode is not OEExecutionMode.NOT_EXECUTABLE:
+                raise OECapacityValidationError(
+                    "not_executable product state requires not_executable execution."
+                )
+            if self.product_mode is not OEProductMode.NOT_EXECUTABLE:
+                raise OECapacityValidationError(
+                    "not_executable product state requires matching product_mode."
                 )
 
 
@@ -762,9 +1099,12 @@ class OECapacityScenarioResult:
     def validate(self) -> None:
         self.baseline.validate()
         self.perturbed.validate()
-        if self.perturbed.execution_mode is not OEExecutionMode.GENE_CAPACITY:
+        if self.perturbed.execution_mode not in {
+            OEExecutionMode.GENE_CAPACITY,
+            OEExecutionMode.RELATIVE_GENE_CAPACITY,
+        }:
             raise OECapacityValidationError(
-                "scenario perturbed snapshot must use execution_mode=gene_capacity."
+                "scenario perturbed snapshot must use a gene-capacity execution mode."
             )
         if self.baseline.parameter_scenario is not self.parameter_scenario:
             raise OECapacityValidationError(
@@ -810,6 +1150,10 @@ class OECapacityComparisonResult:
     warnings: tuple[str, ...] = ()
     scenario_results: tuple[OECapacityScenarioResult, ...] = ()
     proxy_attempts: tuple[SolverSnapshot, ...] = ()
+    relative_scenarios: tuple[SolverSnapshot, ...] = ()
+    relative_scenario_results: tuple[OECapacityScenarioResult, ...] = ()
+    relative_vs_baseline_delta: float | None = None
+    relative_vs_proxy_delta: float | None = None
 
     def validate(self) -> None:
         _require_text(self.gene_id, "gene_id")
@@ -870,6 +1214,34 @@ class OECapacityComparisonResult:
                     f"duplicate proxy attempt_id: {snapshot.attempt_id}"
                 )
             attempt_ids.add(snapshot.attempt_id)
+        relative_ids: set[ParameterScenario] = set()
+        for snapshot in self.relative_scenarios:
+            snapshot.validate()
+            if snapshot.execution_mode is not OEExecutionMode.RELATIVE_GENE_CAPACITY:
+                raise OECapacityValidationError(
+                    "relative snapshots must use relative_gene_capacity execution."
+                )
+        for result in self.relative_scenario_results:
+            result.validate()
+            if result.perturbed.execution_mode is not OEExecutionMode.RELATIVE_GENE_CAPACITY:
+                raise OECapacityValidationError(
+                    "relative scenario results require relative_gene_capacity snapshots."
+                )
+            if result.parameter_scenario in relative_ids:
+                raise OECapacityValidationError(
+                    f"duplicate relative scenario: {result.parameter_scenario.value}"
+                )
+            relative_ids.add(result.parameter_scenario)
+        for field_name, value in (
+            ("relative_vs_baseline_delta", self.relative_vs_baseline_delta),
+            ("relative_vs_proxy_delta", self.relative_vs_proxy_delta),
+        ):
+            if value is not None and (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+            ):
+                raise OECapacityValidationError(f"{field_name} must be finite when present.")
 
 
 @dataclass(frozen=True)
@@ -879,19 +1251,19 @@ class OECapacityScreenRequest:
     context_id: str
     dose: OEDoseSpec
     execution_mode: OEExecutionMode
+    product_mode: OEProductMode | None = None
 
     def validate(self) -> None:
         _require_text(self.gene_id, "gene_id")
         _require_text(self.target_id, "target_id")
         _require_text(self.context_id, "context_id")
         self.dose.validate()
-        if (
-            self.execution_mode in {OEExecutionMode.GENE_CAPACITY, OEExecutionMode.COMPARISON}
-            and self.dose.dose_mode is OEDoseMode.CATEGORICAL_ONLY
+        if self.product_mode is not None and not isinstance(
+            self.product_mode, OEProductMode
         ):
-            raise OECapacityValidationError(
-                "categorical_only dose cannot run gene_capacity or comparison execution."
-            )
+            raise OECapacityValidationError("product_mode must be an OEProductMode value.")
+        # Categorical dose is retained as an auditable not-executable product
+        # result instead of being rejected at the facade boundary.
 
 
 @dataclass(frozen=True)
@@ -930,6 +1302,12 @@ class OECapacityScreenRow:
     context_id: str
     execution_mode: OEExecutionMode
     execution_status: OEExecutionStatus
+    product_mode: OEProductMode
+    product_state: OEProductState
+    absolute_capacity_availability: AbsoluteCapacityAvailability
+    calibration_status: OECalibrationStatus
+    absolute_solver_allowed: bool
+    model_fingerprint: str
     dose_id: str
     dose_mode: OEDoseMode
     expression_multiplier: float | None
@@ -949,6 +1327,16 @@ class OECapacityScreenRow:
     scenario_results: tuple[OECapacityScenarioResult, ...] = ()
     proxy_attempts: tuple[SolverSnapshot, ...] = ()
     summary_source: str = ""
+    mapping_sources: tuple[str, ...] = ()
+    dose_source: str = ""
+    relative_capacity_factors: tuple[tuple[ParameterScenario, float], ...] = ()
+    nominal_capacity: float | None = None
+    nominal_capacities: tuple[tuple[str, float], ...] = ()
+    limitations: tuple[str, ...] = ()
+    relative_objective: float | None = None
+    relative_vs_baseline_delta: float | None = None
+    relative_vs_proxy_delta: float | None = None
+    relative_scenario_results: tuple[OECapacityScenarioResult, ...] = ()
 
     def validate(self) -> None:
         for field_name, value in (
@@ -956,6 +1344,7 @@ class OECapacityScreenRow:
             ("target_id", self.target_id),
             ("context_id", self.context_id),
             ("dose_id", self.dose_id),
+            ("model_fingerprint", self.model_fingerprint),
         ):
             _require_text(value, field_name)
         if self.expression_multiplier is not None:
@@ -976,6 +1365,9 @@ class OECapacityScreenRow:
             ),
             ("gene_capacity_vs_proxy_delta", self.gene_capacity_vs_proxy_delta),
             ("protein_resource_cost_delta", self.protein_resource_cost_delta),
+            ("relative_objective", self.relative_objective),
+            ("relative_vs_baseline_delta", self.relative_vs_baseline_delta),
+            ("relative_vs_proxy_delta", self.relative_vs_proxy_delta),
         ):
             if value is not None and (
                 isinstance(value, bool)
@@ -1000,6 +1392,69 @@ class OECapacityScreenRow:
             result.validate()
         for snapshot in self.proxy_attempts:
             snapshot.validate()
+        for result in self.relative_scenario_results:
+            result.validate()
+        if not self.limitations:
+            raise OECapacityValidationError("screen row requires explicit limitations.")
+        for scenario, factor in self.relative_capacity_factors:
+            if not isinstance(scenario, ParameterScenario):
+                raise OECapacityValidationError(
+                    "relative capacity factor scenario must be ParameterScenario."
+                )
+            _require_positive_number(factor, "relative_capacity_factor")
+        for handle, value in self.nominal_capacities:
+            _require_text(handle, "nominal capacity handle")
+            _require_positive_number(value, "nominal capacity value")
+        if self.product_state is OEProductState.RELATIVE_UNCALIBRATED:
+            if self.absolute_solver_allowed or self.nominal_capacity is not None:
+                raise OECapacityValidationError(
+                    "relative_uncalibrated cannot expose absolute capacity."
+                )
+            if self.gene_capacity_objective is not None or self.scenario_results:
+                raise OECapacityValidationError(
+                    "relative_uncalibrated cannot contain absolute scenario solver output."
+                )
+            if not self.relative_capacity_factors:
+                raise OECapacityValidationError(
+                    "relative_uncalibrated requires relative capacity factors."
+                )
+            if not self.relative_scenario_results:
+                raise OECapacityValidationError(
+                    "relative_uncalibrated requires relative scenario solver evidence."
+                )
+        if self.product_state is OEProductState.ABSOLUTE_UNAVAILABLE:
+            if self.execution_mode is not OEExecutionMode.NOT_EXECUTABLE:
+                raise OECapacityValidationError(
+                    "absolute_unavailable row must be not_executable."
+                )
+            if any(
+                value is not None
+                for value in (
+                    self.baseline_objective,
+                    self.proxy_objective,
+                    self.gene_capacity_objective,
+                    self.nominal_capacity,
+                )
+            ):
+                raise OECapacityValidationError(
+                    "absolute_unavailable row must not contain solver objectives or nominal capacity."
+                )
+        if self.product_state is not OEProductState.RELATIVE_UNCALIBRATED:
+            if (
+                self.relative_capacity_factors
+                or self.relative_scenario_results
+                or self.relative_objective is not None
+                or self.relative_vs_baseline_delta is not None
+                or self.relative_vs_proxy_delta is not None
+            ):
+                raise OECapacityValidationError(
+                    "non-relative product rows cannot contain relative solver evidence."
+                )
+        if self.product_state is OEProductState.NOT_EXECUTABLE:
+            if self.execution_mode is not OEExecutionMode.NOT_EXECUTABLE:
+                raise OECapacityValidationError(
+                    "not_executable product state requires execution_mode=not_executable."
+                )
 
 
 def derive_mapping_execution_status(

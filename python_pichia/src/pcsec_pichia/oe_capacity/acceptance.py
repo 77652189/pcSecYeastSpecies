@@ -75,6 +75,7 @@ def verify_oe_capacity_run(
     _verify_status_and_coverage(manifest, rows, errors)
     _verify_row_identity(identity, rows, errors)
     _verify_scenario_and_proxy_evidence(manifest, rows, errors)
+    _verify_product_state_contract(manifest, rows, errors)
     _verify_case_contract(identity, rows, errors)
 
     manifest_sha256 = _sha256(manifest_path) if manifest_path.is_file() else ""
@@ -320,7 +321,8 @@ def _verify_scenario_and_proxy_evidence(
         row
         for row in rows
         if row.get("screen_status") == "completed"
-        and row.get("execution_status") == "gene_level_executable"
+        and row.get("product_state") == "absolute_available"
+        and row.get("absolute_solver_allowed") is True
     ]
     actual_scenarios_complete = not feature_enabled or (
         bool(required)
@@ -362,6 +364,10 @@ def _verify_case_contract(
         clean = bool(rows) and all(
             row.get("screen_status") == "completed"
             and row.get("execution_status") == "gene_level_executable"
+            and row.get("product_state") == "absolute_available"
+            and row.get("absolute_solver_allowed") is True
+            and row.get("absolute_capacity_availability") == "available_reviewed"
+            and row.get("calibration_status") == "reviewed_absolute"
             and not row.get("missing_information")
             and all(
                 _finite(row.get(name))
@@ -395,6 +401,68 @@ def _verify_case_contract(
         )
         if not preserved:
             errors.append("case.boundary_not_preserved")
+
+
+def _verify_product_state_contract(
+    manifest: Mapping[str, object],
+    rows: Sequence[Mapping[str, object]],
+    errors: list[str],
+) -> None:
+    states = sorted({str(row.get("product_state") or "") for row in rows})
+    manifest_states = manifest.get("product_states")
+    if manifest_states is not None and list(manifest_states or []) != states:
+        errors.append("manifest.product_states")
+    for row in rows:
+        state = str(row.get("product_state") or "")
+        mode = str(row.get("execution_mode") or "")
+        calibration = str(row.get("calibration_status") or "")
+        availability = str(row.get("absolute_capacity_availability") or "")
+        solver_allowed = row.get("absolute_solver_allowed") is True
+        absolute_outputs = any(
+            row.get(field) is not None
+            for field in ("gene_capacity_objective", "nominal_capacity")
+        ) or bool(row.get("scenario_results"))
+        relative_outputs = bool(row.get("relative_scenario_results"))
+        if state == "reaction_proxy":
+            invalid = mode != "reaction_proxy" or calibration != "proxy_only" or solver_allowed
+        elif state == "relative_uncalibrated":
+            invalid = (
+                mode != "relative_gene_capacity"
+                or calibration != "relative_uncalibrated"
+                or solver_allowed
+                or absolute_outputs
+                or not relative_outputs
+            )
+        elif state == "absolute_available":
+            invalid = (
+                mode not in {"gene_capacity", "comparison"}
+                or calibration != "reviewed_absolute"
+                or availability != "available_reviewed"
+                or not solver_allowed
+                or not absolute_outputs
+            )
+        elif state == "absolute_unavailable":
+            invalid = (
+                mode != "not_executable"
+                or calibration != "unavailable"
+                or availability == "available_reviewed"
+                or solver_allowed
+                or absolute_outputs
+                or relative_outputs
+                or row.get("baseline_objective") is not None
+                or row.get("proxy_objective") is not None
+            )
+        elif state == "not_executable":
+            invalid = (
+                mode != "not_executable"
+                or solver_allowed
+                or absolute_outputs
+                or relative_outputs
+            )
+        else:
+            invalid = True
+        if invalid:
+            errors.append(f"rows.product_state.{state or 'unknown'}")
 
 
 def _validate_capacity_asset(path: Path) -> dict[str, object]:
@@ -636,10 +704,17 @@ def _read_jsonl(path: Path, errors: list[str]) -> list[dict[str, object]]:
 
 def _coverage_from_rows(rows: Sequence[Mapping[str, object]]) -> dict[str, object]:
     by_status: dict[str, int] = {}
+    by_product_state: dict[str, int] = {}
     for row in rows:
         status = str(row.get("execution_status") or "unknown")
         by_status[status] = by_status.get(status, 0) + 1
-    return {"total_rows": len(rows), "by_execution_status": by_status}
+        product_state = str(row.get("product_state") or "unknown")
+        by_product_state[product_state] = by_product_state.get(product_state, 0) + 1
+    return {
+        "total_rows": len(rows),
+        "by_execution_status": by_status,
+        "by_product_state": by_product_state,
+    }
 
 
 def _has_scenario_pairs(row: Mapping[str, object], required: Sequence[str]) -> bool:

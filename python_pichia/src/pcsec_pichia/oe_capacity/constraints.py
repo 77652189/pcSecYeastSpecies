@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import numpy as np
+
 from pcsec_pichia.oe_capacity.schema import (
     CapacityConstraintChange,
     ConstraintChangeKind,
@@ -9,6 +11,7 @@ from pcsec_pichia.oe_capacity.schema import (
     OECapacityPlan,
     OECapacityValidationError,
 )
+from pcsec_pichia.oe_capacity.mapping import fingerprint_oe_capacity_model
 
 
 def build_oe_capacity_constraints(
@@ -30,6 +33,22 @@ def build_oe_capacity_constraints(
         raise OECapacityValidationError(
             "gene-level capacity constraints require executable_capacity_specs."
         )
+    if not plan.absolute_solver_allowed:
+        raise OECapacityValidationError(
+            "absolute capacity constraints require the reviewed anchor solver gate."
+        )
+    prepared_fingerprint = fingerprint_oe_capacity_model(model)
+    if prepared_fingerprint != plan.model_fingerprint:
+        raise OECapacityValidationError(
+            "absolute capacity plan does not match the prepared model fingerprint."
+        )
+    anchor_catalog = getattr(prepared_model, "capacity_anchor_catalog", None)
+    if anchor_catalog is None:
+        raise OECapacityValidationError(
+            "absolute capacity execution requires the runtime capacity anchor catalog."
+        )
+    anchor_catalog.validate()
+    asset_metadata = getattr(prepared_model, "capacity_asset_metadata", {})
     model_fingerprints = {
         spec.mapping.model_fingerprint for spec in plan.executable_capacity_specs
     }
@@ -44,6 +63,59 @@ def build_oe_capacity_constraints(
     for spec in plan.executable_capacity_specs:
         scenario = spec.parameter_scenario
         mapping = spec.mapping
+        binding = spec.capacity_anchor_binding
+        if binding is None:
+            raise OECapacityValidationError(
+                "absolute capacity spec requires a reviewed anchor binding."
+            )
+        if (
+            binding.target_id != plan.target_id
+            or binding.context_id != plan.context_id
+            or binding.model_fingerprint != prepared_fingerprint
+            or binding.gene_id != mapping.gene_id
+            or binding.enzyme_id != mapping.enzyme_id
+            or binding.formation_or_dilution_reaction_id
+            != mapping.formation_or_dilution_reaction_id
+        ):
+            raise OECapacityValidationError(
+                "reviewed capacity anchor binding does not match the plan or mapping."
+            )
+        matching_anchors = tuple(
+            anchor
+            for anchor in anchor_catalog.anchors
+            if anchor.anchor_id == binding.anchor_id
+            and anchor.target_id == binding.target_id
+            and anchor.context_id == binding.context_id
+            and anchor.gene_id == binding.gene_id
+            and anchor.enzyme_id == binding.enzyme_id
+            and anchor.formation_or_dilution_reaction_id
+            == binding.formation_or_dilution_reaction_id
+            and anchor.model_fingerprint == binding.model_fingerprint
+        )
+        if len(matching_anchors) != 1:
+            raise OECapacityValidationError(
+                "capacity anchor binding is not present in the runtime reviewed catalog."
+            )
+        anchor = matching_anchors[0]
+        if (
+            binding.asset_version != anchor_catalog.asset_version
+            or binding.asset_sha256 != anchor_catalog.source_sha256
+            or binding.source_ref != anchor.source_ref
+            or binding.reviewed_by != anchor.reviewed_by
+            or binding.reviewed_at != anchor.reviewed_at
+        ):
+            raise OECapacityValidationError(
+                "capacity anchor binding does not match the runtime asset provenance."
+            )
+        if asset_metadata:
+            if (
+                str(asset_metadata.get("version") or "") != binding.asset_version
+                or str(asset_metadata.get("sha256") or "") != binding.asset_sha256
+                or asset_metadata.get("reviewed") is not True
+            ):
+                raise OECapacityValidationError(
+                    "runtime capacity asset metadata does not match the reviewed binding."
+                )
         if mapping.reaction_id not in reaction_index:
             raise OECapacityValidationError(
                 f"capacity mapping reaction is missing from prepared model: {mapping.reaction_id}"
@@ -68,6 +140,27 @@ def build_oe_capacity_constraints(
         if baseline is None or kcat is None or molecular_weight is None:
             raise OECapacityValidationError(
                 "executable capacity constraints require baseline, kcat, and molecular weight."
+            )
+        if (
+            baseline.source_ref != anchor.source_ref
+            or baseline.source_version != anchor.source_version
+            or baseline.unit != anchor.unit
+            or not all(
+                np.isclose(
+                    float(value),
+                    float(anchor.baseline_capacity),
+                    rtol=0.0,
+                    atol=1e-12,
+                )
+                for value in (
+                    baseline.lower_bound,
+                    baseline.nominal_value,
+                    baseline.upper_bound,
+                )
+            )
+        ):
+            raise OECapacityValidationError(
+                "baseline capacity values do not match the runtime reviewed anchor."
             )
         expected_units = (
             ("kcat", kcat.unit, "1/h"),

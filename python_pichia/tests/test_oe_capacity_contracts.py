@@ -4,6 +4,8 @@ import pytest
 from dataclasses import FrozenInstanceError
 
 from pcsec_pichia.oe_capacity import (
+    AbsoluteCapacityAvailability,
+    CapacityAnchorBinding,
     ConfidenceLevel,
     ConstraintChangeKind,
     CapacityConstraintChange,
@@ -23,6 +25,9 @@ from pcsec_pichia.oe_capacity import (
     OECapacityValidationError,
     OEExecutionMode,
     OEExecutionStatus,
+    OECalibrationStatus,
+    OEProductMode,
+    OEProductState,
     SolverSnapshot,
     ParameterScenario,
     ParameterEstimate,
@@ -201,6 +206,7 @@ def test_capacity_spec_and_plan_are_frozen_and_reject_proxy_disguised_as_gene_ca
         dose=dose,
         parameter_scenario=ParameterScenario.NOMINAL,
         resource_cost_mode=ResourceCostMode.CURRENT_PROTEIN_POOL,
+        capacity_anchor_binding=_reviewed_binding(),
     )
     spec.validate()
 
@@ -212,6 +218,13 @@ def test_capacity_spec_and_plan_are_frozen_and_reject_proxy_disguised_as_gene_ca
         execution_mode=OEExecutionMode.GENE_CAPACITY,
         execution_status=OEExecutionStatus.GENE_LEVEL_EXECUTABLE,
         executable_capacity_specs=(spec,),
+        product_mode=OEProductMode.ABSOLUTE_CAPACITY,
+        product_state=OEProductState.ABSOLUTE_AVAILABLE,
+        absolute_capacity_availability=AbsoluteCapacityAvailability.AVAILABLE_REVIEWED,
+        calibration_status=OECalibrationStatus.REVIEWED_ABSOLUTE,
+        absolute_solver_allowed=True,
+        model_fingerprint="model-v1",
+        limitations=("model_relative_only", "no_mg_per_litre_prediction"),
     )
     plan.validate()
     with pytest.raises(FrozenInstanceError):
@@ -226,6 +239,8 @@ def test_capacity_spec_and_plan_are_frozen_and_reject_proxy_disguised_as_gene_ca
             execution_mode=OEExecutionMode.GENE_CAPACITY,
             execution_status=OEExecutionStatus.PROXY_ONLY,
             proxy_reaction_ids=("R1",),
+            model_fingerprint="model-v1",
+            limitations=("not_executable",),
         ).validate()
 
     with pytest.raises(OECapacityValidationError, match="both executable_capacity_specs"):
@@ -237,6 +252,13 @@ def test_capacity_spec_and_plan_are_frozen_and_reject_proxy_disguised_as_gene_ca
             execution_mode=OEExecutionMode.COMPARISON,
             execution_status=OEExecutionStatus.GENE_LEVEL_EXECUTABLE,
             executable_capacity_specs=(spec,),
+            product_mode=OEProductMode.ABSOLUTE_CAPACITY,
+            product_state=OEProductState.ABSOLUTE_AVAILABLE,
+            absolute_capacity_availability=AbsoluteCapacityAvailability.AVAILABLE_REVIEWED,
+            calibration_status=OECalibrationStatus.REVIEWED_ABSOLUTE,
+            absolute_solver_allowed=True,
+            model_fingerprint="model-v1",
+            limitations=("model_relative_only",),
         ).validate()
 
 
@@ -381,20 +403,19 @@ def test_execution_statuses_and_comparison_snapshots_are_explicit() -> None:
     assert result.proxy is not result.gene_capacity_scenarios[0]
 
 
-def test_screen_contract_rejects_categorical_dose_for_gene_capacity_execution() -> None:
+def test_screen_contract_retains_categorical_dose_for_core_not_executable_result() -> None:
     categorical = OEDoseSpec(
         dose_id="strong-promoter",
         dose_mode=OEDoseMode.CATEGORICAL_ONLY,
         promoter="pGAP",
     )
-    with pytest.raises(OECapacityValidationError, match="categorical_only"):
-        OECapacityScreenRequest(
-            gene_id="G1",
-            target_id="hLF",
-            context_id="ctx-hlf",
-            dose=categorical,
-            execution_mode=OEExecutionMode.GENE_CAPACITY,
-        ).validate()
+    OECapacityScreenRequest(
+        gene_id="G1",
+        target_id="hLF",
+        context_id="ctx-hlf",
+        dose=categorical,
+        execution_mode=OEExecutionMode.GENE_CAPACITY,
+    ).validate()
 
     config = OECapacityScreenConfig(
         feature_enabled=True,
@@ -526,6 +547,7 @@ def _gene_capacity_plan() -> OECapacityPlan:
         dose=dose,
         parameter_scenario=ParameterScenario.NOMINAL,
         resource_cost_mode=ResourceCostMode.CURRENT_PROTEIN_POOL,
+        capacity_anchor_binding=_reviewed_binding(),
     )
     return OECapacityPlan(
         gene_id="G1",
@@ -535,4 +557,28 @@ def _gene_capacity_plan() -> OECapacityPlan:
         execution_mode=OEExecutionMode.GENE_CAPACITY,
         execution_status=OEExecutionStatus.GENE_LEVEL_EXECUTABLE,
         executable_capacity_specs=(spec,),
+        product_mode=OEProductMode.ABSOLUTE_CAPACITY,
+        product_state=OEProductState.ABSOLUTE_AVAILABLE,
+        absolute_capacity_availability=AbsoluteCapacityAvailability.AVAILABLE_REVIEWED,
+        calibration_status=OECalibrationStatus.REVIEWED_ABSOLUTE,
+        absolute_solver_allowed=True,
+        model_fingerprint="model-v1",
+        limitations=("model_relative_only", "no_mg_per_litre_prediction"),
+    )
+
+
+def _reviewed_binding() -> CapacityAnchorBinding:
+    return CapacityAnchorBinding(
+        anchor_id="anchor-G1-R1",
+        target_id="hLF",
+        context_id="ctx-hlf",
+        gene_id="G1",
+        enzyme_id="R1_complex",
+        formation_or_dilution_reaction_id="R1_complex_formation",
+        model_fingerprint="model-v1",
+        asset_version="v1",
+        asset_sha256="a" * 64,
+        source_ref="reviewed-capacity/v1",
+        reviewed_by="capacity-review-board",
+        reviewed_at="2026-07-14",
     )

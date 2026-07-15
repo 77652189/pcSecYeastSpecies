@@ -5,7 +5,7 @@
 
 项目文档围绕一个原始研发目标组织：通过 KO/OE 和分泌路径改造，提高 hLF、OPN 等目标蛋白在 Pichia 中的分泌表现。
 
-当前系统已经具备 KO/OE 候选生成、证据复核、实验反馈回放、gene-enzyme-reaction capacity 求解，以及外部 baseline capacity 候选的审核链路，但不能承诺真实发酵产量、mg/L 绝对值或实验成功率。方向 1 的研发发酵模板回填已经验收；A0c 已确认现有证据不能形成可审核的绝对 baseline capacity。当前授权切片按 ADR-002 收口相对、未校准 OE 决策层与绝对容量研究层的产品状态和门禁。
+当前系统已经具备 KO/OE 候选生成、证据复核、实验反馈回放、独立的 reaction proxy 与相对未校准 gene-capacity 求解，以及外部 baseline capacity 候选的审核链路，但不能承诺真实发酵产量、mg/L 绝对值或实验成功率。方向 1 与方向 2 产品分层已经验收；绝对容量仍等待合格审核锚点。当前授权切片是方向 3 的 secretory resource Round 0 架构与可执行契约，不包含机制实现。
 
 ## 当前入口
 

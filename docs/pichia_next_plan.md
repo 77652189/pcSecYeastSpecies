@@ -7,13 +7,13 @@
 
 ```yaml
 current_program: mvp_directions_1_to_3
-current_slice: direction_2_oe_product_tiering_closure
+current_slice: direction_3_secretory_resource_round_0
 slice_status: ready
 ```
 
 执行会话必须从这里和 `docs/handoff.md` 记录的切片继续。历史 Phase/Round 只用于理解既有实现，不得覆盖项目级执行计划的当前授权顺序。
 
-方向 1 的软件闭环和真实发酵模板适配已经通过验收。获批真实数据到来后执行独立回填 checkpoint；当前按项目级顺序进入方向 2 产品层级与门禁收口。
+方向 1 的软件闭环和真实发酵模板适配已经通过验收；方向 2 产品层级与门禁也已收口。获批真实数据到来后执行独立回填 checkpoint；当前按项目级顺序进入方向 3 secretory resource Round 0。
 
 ## 总目标
 
@@ -284,12 +284,12 @@ Phase 1 完成时，研发同事应能在 Streamlit 中：
 
 Phase 1 和方向 1 模板适配已完成并验收。Phase 2 的 mapping、剂量、约束、求解、报告、UI 和外部候选审计已存在，但正式容量资产为空。当前不再扩大同类来源搜索，而是按 ADR-002 收口 reaction proxy、relative uncalibrated、absolute unavailable 和 not executable 的产品状态与门禁。
 
-### 当前执行锁
+### 方向 2 验收状态
 
-- 当前只执行 `direction_2_oe_product_tiering_closure`，必须修改实际核心状态/门禁及其测试。
-- 只读审计、继续搜索同类绝对容量来源、重复既有 smoke 或只修改文档均不构成交付。
-- 不删除或重写既有 `oe_capacity` 能力；在当前实现上收口产品语义并保持回归。
-- 验收前不得进入 Phase 3、组合搜索或完整跨条件排名。
+- `direction_2_oe_product_tiering_closure` 已验收：reaction proxy、relative uncalibrated、absolute unavailable 和 not executable 由核心层统一判定。
+- relative uncalibrated 使用独立 enzyme-coupling 场景；absolute 入口绑定 runtime 审核资产，缺锚点不调用求解器。
+- 绝对容量资产仍为空，正式 Phase 2 absolute acceptance 保持 `passed=false`，等待机会驱动的新合格证据。
+- 后续不得为了推进方向 3 而弱化 ADR-001/ADR-002 门禁。
 
 ### 目标与边界
 
@@ -467,7 +467,7 @@ A0c 历史结果：已完成 ecPichia `Supplementary 8.yml` 与 `Supplementary 1
 
 screen rows 并行保留旧字段，并新增 execution mode/status、dose、expression multiplier、mapping、parameter source/confidence、uncertainty scenarios、gene-capacity objective、proxy objective、差异、resource cost、missing information 和 warnings。
 
-当前方向 2 产品收口必须满足：
+方向 2 产品收口已按以下条件验收：
 
 - single gene、isoenzyme、complex、mixed、missing parameter 和 external-only 都有测试。
 - reaction proxy、relative uncalibrated、absolute unavailable 和 not executable 可区分，且由核心层统一判定。
@@ -483,6 +483,8 @@ screen rows 并行保留旧字段，并新增 execution mode/status、dose、exp
 ## Phase 3：分泌资源与蛋白稳态约束
 
 目标：覆盖传统 GEM 难以表达的分泌瓶颈。
+
+当前只授权 `direction_3_secretory_resource_round_0`：冻结资源层架构、单位、来源、条件、不确定性、开关和回归契约，不实现完整机制求解。
 
 优先机制：
 
@@ -528,4 +530,4 @@ screen rows 并行保留旧字段，并新增 execution mode/status、dose、exp
 
 ## 当前下一步
 
-执行 `direction_2_oe_product_tiering_closure`。具体成功条件和预算边界读取 `docs/EXECUTION_PLAN.md`，产品分层读取架构文档与 ADR-002，当前切片和验证方式读取 `docs/handoff.md`；验收完成前不得进入方向 3。
+执行 `direction_3_secretory_resource_round_0`。具体成功条件和预算边界读取 `docs/EXECUTION_PLAN.md`，层级边界读取架构文档，当前切片和验证方式读取 `docs/handoff.md`；本轮只做 Round 0 契约，不实现完整机制求解，不进入方向 4。

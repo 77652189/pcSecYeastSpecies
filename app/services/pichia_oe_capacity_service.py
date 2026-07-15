@@ -15,13 +15,17 @@ from app import ensure_python_pichia_on_path
 ensure_python_pichia_on_path()
 
 from pcsec_pichia.oe_capacity import (
+    OEProductMode,
     OECapacityScreenConfig,
     OECapacityScreenRequest,
     OEExecutionMode,
     ParameterScenario,
     build_oe_dose_spec,
+    plan_gene_level_overexpression,
+    resolve_oe_product_plan,
     run_gene_level_oe_screen,
     summarize_gene_capacity_catalog,
+    summarize_oe_product_candidate,
     write_oe_capacity_outputs,
 )
 from pcsec_pichia.oe_capacity.external_candidate_audit import (
@@ -133,6 +137,8 @@ def preview_oe_capacity_candidate(
     growth_rate: float = 0.1,
     carbon_source_id: str = "glucose",
     relative_uncertainty: float = 0.2,
+    dose_payload: Mapping[str, Any] | None = None,
+    product_mode: str = "relative_uncalibrated",
 ) -> dict[str, Any]:
     normalized_gene = _required_text(gene_id, "gene_id")
     runtime = _prepare_runtime(
@@ -141,6 +147,7 @@ def preview_oe_capacity_candidate(
         carbon_source_id,
         float(relative_uncertainty),
         _capacity_asset_version(),
+        _model_asset_version(),
     )
     mappings = [
         mapping
@@ -152,25 +159,35 @@ def preview_oe_capacity_candidate(
         for parameter_set in runtime.parameter_policy.parameter_sets
         if parameter_set.gene_id == normalized_gene
     ]
-    parameter_mapping_ids = {item.mapping_id for item in parameter_sets}
-    mapping_payloads: list[dict[str, Any]] = []
-    for mapping in mappings:
-        payload = _json_ready(asdict(mapping))
-        if (
-            payload.get("execution_status") == "gene_level_executable"
-            and mapping.mapping_id not in parameter_mapping_ids
-        ):
-            payload["execution_status"] = "partial_mapping"
-            payload["missing_information"] = list(
-                dict.fromkeys(
-                    (
-                        *(payload.get("missing_information") or []),
-                        "reviewed_baseline_capacity",
-                        "capacity_parameters",
-                    )
-                )
-            )
-        mapping_payloads.append(payload)
+    preview_dose = build_oe_dose_spec(
+        dict(dose_payload)
+        if dose_payload is not None
+        else {
+            "dose_id": "2x-preview",
+            "dose_mode": "explicit_multiplier",
+            "expression_multiplier": 2.0,
+        }
+    )
+    try:
+        requested_product = OEProductMode(product_mode)
+    except ValueError as exc:
+        raise ValueError(f"unsupported product_mode: {product_mode}") from exc
+    capability_plan = plan_gene_level_overexpression(
+        runtime.fixed_model,
+        normalized_gene,
+        target_id,
+        _context_id(carbon_source_id, growth_rate),
+        preview_dose,
+        runtime.gene_capacity_catalog,
+        runtime.parameter_policy,
+    )
+    preview_plan = resolve_oe_product_plan(
+        capability_plan,
+        requested_mode=requested_product,
+        feature_enabled=True,
+        compare_proxy=True,
+    )
+    product_summary = summarize_oe_product_candidate(preview_plan)
     coverage = summarize_gene_capacity_catalog(runtime.gene_capacity_catalog)
     return {
         "target_id": target_id,
@@ -178,12 +195,16 @@ def preview_oe_capacity_candidate(
         "context_id": _context_id(carbon_source_id, growth_rate),
         "mapping_count": len(mappings),
         "parameter_set_count": len(parameter_sets),
-        "mappings": mapping_payloads,
+        "mappings": [_json_ready(asdict(mapping)) for mapping in mappings],
         "parameter_sets": [
             _json_ready(asdict(parameter_set)) for parameter_set in parameter_sets
         ],
         "coverage": _json_ready(asdict(coverage)),
-        "executable_mapping_count": len(parameter_mapping_ids),
+        "executable_mapping_count": len(
+            {spec.mapping.mapping_id for spec in capability_plan.executable_capacity_specs}
+        ),
+        "product": product_summary,
+        "model_fingerprint": runtime.gene_capacity_catalog.model_fingerprint,
         "execution_boundary": (
             "Gene-level capacity requires a current-model mapping plus an exact "
             "target/context/model-matched reviewed baseline capacity anchor."
@@ -198,6 +219,7 @@ def submit_oe_capacity_screen(
     dose_payload: Mapping[str, Any],
     parameter_scenarios: Sequence[str] = ("low", "nominal", "high"),
     execution_mode: str = "comparison",
+    product_mode: str = "relative_uncalibrated",
     feature_enabled: bool = True,
     compare_proxy: bool = True,
     growth_rate: float = 0.1,
@@ -215,6 +237,10 @@ def submit_oe_capacity_screen(
         mode = OEExecutionMode(execution_mode)
     except ValueError as exc:
         raise ValueError(f"unsupported execution_mode: {execution_mode}") from exc
+    try:
+        resolved_product_mode = OEProductMode(product_mode)
+    except ValueError as exc:
+        raise ValueError(f"unsupported product_mode: {product_mode}") from exc
     scenarios = tuple(ParameterScenario(value) for value in parameter_scenarios)
     context_id = _context_id(carbon_source_id, growth_rate)
     requests = tuple(
@@ -224,6 +250,7 @@ def submit_oe_capacity_screen(
             context_id=context_id,
             dose=dose,
             execution_mode=mode,
+            product_mode=resolved_product_mode,
         )
         for gene_id in normalized_genes
     )
@@ -255,6 +282,7 @@ def submit_oe_capacity_screen(
             carbon_source_id,
             float(relative_uncertainty),
             _capacity_asset_version(),
+            _model_asset_version(),
         )
         result = run_gene_level_oe_screen(runtime, requests, config)
         outputs = write_oe_capacity_outputs(
@@ -279,10 +307,20 @@ def submit_oe_capacity_screen(
         )
         raise
     try:
+        run_status = (
+            "partial_failure"
+            if result.rows and result.failures
+            else "failed"
+            if result.failures
+            else "completed"
+        )
+        product_states = sorted(
+            {row.product_state.value for row in (*result.rows, *result.failures)}
+        )
         summary = {
             "run_name": safe_run_name,
             "run_dir": str(run_dir),
-            "status": "completed",
+            "status": run_status,
             "target_id": target_id,
             "context_id": context_id,
             "completed_count": len(result.rows),
@@ -291,7 +329,14 @@ def submit_oe_capacity_screen(
             "failures": [_json_ready(asdict(row)) for row in result.failures],
             "warnings": list(result.warnings),
             "paths": _json_ready(asdict(outputs)),
-            "model_relative_only": True,
+            "model_fingerprint": result.model_fingerprint,
+            "product_states": product_states,
+            "absolute_capacity_available": any(
+                row.absolute_solver_allowed for row in (*result.rows, *result.failures)
+            ),
+            "model_relative_only": not any(
+                row.absolute_solver_allowed for row in (*result.rows, *result.failures)
+            ),
             "mutates_recommendation_tier": False,
         }
         (run_dir / "ui_run_summary.json").write_text(
@@ -300,7 +345,7 @@ def submit_oe_capacity_screen(
         )
         _write_run_status(
             run_dir,
-            status="completed",
+            status=run_status,
             completed_count=len(result.rows),
             failure_count=len(result.failures),
             **status_base,
@@ -372,6 +417,7 @@ def _prepare_runtime(
     carbon_source_id: str,
     relative_uncertainty: float,
     capacity_asset_version: str,
+    model_asset_version: str,
 ) -> SimpleNamespace:
     return prepare_external_candidate_runtime(
         _repo_root(),
@@ -386,6 +432,15 @@ def _prepare_runtime(
 
 def _capacity_asset_version() -> str:
     return capacity_asset_version(_repo_root(), OE_CAPACITY_ASSET_PATH)
+
+
+def _model_asset_version() -> str:
+    digest = __import__("hashlib").sha256()
+    model_root = _repo_root() / "Model"
+    for path in sorted(item for item in model_root.rglob("*") if item.is_file()):
+        digest.update(str(path.relative_to(model_root)).replace("\\", "/").encode("utf-8"))
+        digest.update(path.read_bytes())
+    return digest.hexdigest()
 
 
 def _load_capacity_asset_snapshot(

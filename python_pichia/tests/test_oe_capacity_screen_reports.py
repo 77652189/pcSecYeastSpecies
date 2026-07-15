@@ -13,6 +13,7 @@ from pcsec_pichia.core.pichia_enzymes import (
     SecretoryEnzymeData,
 )
 from pcsec_pichia.oe_capacity import (
+    AbsoluteCapacityAvailability,
     OECapacityComparisonResult,
     OECapacityScenarioResult,
     OECapacityScreenConfig,
@@ -21,6 +22,9 @@ from pcsec_pichia.oe_capacity import (
     OEDoseSpec,
     OEExecutionMode,
     OEExecutionStatus,
+    OECalibrationStatus,
+    OEProductMode,
+    OEProductState,
     ParameterScenario,
     SolverSnapshot,
     run_gene_level_oe_screen,
@@ -88,7 +92,7 @@ def test_small_batch_screen_preserves_completed_and_non_executable_rows(
         _config(),
     )
     result.validate()
-    assert captured_modes == [OEExecutionMode.REACTION_PROXY]
+    assert captured_modes == [OEExecutionMode.RELATIVE_GENE_CAPACITY]
     assert len(result.rows) == 1
     assert len(result.failures) == 1
     row = result.rows[0]
@@ -148,36 +152,6 @@ def test_screen_outputs_write_jsonl_manifest_and_boundary_report(
         _config(),
     )
     failed_row = result.failures[0]
-    scenario_baseline = replace(
-        failed_row.proxy_attempts[0],
-        execution_mode=OEExecutionMode.NOT_EXECUTABLE,
-        parameter_scenario=ParameterScenario.NOMINAL,
-        attempt_id="nominal-baseline",
-    )
-    scenario_perturbed = replace(
-        failed_row.proxy_attempts[1],
-        execution_mode=OEExecutionMode.GENE_CAPACITY,
-        parameter_scenario=ParameterScenario.NOMINAL,
-        attempt_id="nominal-perturbed",
-        message="high scenario infeasible",
-    )
-    result = replace(
-        result,
-        failures=(
-            replace(
-                failed_row,
-                scenario_results=(
-                    OECapacityScenarioResult(
-                        parameter_scenario=ParameterScenario.NOMINAL,
-                        baseline=scenario_baseline,
-                        perturbed=scenario_perturbed,
-                        failure_reason="perturbed solve infeasible",
-                    ),
-                ),
-            ),
-        ),
-    )
-
     outputs = write_oe_capacity_outputs(result, tmp_path / "oe_capacity")
 
     outputs.validate()
@@ -188,9 +162,10 @@ def test_screen_outputs_write_jsonl_manifest_and_boundary_report(
     manifest = json.loads(Path(outputs.manifest_path).read_text(encoding="utf-8"))
     report = Path(outputs.report_path).read_text(encoding="utf-8")
     assert rows[0]["screen_status"] == "partial_failure"
-    assert rows[0]["execution_mode"] == "reaction_proxy"
+    assert rows[0]["execution_mode"] == "relative_gene_capacity"
     assert rows[0]["proxy_objective"] == 1.1
     assert rows[0]["gene_capacity_objective"] is None
+    assert rows[0]["relative_objective"] == 1.15
     assert rows[0]["gene_capacity_vs_baseline_delta"] is None
     assert rows[0]["proxy_attempts"][1]["success"] is False
     assert rows[0]["proxy_attempts"][1]["message"] == "infeasible proxy"
@@ -211,8 +186,77 @@ def test_screen_outputs_write_jsonl_manifest_and_boundary_report(
     assert "Mapping and parameter traceability" in report
     assert "reviewed_baseline_capacity" in report
     assert "Reaction proxy attempts" in report
+    assert "Relative scenario solver evidence" in report
     assert "infeasible proxy" in report
+    assert "Scenario solver evidence" not in report
+
+
+def test_absolute_partial_failure_preserves_scenario_message_in_all_outputs(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "pcsec_pichia.oe_capacity.simulation.run_gene_level_oe_comparison",
+        lambda _prepared, plan, _options: _comparison(
+            plan, include_failed_proxy=True
+        ),
+    )
+    relative_result = run_gene_level_oe_screen(
+        _prepared_model(),
+        (_request("G1", OEExecutionMode.COMPARISON),),
+        _config(),
+    )
+    source_row = relative_result.failures[0]
+    baseline = replace(
+        source_row.proxy_attempts[0],
+        execution_mode=OEExecutionMode.NOT_EXECUTABLE,
+        parameter_scenario=ParameterScenario.NOMINAL,
+        attempt_id="nominal-absolute-baseline",
+    )
+    perturbed = replace(
+        source_row.proxy_attempts[1],
+        execution_mode=OEExecutionMode.GENE_CAPACITY,
+        parameter_scenario=ParameterScenario.NOMINAL,
+        attempt_id="nominal-absolute-perturbed",
+        message="high scenario infeasible",
+    )
+    absolute_row = replace(
+        source_row,
+        execution_mode=OEExecutionMode.COMPARISON,
+        execution_status=OEExecutionStatus.GENE_LEVEL_EXECUTABLE,
+        product_mode=OEProductMode.ABSOLUTE_CAPACITY,
+        product_state=OEProductState.ABSOLUTE_AVAILABLE,
+        absolute_capacity_availability=AbsoluteCapacityAvailability.AVAILABLE_REVIEWED,
+        calibration_status=OECalibrationStatus.REVIEWED_ABSOLUTE,
+        absolute_solver_allowed=True,
+        scenario_results=(
+            OECapacityScenarioResult(
+                parameter_scenario=ParameterScenario.NOMINAL,
+                baseline=baseline,
+                perturbed=perturbed,
+                failure_reason="scenario_perturbation_failed",
+            ),
+        ),
+        relative_scenario_results=(),
+        relative_capacity_factors=(),
+        relative_objective=None,
+        relative_vs_baseline_delta=None,
+        relative_vs_proxy_delta=None,
+        nominal_capacity=1.0,
+        nominal_capacities=(("R1_complex_formation", 1.0),),
+        screen_status="partial_failure",
+    )
+    result = replace(relative_result, rows=(), failures=(absolute_row,))
+    outputs = write_oe_capacity_outputs(result, tmp_path / "absolute-failure")
+    row = json.loads(Path(outputs.rows_path).read_text(encoding="utf-8"))
+    manifest = json.loads(Path(outputs.manifest_path).read_text(encoding="utf-8"))
+    report = Path(outputs.report_path).read_text(encoding="utf-8")
+
+    assert row["scenario_results"][0]["failure_reason"] == "scenario_perturbation_failed"
+    assert row["scenario_results"][0]["perturbed"]["message"] == "high scenario infeasible"
+    assert manifest["status"]["state"] == "failed"
     assert "Scenario solver evidence" in report
+    assert "scenario_perturbation_failed" in report
     assert "high scenario infeasible" in report
 
 
@@ -299,7 +343,7 @@ def _comparison(
         protein_resource_cost=0.1,
     )
     proxy = None
-    if plan.execution_mode in {
+    if plan.proxy_reaction_ids or plan.execution_mode in {
         OEExecutionMode.REACTION_PROXY,
         OEExecutionMode.COMPARISON,
     }:
@@ -350,6 +394,35 @@ def _comparison(
                 parameter_scenario=ParameterScenario.NOMINAL,
             ),
         )
+    relative_scenarios = ()
+    relative_results = ()
+    if plan.execution_mode is OEExecutionMode.RELATIVE_GENE_CAPACITY:
+        relative_baseline = replace(
+            baseline,
+            parameter_scenario=ParameterScenario.NOMINAL,
+            attempt_id="nominal-relative-baseline",
+        )
+        relative_perturbed = SolverSnapshot(
+            execution_mode=OEExecutionMode.RELATIVE_GENE_CAPACITY,
+            backend="scipy_highs_reference",
+            solver_status="optimal",
+            success=True,
+            secretion_objective=1.15,
+            growth_retention=1.0,
+            max_feasible_growth_rate=None,
+            protein_resource_cost=0.15,
+            parameter_scenario=ParameterScenario.NOMINAL,
+            attempt_id="nominal-relative-2x",
+        )
+        relative_scenarios = (relative_perturbed,)
+        relative_results = (
+            OECapacityScenarioResult(
+                parameter_scenario=ParameterScenario.NOMINAL,
+                baseline=relative_baseline,
+                perturbed=relative_perturbed,
+                objective_delta=0.15,
+            ),
+        )
     return OECapacityComparisonResult(
         gene_id=plan.gene_id,
         target_id=plan.target_id,
@@ -364,4 +437,8 @@ def _comparison(
         missing_information=plan.missing_information,
         warnings=plan.warnings,
         proxy_attempts=proxy_attempts,
+        relative_scenarios=relative_scenarios,
+        relative_scenario_results=relative_results,
+        relative_vs_baseline_delta=0.15 if relative_results else None,
+        relative_vs_proxy_delta=0.05 if relative_results and proxy else None,
     )

@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 from pcsec_pichia.oe_capacity import (
     ConfidenceLevel,
+    CapacityAnchorBinding,
     EvidenceSourceType,
     GeneCapacityCatalog,
     GeneCapacityParameterSet,
@@ -17,6 +18,8 @@ from pcsec_pichia.oe_capacity import (
     OECapacityValidationError,
     OEExecutionMode,
     OEExecutionStatus,
+    OEProductMode,
+    OEProductState,
     ParameterEstimate,
     ParameterPolicy,
     ParameterScenario,
@@ -25,6 +28,7 @@ from pcsec_pichia.oe_capacity import (
     build_oe_dose_spec,
     fingerprint_oe_capacity_model,
     plan_gene_level_overexpression,
+    resolve_oe_product_plan,
 )
 from pcsec_pichia.oe_capacity.parameters import load_capacity_anchor_catalog
 from pcsec_pichia.oe_capacity.schema import CapacityAnchor, CapacityAnchorCatalog
@@ -133,7 +137,10 @@ def test_current_model_policy_requires_reviewed_absolute_capacity_anchor() -> No
         exact_enzyme_mw=lambda enzyme_id: 60000.0,
     )
     catalog = GeneCapacityCatalog("model-v1", (_mapping(),))
-    assert not build_current_model_parameter_policy(catalog, combined).parameter_sets
+    unanchored = build_current_model_parameter_policy(catalog, combined)
+    assert len(unanchored.parameter_sets) == 1
+    assert unanchored.parameter_sets[0].baseline_enzyme_amount is None
+    assert "baseline_enzyme_amount" in unanchored.parameter_sets[0].missing_information
 
     policy = build_current_model_parameter_policy(
         catalog,
@@ -141,6 +148,9 @@ def test_current_model_policy_requires_reviewed_absolute_capacity_anchor() -> No
         capacity_anchors=CapacityAnchorCatalog(
             model_fingerprint="model-v1",
             anchors=(_anchor(),),
+            source_ref="Enzymedata/oe_capacity_baseline_capacity.json",
+            asset_version="v1",
+            source_sha256="a" * 64,
         ),
         target_id="hLF",
         context_id="ctx-hlf",
@@ -164,6 +174,9 @@ def test_capacity_anchor_asset_loader_validates_review_and_model_identity() -> N
         {
             "schema_version": 1,
             "model_fingerprint": "model-v1",
+            "source_ref": "Enzymedata/oe_capacity_baseline_capacity.json",
+            "asset_version": "v1",
+            "source_sha256": "a" * 64,
             "anchors": [
                 {
                     "anchor_id": "anchor-G1",
@@ -195,6 +208,9 @@ def test_capacity_anchor_asset_loader_validates_review_and_model_identity() -> N
     CapacityAnchorCatalog(
         model_fingerprint="registry-v1",
         anchors=(_anchor(), second_model),
+        source_ref="Enzymedata/oe_capacity_baseline_capacity.json",
+        asset_version="v1",
+        source_sha256="a" * 64,
     ).validate()
 
 
@@ -331,7 +347,12 @@ def test_plan_exposes_comparison_proxy_fallback_and_categorical_boundary() -> No
     )
     complete = ParameterPolicy(
         parameter_sets=(
-            _parameter_set("local", EvidenceSourceType.LOCAL_ENZYME_DATA, kcat=120.0),
+            _parameter_set(
+                "local",
+                EvidenceSourceType.LOCAL_ENZYME_DATA,
+                kcat=120.0,
+                model_fingerprint=model_fingerprint,
+            ),
         )
     )
 
@@ -348,6 +369,19 @@ def test_plan_exposes_comparison_proxy_fallback_and_categorical_boundary() -> No
     assert comparison.execution_status is OEExecutionStatus.GENE_LEVEL_EXECUTABLE
     assert comparison.proxy_reaction_ids == ("R1",)
     assert len(comparison.executable_capacity_specs) == 3
+    assert not comparison.relative_scenario_specs
+    assert len(comparison.available_relative_scenario_specs) == 3
+
+    relative = resolve_oe_product_plan(
+        comparison,
+        requested_mode=OEProductMode.RELATIVE_UNCALIBRATED,
+        feature_enabled=True,
+        compare_proxy=True,
+    )
+    assert relative.product_state is OEProductState.RELATIVE_UNCALIBRATED
+    assert relative.execution_status is OEExecutionStatus.GENE_LEVEL_EXECUTABLE
+    assert len(relative.relative_scenario_specs) == 3
+    assert not relative.executable_capacity_specs
 
     external_trace = GeneEnzymeReactionMapping(
         mapping_id="external-trace",
@@ -438,11 +472,12 @@ def test_any_incomplete_expected_mapping_downgrades_entire_plan_to_partial() -> 
         GeneCapacityCatalog(fingerprint, (first, second)),
         ParameterPolicy(
             parameter_sets=(
-                _parameter_set(
-                    "local",
-                    EvidenceSourceType.LOCAL_ENZYME_DATA,
-                    kcat=120.0,
-                ),
+                    _parameter_set(
+                        "local",
+                        EvidenceSourceType.LOCAL_ENZYME_DATA,
+                        kcat=120.0,
+                        model_fingerprint=fingerprint,
+                    ),
             )
         ),
     )
@@ -490,6 +525,7 @@ def _parameter_set(
     source_type: EvidenceSourceType,
     *,
     kcat: float,
+    model_fingerprint: str = "model-v1",
 ) -> GeneCapacityParameterSet:
     def estimate(name: str, value: float, unit: str) -> ParameterEstimate:
         return ParameterEstimate(
@@ -515,5 +551,19 @@ def _parameter_set(
             "baseline_enzyme_amount",
             1.0,
             "model_flux",
+        ),
+        capacity_anchor_binding=CapacityAnchorBinding(
+            anchor_id=f"anchor-{parameter_set_id}",
+            target_id="hLF",
+            context_id="ctx-hlf",
+            gene_id="G1",
+            enzyme_id="R1_complex",
+            formation_or_dilution_reaction_id="R1_complex_formation",
+            model_fingerprint=model_fingerprint,
+            asset_version="v1",
+            asset_sha256="a" * 64,
+            source_ref="reviewed-capacity/v1",
+            reviewed_by="capacity-review-board",
+            reviewed_at="2026-07-14",
         ),
     )

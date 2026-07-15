@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -8,6 +9,7 @@ from pcsec_pichia.oe_capacity.schema import (
     ConfidenceLevel,
     CapacityAnchor,
     CapacityAnchorCatalog,
+    AbsoluteCapacityAvailability,
     EvidenceSourceType,
     GeneCapacityCatalog,
     GeneCapacityParameterSet,
@@ -19,9 +21,13 @@ from pcsec_pichia.oe_capacity.schema import (
     OECapacityValidationError,
     OEExecutionStatus,
     OEExecutionMode,
+    OECalibrationStatus,
+    OEProductMode,
+    OEProductState,
     ParameterPolicy,
     ResourceCostMode,
     ParameterEstimate,
+    RelativeOEScenarioSpec,
 )
 from pcsec_pichia.oe_capacity.mapping import fingerprint_oe_capacity_model
 from pcsec_pichia.screens.gene_interventions import plan_gene_overexpression
@@ -137,7 +143,84 @@ def build_gene_capacity_specs(
                 dose=dose,
                 parameter_scenario=scenario,
                 resource_cost_mode=ResourceCostMode.CURRENT_PROTEIN_POOL,
+                capacity_anchor_binding=selected.capacity_anchor_binding,
                 warnings=selected.warnings,
+            )
+            spec.validate()
+            specs.append(spec)
+    return tuple(specs)
+
+
+def build_relative_oe_scenario_specs(
+    gene_id: str,
+    catalog: GeneCapacityCatalog,
+    dose: OEDoseSpec,
+    parameter_policy: ParameterPolicy,
+) -> tuple[RelativeOEScenarioSpec, ...]:
+    catalog.validate()
+    dose.validate()
+    parameter_policy.validate()
+    if dose.dose_mode is OEDoseMode.CATEGORICAL_ONLY:
+        return ()
+    multiplier = dose.expression_multiplier
+    if multiplier is None:
+        return ()
+    specs: list[RelativeOEScenarioSpec] = []
+    for mapping in catalog.mappings:
+        if (
+            mapping.gene_id != gene_id
+            or mapping.execution_status is not OEExecutionStatus.GENE_LEVEL_EXECUTABLE
+        ):
+            continue
+        selected = _select_parameter_set(
+            mapping.mapping_id,
+            mapping.gene_id,
+            mapping.enzyme_id,
+            parameter_policy,
+        )
+        if selected is None or selected.kcat is None or selected.molecular_weight is None:
+            continue
+        sources = tuple(
+            dict.fromkeys(
+                (
+                    f"mapping:{mapping.mapping_source.value}:{mapping.source_ref or mapping.mapping_id}",
+                    f"kcat:{selected.kcat.source_type.value}:{selected.kcat.source_ref}",
+                    "molecular_weight:"
+                    f"{selected.molecular_weight.source_type.value}:"
+                    f"{selected.molecular_weight.source_ref}",
+                    (
+                        f"dose:{dose.mapping_source}"
+                        if dose.mapping_source
+                        else f"dose:explicit_user_input:{dose.dose_id}"
+                    ),
+                )
+            )
+        )
+        for scenario in parameter_policy.scenarios:
+            spec = RelativeOEScenarioSpec(
+                mapping=mapping,
+                dose=dose,
+                parameter_scenario=scenario,
+                relative_capacity_factor=float(multiplier),
+                kcat=selected.kcat,
+                molecular_weight=selected.molecular_weight,
+                parameter_sources=sources,
+                warnings=tuple(
+                    dict.fromkeys(
+                        (
+                            *mapping.warnings,
+                            *selected.warnings,
+                            *dose.warnings,
+                            "Relative OE is uncalibrated and does not define an absolute model_flux capacity.",
+                        )
+                    )
+                ),
+                limitations=(
+                    "cannot_interpret_as_absolute_capacity",
+                    "cannot_interpret_as_true_expression_fold_change",
+                    "cannot_predict_mg_per_litre_or_experimental_success",
+                    "cannot_generalize_across_target_or_context",
+                ),
             )
             spec.validate()
             specs.append(spec)
@@ -175,8 +258,6 @@ def build_current_model_parameter_policy(
             target_id=target_id,
             context_id=context_id,
         )
-        if anchor is None:
-            continue
         warnings: list[str] = []
         kcat = _exact_parameter(
             combined,
@@ -200,7 +281,15 @@ def build_current_model_parameter_policy(
             source_version=catalog.model_fingerprint,
             warnings=warnings,
         )
-        baseline = anchor.as_parameter_estimate()
+        baseline = anchor.as_parameter_estimate() if anchor is not None else None
+        binding = (
+            anchor.binding(
+                asset_version=capacity_anchors.asset_version,
+                asset_sha256=capacity_anchors.source_sha256,
+            )
+            if anchor is not None and capacity_anchors is not None
+            else None
+        )
         parameter_set = GeneCapacityParameterSet(
             parameter_set_id=f"current-{mapping.mapping_id}",
             mapping_id=mapping.mapping_id,
@@ -210,6 +299,7 @@ def build_current_model_parameter_policy(
             molecular_weight=molecular_weight,
             baseline_enzyme_amount=baseline,
             complex_stoichiometry=None,
+            capacity_anchor_binding=binding,
             warnings=tuple(warnings),
         )
         parameter_set.validate()
@@ -223,13 +313,18 @@ def load_capacity_anchor_catalog(
     source: str | Path | Mapping[str, Any],
 ) -> CapacityAnchorCatalog:
     source_ref = ""
+    source_sha256 = ""
     if isinstance(source, Mapping):
         payload = source
+        source_ref = str(payload.get("source_ref") or "")
+        source_sha256 = str(payload.get("source_sha256") or "")
     else:
         path = Path(source)
         source_ref = str(path)
         try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
+            raw = path.read_bytes()
+            payload = json.loads(raw.decode("utf-8"))
+            source_sha256 = hashlib.sha256(raw).hexdigest()
         except (OSError, json.JSONDecodeError) as exc:
             raise OECapacityValidationError(
                 f"failed to load capacity anchor asset: {path}"
@@ -282,6 +377,8 @@ def load_capacity_anchor_catalog(
         anchors=tuple(anchors),
         schema_version=schema_version,
         source_ref=source_ref,
+        asset_version=str(payload.get("asset_version") or ""),
+        source_sha256=source_sha256,
     )
     catalog.validate()
     return catalog
@@ -340,17 +437,42 @@ def plan_gene_level_overexpression(
                     )
                 )
             ),
+            structural_mappings=mappings,
+            relative_scenario_specs=(),
+            product_mode=OEProductMode.NOT_EXECUTABLE,
+            product_state=OEProductState.NOT_EXECUTABLE,
+            absolute_capacity_availability=(
+                AbsoluteCapacityAvailability.UNAVAILABLE_MISSING_REVIEWED_ANCHOR
+            ),
+            calibration_status=OECalibrationStatus.NOT_APPLICABLE,
+            absolute_solver_allowed=False,
+            model_fingerprint=model_fingerprint,
+            limitations=(
+                "categorical_dose_has_no_reviewed_numeric_mapping",
+                "no_absolute_capacity_without_reviewed_anchor",
+                "no_mg_per_litre_prediction",
+            ),
         )
         plan.validate()
         return plan
 
     specs = build_gene_capacity_specs(gene_id, catalog, dose, parameter_policy)
+    relative_specs = build_relative_oe_scenario_specs(
+        gene_id,
+        catalog,
+        dose,
+        parameter_policy,
+    )
     executable_mapping_ids = {
         mapping.mapping_id
         for mapping in mappings
         if mapping.execution_status is OEExecutionStatus.GENE_LEVEL_EXECUTABLE
     }
     spec_mapping_ids = {spec.mapping.mapping_id for spec in specs}
+    relative_mapping_ids = {spec.mapping.mapping_id for spec in relative_specs}
+    incomplete_relative_mappings = bool(
+        executable_mapping_ids - relative_mapping_ids
+    )
     incomplete_expected_mappings = bool(executable_mapping_ids - spec_mapping_ids)
     if incomplete_expected_mappings:
         missing = tuple(dict.fromkeys((*missing, "capacity_parameters")))
@@ -370,6 +492,16 @@ def plan_gene_level_overexpression(
                 missing = tuple(
                     dict.fromkeys((*missing, "reviewed_baseline_capacity"))
                 )
+        # Absolute execution is an all-expected-mappings contract. A partially
+        # anchored plan remains useful for relative review, but none of its
+        # absolute specs may reach the solver.
+        specs = ()
+    if executable_mapping_ids and not specs:
+        missing = tuple(
+            dict.fromkeys(
+                (*missing, "reviewed_baseline_capacity", "capacity_parameters")
+            )
+        )
     scenarios = tuple(dict.fromkeys(spec.parameter_scenario for spec in specs))
     if specs and proxy_reactions:
         mode = OEExecutionMode.COMPARISON
@@ -385,12 +517,26 @@ def plan_gene_level_overexpression(
             if explain_only or incomplete_expected_mappings
             else OEExecutionStatus.GENE_LEVEL_EXECUTABLE
         )
+    elif relative_specs:
+        mode = OEExecutionMode.RELATIVE_GENE_CAPACITY
+        status = (
+            OEExecutionStatus.PARTIAL_MAPPING
+            if explain_only or incomplete_relative_mappings
+            else OEExecutionStatus.GENE_LEVEL_EXECUTABLE
+        )
+        warnings.append(
+            "Relative gene capacity is uncalibrated and does not define an absolute model_flux anchor."
+        )
     elif proxy_reactions:
         mode = OEExecutionMode.REACTION_PROXY
-        status = OEExecutionStatus.PROXY_ONLY
-        missing = tuple(dict.fromkeys((*missing, "capacity_parameters")))
+        status = (
+            OEExecutionStatus.PARTIAL_MAPPING
+            if relative_specs and (explain_only or incomplete_expected_mappings)
+            else OEExecutionStatus.PROXY_ONLY
+        )
         warnings.append(
-            "Gene-level capacity parameters are incomplete; using explicit reaction_proxy mode."
+            "Absolute gene capacity is unavailable without a reviewed baseline anchor; "
+            "reaction proxy remains a separate directional evidence path."
         )
     else:
         mode = OEExecutionMode.NOT_EXECUTABLE
@@ -411,6 +557,49 @@ def plan_gene_level_overexpression(
         uncertainty_scenarios=scenarios,
         missing_information=missing,
         warnings=tuple(dict.fromkeys(warnings)),
+        structural_mappings=mappings,
+        available_relative_scenario_specs=relative_specs,
+        relative_scenario_specs=relative_specs if not specs else (),
+        product_mode=(
+            OEProductMode.ABSOLUTE_CAPACITY
+            if specs
+            else OEProductMode.RELATIVE_UNCALIBRATED
+            if relative_specs
+            else OEProductMode.REACTION_PROXY
+            if proxy_reactions
+            else OEProductMode.NOT_EXECUTABLE
+        ),
+        product_state=(
+            OEProductState.ABSOLUTE_AVAILABLE
+            if specs
+            else OEProductState.RELATIVE_UNCALIBRATED
+            if relative_specs
+            else OEProductState.REACTION_PROXY
+            if proxy_reactions
+            else OEProductState.NOT_EXECUTABLE
+        ),
+        absolute_capacity_availability=(
+            AbsoluteCapacityAvailability.AVAILABLE_REVIEWED
+            if specs
+            else AbsoluteCapacityAvailability.UNAVAILABLE_MISSING_REVIEWED_ANCHOR
+        ),
+        calibration_status=(
+            OECalibrationStatus.REVIEWED_ABSOLUTE
+            if specs
+            else OECalibrationStatus.RELATIVE_UNCALIBRATED
+            if relative_specs
+            else OECalibrationStatus.PROXY_ONLY
+            if proxy_reactions
+            else OECalibrationStatus.NOT_APPLICABLE
+        ),
+        absolute_solver_allowed=bool(specs),
+        model_fingerprint=model_fingerprint,
+        limitations=(
+            "model_relative_only",
+            "no_mg_per_litre_prediction",
+            "no_experimental_success_probability",
+            "no_cross_context_guarantee",
+        ),
     )
     plan.validate()
     return plan

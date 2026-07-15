@@ -44,6 +44,29 @@ def test_verify_run_rejects_tampered_rows_even_when_manifest_claims_completed(
     assert "files.rows.sha256_mismatch" in verification["errors"]
 
 
+def test_verify_run_rejects_scientifically_inconsistent_product_state(
+    tmp_path: Path,
+) -> None:
+    run_dir = _write_run(tmp_path, target_id="hLF", case_kind="executable")
+    rows_path = run_dir / "oe_capacity_rows.jsonl"
+    row = json.loads(rows_path.read_text(encoding="utf-8"))
+    row["product_state"] = "relative_uncalibrated"
+    row["execution_mode"] = "relative_gene_capacity"
+    rows_path.write_text(json.dumps(row, sort_keys=True) + "\n", encoding="utf-8")
+    manifest_path = run_dir / "oe_capacity_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["files"]["rows"]["sha256"] = _sha256(rows_path)
+    manifest_path.write_text(json.dumps(manifest, sort_keys=True), encoding="utf-8")
+
+    verification = verify_oe_capacity_run(
+        run_dir,
+        {"target_id": "hLF", "case_kind": "executable"},
+    )
+
+    assert verification["passed"] is False
+    assert "rows.product_state.relative_uncalibrated" in verification["errors"]
+
+
 def test_verify_run_rejects_v1_and_missing_scenario_evidence(tmp_path: Path) -> None:
     run_dir = _write_run(tmp_path, target_id="hLF", case_kind="executable")
     manifest_path = run_dir / "oe_capacity_manifest.json"
@@ -242,19 +265,35 @@ def _write_run(
         "context_id": "glucose_mu_0.1",
         "gene_id": gene_id or ("G1" if case_kind == "executable" else "G_BOUNDARY"),
         "screen_status": "completed" if case_kind == "executable" else "failed",
-        "execution_mode": "comparison",
+        "execution_mode": "comparison" if case_kind == "executable" else "not_executable",
         "execution_status": (
             "gene_level_executable" if case_kind == "executable" else "partial_mapping"
         ),
-        "baseline_objective": 1.0,
-        "proxy_objective": 1.1,
+        "product_mode": "absolute_capacity",
+        "product_state": (
+            "absolute_available" if case_kind == "executable" else "absolute_unavailable"
+        ),
+        "absolute_capacity_availability": (
+            "available_reviewed"
+            if case_kind == "executable"
+            else "unavailable_missing_reviewed_anchor"
+        ),
+        "calibration_status": (
+            "reviewed_absolute" if case_kind == "executable" else "unavailable"
+        ),
+        "absolute_solver_allowed": case_kind == "executable",
+        "model_fingerprint": "a" * 64,
+        "baseline_objective": 1.0 if case_kind == "executable" else None,
+        "proxy_objective": 1.1 if case_kind == "executable" else None,
         "gene_capacity_objective": 1.2 if case_kind == "executable" else None,
         "missing_information": missing,
         "uncertainty_scenarios": ["nominal"],
         "scenario_results": scenarios if case_kind == "executable" else [],
-        "proxy_attempts": [
-            {"attempt_id": "R1", "success": True, "solver_status": "optimal"}
-        ],
+        "proxy_attempts": (
+            [{"attempt_id": "R1", "success": True, "solver_status": "optimal"}]
+            if case_kind == "executable"
+            else []
+        ),
     }
     rows_path.write_text(json.dumps(row, sort_keys=True) + "\n", encoding="utf-8")
     report_path.write_text("# verified report\n", encoding="utf-8")
@@ -295,6 +334,7 @@ def _write_run(
         "coverage": {
             "total_rows": 1,
             "by_execution_status": {row["execution_status"]: 1},
+            "by_product_state": {row["product_state"]: 1},
         },
     }
     (root / "oe_capacity_manifest.json").write_text(

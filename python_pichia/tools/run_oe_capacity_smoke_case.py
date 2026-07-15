@@ -37,6 +37,7 @@ def main() -> int:
         },
         parameter_scenarios=("low", "nominal", "high"),
         execution_mode="comparison",
+        product_mode="absolute_capacity",
         feature_enabled=True,
         compare_proxy=True,
         run_name=args.run_name,

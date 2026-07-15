@@ -6,6 +6,7 @@ from threading import Event, Thread
 from types import SimpleNamespace
 
 from pcsec_pichia.oe_capacity import (
+    AbsoluteCapacityAvailability,
     ConfidenceLevel,
     EvidenceSourceType,
     GeneCapacityCatalog,
@@ -17,6 +18,9 @@ from pcsec_pichia.oe_capacity import (
     OEDoseMode,
     OEExecutionMode,
     OEExecutionStatus,
+    OECalibrationStatus,
+    OEProductMode,
+    OEProductState,
     ParameterScenario,
     ParameterPolicy,
 )
@@ -30,7 +34,7 @@ from pcsec_pichia.screens import prepare_screen_inputs
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_preview_downgrades_structural_mapping_without_reviewed_capacity(
+def test_preview_uses_core_product_summary_without_mutating_mapping_status(
     monkeypatch,
 ) -> None:
     mapping = GeneEnzymeReactionMapping(
@@ -52,17 +56,39 @@ def test_preview_downgrades_structural_mapping_without_reviewed_capacity(
         mappings=(mapping,),
     )
     runtime = SimpleNamespace(
+        fixed_model=object(),
         gene_capacity_catalog=catalog,
         parameter_policy=ParameterPolicy(parameter_sets=()),
     )
     monkeypatch.setattr(service, "_prepare_runtime", lambda *args: runtime)
+    core_plan = SimpleNamespace(executable_capacity_specs=())
+    monkeypatch.setattr(
+        service,
+        "plan_gene_level_overexpression",
+        lambda *args: core_plan,
+    )
+    monkeypatch.setattr(
+        service,
+        "resolve_oe_product_plan",
+        lambda plan, **kwargs: plan,
+    )
+    monkeypatch.setattr(
+        service,
+        "summarize_oe_product_candidate",
+        lambda plan: {
+            "product_state": "absolute_unavailable",
+            "absolute_capacity_availability": "unavailable_missing_reviewed_anchor",
+            "missing_information": ["reviewed_baseline_capacity"],
+        },
+    )
 
     preview = service.preview_oe_capacity_candidate(target_id="hLF", gene_id="G1")
 
     assert preview["parameter_set_count"] == 0
     assert preview["executable_mapping_count"] == 0
-    assert preview["mappings"][0]["execution_status"] == "partial_mapping"
-    assert "reviewed_baseline_capacity" in preview["mappings"][0]["missing_information"]
+    assert preview["mappings"][0]["execution_status"] == "gene_level_executable"
+    assert preview["product"]["product_state"] == "absolute_unavailable"
+    assert "reviewed_baseline_capacity" in preview["product"]["missing_information"]
 
 
 def test_oe_capacity_page_is_registered_in_navigation_and_entrypoint() -> None:
@@ -99,12 +125,13 @@ def test_oe_capacity_view_uses_service_only_and_target_scoped_session_keys() -> 
         "oe_capacity_last_runs_by_target",
         "oe_capacity_candidate_selection_by_target",
         "oe_capacity_promotion_preview_by_target",
-        '"gene_id": "oe_capacity_widget_gene_id"',
+            '"gene_id": "oe_capacity_widget_gene_id"',
+            '"product_mode": "oe_capacity_widget_product_mode"',
         '"scenarios": "oe_capacity_widget_scenarios"',
         "on_change=_sync_form_field",
         "on_change=_switch_target_form",
         "reviewed_baseline_capacity",
-        "baseline / proxy / gene-capacity",
+            "运行所选 OE 产品模式",
         "不会自动修改 recommendation tier",
         "我明确批准以上候选写入正式容量资产",
     ):
@@ -217,6 +244,12 @@ def test_service_submits_core_screen_and_writes_target_scoped_summary(
             context_id="glucose_mu_0.1",
             execution_mode=OEExecutionMode.COMPARISON,
             execution_status=OEExecutionStatus.GENE_LEVEL_EXECUTABLE,
+            product_mode=OEProductMode.ABSOLUTE_CAPACITY,
+            product_state=OEProductState.ABSOLUTE_AVAILABLE,
+            absolute_capacity_availability=AbsoluteCapacityAvailability.AVAILABLE_REVIEWED,
+            calibration_status=OECalibrationStatus.REVIEWED_ABSOLUTE,
+            absolute_solver_allowed=True,
+            model_fingerprint="model-v1",
             dose_id="2x",
             dose_mode=OEDoseMode.EXPLICIT_MULTIPLIER,
             expression_multiplier=2.0,
@@ -230,6 +263,8 @@ def test_service_submits_core_screen_and_writes_target_scoped_summary(
             gene_capacity_vs_baseline_delta=0.2,
             gene_capacity_vs_proxy_delta=0.1,
             protein_resource_cost_delta=0.01,
+            nominal_capacity=2.0,
+            limitations=("model_relative_only", "no_mg_per_litre_prediction"),
         )
         return OECapacityScreenResult(
             model_fingerprint="model-v1",
@@ -282,7 +317,9 @@ def test_service_submits_core_screen_and_writes_target_scoped_summary(
     assert summary["completed_count"] == 1
     assert summary["failure_count"] == 0
     assert summary["status"] == "completed"
-    assert summary["model_relative_only"] is True
+    assert summary["model_relative_only"] is False
+    assert summary["absolute_capacity_available"] is True
+    assert summary["product_states"] == ["absolute_available"]
     assert summary["mutates_recommendation_tier"] is False
     assert (tmp_path / "hlf-ui-test" / "ui_run_summary.json").is_file()
     status = service._load_run_status(tmp_path / "hlf-ui-test")

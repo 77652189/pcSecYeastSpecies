@@ -68,6 +68,10 @@ def write_oe_capacity_outputs(
         required_scenarios,
         feature_enabled=result.config.feature_enabled,
     )
+    relative_complete = _relative_scenario_evidence_complete(
+        row_payloads,
+        required_scenarios,
+    )
     identity = {
         "run_id": resolved.name,
         "target_ids": target_ids,
@@ -93,9 +97,12 @@ def write_oe_capacity_outputs(
         else "completed"
     )
     execution_status_counts: dict[str, int] = {}
+    product_state_counts: dict[str, int] = {}
     for payload in row_payloads:
         key = str(payload.get("execution_status") or "unknown")
         execution_status_counts[key] = execution_status_counts.get(key, 0) + 1
+        product_key = str(payload.get("product_state") or "unknown")
+        product_state_counts[product_key] = product_state_counts.get(product_key, 0) + 1
     manifest = {
         "schema_version": 2,
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -124,15 +131,29 @@ def write_oe_capacity_outputs(
         "coverage": {
             "total_rows": len(row_payloads),
             "by_execution_status": execution_status_counts,
+            "by_product_state": product_state_counts,
         },
         "scenario_completeness": {
             "required": required_scenarios if result.config.feature_enabled else [],
             "complete": complete_scenarios,
         },
+        "absolute_scenario_completeness": {
+            "required": required_scenarios if result.config.feature_enabled else [],
+            "complete": complete_scenarios,
+        },
+        "relative_scenario_definition_complete": relative_complete,
         "execution_modes": sorted(
             {row.execution_mode.value for row in (*result.rows, *result.failures)}
         ),
-        "model_relative_only": True,
+        "product_states": sorted(
+            {row.product_state.value for row in (*result.rows, *result.failures)}
+        ),
+        "absolute_capacity_available": any(
+            row.absolute_solver_allowed for row in (*result.rows, *result.failures)
+        ),
+        "model_relative_only": not any(
+            row.absolute_solver_allowed for row in (*result.rows, *result.failures)
+        ),
         "predicts_absolute_yield": False,
         "mutates_recommendation_tier": False,
         "mutates_model_assets": False,
@@ -159,7 +180,7 @@ def _scenario_evidence_complete(
     executable = [
         row
         for row in rows
-        if row.get("execution_status") == "gene_level_executable"
+        if row.get("product_state") == "absolute_available"
         and row.get("screen_status") == "completed"
     ]
     if not executable:
@@ -191,6 +212,31 @@ def _row_has_scenarios(row: Mapping[str, Any], required: list[str]) -> bool:
     return set(required).issubset(found)
 
 
+def _relative_scenario_evidence_complete(
+    rows: list[dict[str, Any]],
+    required: list[str],
+) -> bool:
+    relative_rows = [
+        row for row in rows if row.get("product_state") == "relative_uncalibrated"
+    ]
+    if not relative_rows:
+        return True
+    for row in relative_rows:
+        factors = {
+            str(item[0])
+            for item in row.get("relative_capacity_factors") or []
+            if isinstance(item, list) and len(item) == 2
+        }
+        evidence = {
+            str(item.get("parameter_scenario") or item.get("scenario") or "")
+            for item in row.get("relative_scenario_results") or []
+            if isinstance(item, Mapping)
+        }
+        if not set(required).issubset(factors) or not set(required).issubset(evidence):
+            return False
+    return True
+
+
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -199,8 +245,8 @@ def _markdown_report(result: OECapacityScreenResult) -> str:
     lines = [
         "# Gene-level OE capacity comparison",
         "",
-        "This report compares model-relative baseline, legacy reaction proxy, and "
-        "gene-enzyme capacity scenarios. It does not predict mg/L, true expression "
+        "This report separates reaction proxy, relative uncalibrated OE, absolute "
+        "capacity availability, and not-executable outcomes. It does not predict mg/L, true expression "
         "fold-change, experimental success probability, or recommendation tier.",
         "",
         f"- Model fingerprint: `{result.model_fingerprint}`",
@@ -209,22 +255,27 @@ def _markdown_report(result: OECapacityScreenResult) -> str:
         f"- Gene-capacity feature enabled: {result.config.feature_enabled}",
         f"- Legacy proxy comparison enabled: {result.config.compare_proxy}",
         "",
-        "| Status | Gene | Target | Mode | Execution status | Baseline | Proxy | "
-        "Gene capacity | Delta vs baseline | Delta vs proxy | Resource cost delta | "
+        "| Status | Gene | Target | Context | Product state | Calibration | Absolute availability | Mode | Execution status | Baseline | Proxy | "
+        "Relative objective | Relative delta | Gene capacity | Nominal capacity | Delta vs baseline | Delta vs proxy | Resource cost delta | "
         "Missing information |",
-        "| --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
     ]
     for status, rows in (("completed", result.rows), ("failed", result.failures)):
         for row in rows:
-            lines.append(_markdown_row(status, row))
+            lines.append(_markdown_row(row.screen_status or status, row))
     lines.extend(("", "## Mapping and parameter traceability", ""))
     for status, rows in (("completed", result.rows), ("failed", result.failures)):
         for row in rows:
             identity = f"{row.target_id}/{row.gene_id}/{row.context_id}/{row.dose_id}"
             lines.extend(
                 (
-                    f"### `{identity}` ({status})",
+                    f"### `{identity}` ({row.screen_status or status})",
                     "",
+                    f"- Product mode/state: `{row.product_mode.value}` / `{row.product_state.value}`",
+                    f"- Calibration: `{row.calibration_status.value}`",
+                    f"- Absolute availability: `{row.absolute_capacity_availability.value}`",
+                    f"- Absolute solver allowed: `{row.absolute_solver_allowed}`",
+                    f"- Model fingerprint: `{row.model_fingerprint}`",
                     f"- Mapping IDs: {', '.join(row.mapping_ids) or 'none'}",
                     f"- Parameter sources: {', '.join(row.parameter_sources) or 'none'}",
                     "- Parameter confidence: "
@@ -241,6 +292,7 @@ def _markdown_report(result: OECapacityScreenResult) -> str:
                         or "none"
                     ),
                     f"- Warnings: {', '.join(row.warnings) or 'none'}",
+                    f"- Limitations: {', '.join(row.limitations) or 'none'}",
                     "",
                 )
             )
@@ -254,6 +306,21 @@ def _markdown_report(result: OECapacityScreenResult) -> str:
                         f"(success={scenario_result.baseline.success}); "
                         f"perturbed=`{scenario_result.perturbed.solver_status}` "
                         f"(success={scenario_result.perturbed.success}); "
+                        f"failure=`{scenario_result.failure_reason or 'none'}`; "
+                        f"message=`{scenario_result.perturbed.message or scenario_result.baseline.message or 'none'}`"
+                    )
+                lines.append("")
+            if row.relative_scenario_results:
+                lines.extend(("#### Relative scenario solver evidence", ""))
+                for scenario_result in row.relative_scenario_results:
+                    lines.append(
+                        "- "
+                        f"`{scenario_result.parameter_scenario.value}`: "
+                        f"baseline=`{scenario_result.baseline.solver_status}` "
+                        f"(success={scenario_result.baseline.success}); "
+                        f"perturbed=`{scenario_result.perturbed.solver_status}` "
+                        f"(success={scenario_result.perturbed.success}); "
+                        f"delta=`{_number(scenario_result.objective_delta)}`; "
                         f"failure=`{scenario_result.failure_reason or 'none'}`; "
                         f"message=`{scenario_result.perturbed.message or scenario_result.baseline.message or 'none'}`"
                     )
@@ -281,11 +348,18 @@ def _markdown_row(status: str, row: OECapacityScreenRow) -> str:
         status,
         row.gene_id,
         row.target_id,
+        row.context_id,
+        row.product_state.value,
+        row.calibration_status.value,
+        row.absolute_capacity_availability.value,
         row.execution_mode.value,
         row.execution_status.value,
         _number(row.baseline_objective),
         _number(row.proxy_objective),
+        _number(row.relative_objective),
+        _number(row.relative_vs_baseline_delta),
         _number(row.gene_capacity_objective),
+        _number(row.nominal_capacity),
         _number(row.gene_capacity_vs_baseline_delta),
         _number(row.gene_capacity_vs_proxy_delta),
         _number(row.protein_resource_cost_delta),

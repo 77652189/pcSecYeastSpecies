@@ -7,10 +7,11 @@
 
 ```yaml
 current_program: mvp_directions_1_to_3
-current_slice: direction_2_oe_product_tiering_closure
+current_slice: direction_3_secretory_resource_round_0
 slice_status: ready
 direction_1_status: accepted_waiting_for_real_data_replay
-relative_oe_status: authorized_ready_for_product_closure
+direction_2_status: accepted_product_tiering_closed
+relative_oe_status: available_uncalibrated_with_independent_solver_path
 absolute_capacity_status: unavailable_waiting_for_qualified_evidence
 ```
 
@@ -21,29 +22,28 @@ absolute_capacity_status: unavailable_waiting_for_qualified_evidence
 - 方向 1 已通过验收：研发发酵宽表 CSV/XLSX/JSONL 已接入 canonical validation、cache、prediction linkage、calibration eligibility 和报告链路。
 - 脱敏回放覆盖正常、污染、培养失败、检测失败、其他排除、亲本对照、独立培养重复和阴性结果；失败/排除原值保留且不进入校准。
 - 尚未读取获批真实研发数据；真实数据到来后只执行独立回填 checkpoint，不重新开启方向 1 开发。
-- 当前进入方向 2 产品收口。现有 PRIDE/ecPichia 证据不能形成审核后的绝对 baseline capacity，正式 registry 保持不变。
-- ADR-002 已接受 reaction proxy、相对未校准 gene-capacity 与绝对 unavailable 三种产品状态必须分离。
+- 方向 2 已验收：核心层统一判定 reaction proxy、relative uncalibrated、absolute unavailable 和 not executable；report、service 与 Streamlit 只透传和展示。
+- relative uncalibrated 使用独立的 current-model enzyme-coupling 成对求解，不读取 formation 通用上界或 baseline optimal flux；absolute 公共入口反查 runtime 审核 catalog、asset hash/version 和 baseline 数值。
+- hLF/OPN G6PDH2 新鲜 smoke 均为 `relative_uncalibrated`，绝对模式稳定为 `absolute_unavailable`；正式绝对容量 acceptance 仍为 `passed=false`，正式 registry 未修改。
 
 ## 已授权切片
 
-只执行 `direction_2_oe_product_tiering_closure`：让已有 OE 能力按照 ADR-002 形成一致、可审计的核心状态、报告、service 和 Streamlit 产品门禁。
+只执行 `direction_3_secretory_resource_round_0`：冻结 secretory resource layer 的资源池、单位、来源、适用条件、不确定性、开关、基线回归和 hLF/OPN 不可用状态契约。
 
-本切片不得新增外部容量来源、伪造绝对容量、进入方向 3 secretory resource layer、组合搜索或完整跨条件排名。
+本切片不得实现完整 secretory mechanism 求解、进入组合搜索或完整跨条件排名，也不得用文献基因名单直接生成约束。
 
 ## 必读材料
 
-1. [项目级执行与预算计划：方向 2 成功条件与授权边界](EXECUTION_PLAN.md#方向-2-成功条件)
+1. [项目级执行与预算计划：方向 3 Round 0 成功条件与授权边界](EXECUTION_PLAN.md#方向-3-round-0-成功条件)
 2. [当前架构：实验校准层与产品验收分层](pichia_current_architecture_and_requirements.md#产品验收分层)
-3. [ADR-002：相对 OE 与绝对容量分层](adr/002-relative-oe-and-absolute-capacity-layers.md)
-4. [Phase 2 既有实现与边界](pichia_next_plan.md#phase-2gene-level-oe-与酶容量)
+3. [Phase 3：分泌资源与蛋白稳态约束](pichia_next_plan.md#phase-3分泌资源与蛋白稳态约束)
+4. [ADR-002：相对 OE 与绝对容量分层](adr/002-relative-oe-and-absolute-capacity-layers.md)
 5. [数据与结果治理策略](data_and_results_policy.md)
 
 ## 验收与停止线
 
-- 必须产生实际产品状态或门禁收口及 focused tests，不能只修改文档或重复外部来源审计。
-- reaction proxy、relative uncalibrated、absolute unavailable 和 not executable 必须由核心层判定并在报告、service、UI 一致透传。
-- 缺少审核 baseline capacity 时不得调用绝对容量求解或生成 nominal capacity；不得用 proxy、最优 flux、通用上界、固定值或 fixture 替代。
-- 保留旧 proxy 数值和 feature-off 回归；hLF/OPN 必须保持 target/context/model version 与风险说明隔离。
-- `app/services` 和 Streamlit 只做 facade/展示，不重新实现模式判断或科学降级逻辑。
-- 完成 review/fix/verify 后更新状态并停止；不得自动进入方向 3。
-- 验证 focused tests、hLF/OPN smoke、相关 service/UI contract、`compileall`、保护目录、依赖、密钥和 ignore 边界。
+- Round 0 只冻结可执行契约和边界，必须明确代谢层、protein resource、secretory resource 与实验校准层的所有权。
+- 每类资源池必须声明单位、来源、适用条件、不确定性、开关和 baseline/feature-off 回归。
+- 文献基因名单、外部注释或同源关系不能直接提升为可执行约束；无合格参数时必须 unavailable/not executable。
+- hLF/OPN 的目标特异成本与不可用状态必须分开表达。
+- 完成 review/fix/verify 后更新状态并停止；不得自动进入方向 3 的机制实现或方向 4。

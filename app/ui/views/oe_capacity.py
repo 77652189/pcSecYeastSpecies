@@ -31,6 +31,7 @@ CANDIDATE_ACTIVE_TARGET_KEY = "oe_capacity_candidate_active_target"
 FORM_WIDGET_KEYS = {
     "gene_id": "oe_capacity_widget_gene_id",
     "dose_mode": "oe_capacity_widget_dose_mode",
+    "product_mode": "oe_capacity_widget_product_mode",
     "multiplier": "oe_capacity_widget_multiplier",
     "scenarios": "oe_capacity_widget_scenarios",
     "compare_proxy": "oe_capacity_widget_compare_proxy",
@@ -42,6 +43,7 @@ def _default_form_state(target_id: str) -> dict[str, Any]:
     return {
         "gene_id": "PAS_chr2-1_0047",
         "dose_mode": "明确倍数",
+        "product_mode": "相对未校准",
         "multiplier": 2.0,
         "scenarios": ["low", "nominal", "high"],
         "compare_proxy": True,
@@ -110,7 +112,7 @@ def _sync_candidate_selection(target_id: str) -> None:
 def render_oe_capacity() -> None:
     st.subheader("基因级 OE 容量对照")
     st.caption(
-        "并列比较 baseline、旧 reaction proxy 与 gene-enzyme capacity。"
+        "明确区分 reaction proxy、相对未校准 OE 与绝对容量可用性。"
         "结果是模型内相对比较，不预测 mg/L、真实表达倍数或实验成功率。"
     )
     targets = list_oe_capacity_targets()
@@ -151,6 +153,15 @@ def render_oe_capacity() -> None:
         args=(target_id, "gene_id"),
         help="必须使用当前模型 gene ID；common name 不会自动关联。",
     ).strip()
+    product_mode_label = st.radio(
+        "产品层级",
+        ("相对未校准", "Reaction proxy", "绝对容量研究"),
+        horizontal=True,
+        key=FORM_WIDGET_KEYS["product_mode"],
+        on_change=_sync_form_field,
+        args=(target_id, "product_mode"),
+        help="绝对容量研究在缺少审核 baseline anchor 时会返回 unavailable，且不会调用求解器。",
+    )
     left, right = st.columns(2)
     with left:
         dose_mode = st.radio(
@@ -199,6 +210,24 @@ def render_oe_capacity() -> None:
                         preview = preview_oe_capacity_candidate(
                             target_id=target_id,
                             gene_id=gene_id,
+                            dose_payload=(
+                                {
+                                    "dose_id": f"{float(multiplier):g}x-preview",
+                                    "dose_mode": "explicit_multiplier",
+                                    "expression_multiplier": float(multiplier),
+                                }
+                                if dose_mode == "明确倍数"
+                                else {
+                                    "dose_id": "categorical_oe_preview",
+                                    "dose_mode": "categorical_only",
+                                    "promoter": "unspecified",
+                                }
+                            ),
+                            product_mode={
+                                "相对未校准": "relative_uncalibrated",
+                                "Reaction proxy": "reaction_proxy",
+                                "绝对容量研究": "absolute_capacity",
+                            }[product_mode_label],
                         )
                     except Exception as exc:
                         st.error(f"预览失败：{exc}")
@@ -214,7 +243,7 @@ def render_oe_capacity() -> None:
             args=(target_id, "run_name"),
         )
         if st.button(
-            "运行 baseline / proxy / gene-capacity",
+            "运行所选 OE 产品模式",
             type="primary",
             use_container_width=True,
             disabled=not gene_id or not scenarios,
@@ -240,6 +269,11 @@ def render_oe_capacity() -> None:
                         dose_payload=dose_payload,
                         parameter_scenarios=tuple(scenarios),
                         execution_mode="comparison",
+                        product_mode={
+                            "相对未校准": "relative_uncalibrated",
+                            "Reaction proxy": "reaction_proxy",
+                            "绝对容量研究": "absolute_capacity",
+                        }[product_mode_label],
                         feature_enabled=True,
                         compare_proxy=compare_proxy,
                         run_name=run_name,
@@ -252,7 +286,7 @@ def render_oe_capacity() -> None:
                     runs = dict(st.session_state.get(LAST_RUNS_KEY) or {})
                     runs[target_id] = result
                     st.session_state[LAST_RUNS_KEY] = runs
-                    st.success("OE 容量对照已完成，结果已写入 local_runs/oe_capacity/ui_runs。")
+                    st.success("OE 产品分层运行已完成，结果已写入 local_runs/oe_capacity/ui_runs。")
 
     preview = (st.session_state.get(LAST_PREVIEWS_KEY) or {}).get(target_id)
     if preview:
@@ -386,6 +420,25 @@ def _render_external_candidate_review(target_id: str) -> None:
 
 def _render_preview(preview: dict[str, Any]) -> None:
     st.markdown("### Mapping 与参数预览")
+    product = preview.get("product") or {}
+    if product:
+        state_cols = st.columns(4)
+        state_cols[0].metric("产品状态", str(product.get("product_state") or ""))
+        state_cols[1].metric("校准状态", str(product.get("calibration_status") or ""))
+        state_cols[2].metric(
+            "绝对容量",
+            str(product.get("absolute_capacity_availability") or ""),
+        )
+        state_cols[3].metric(
+            "绝对求解门禁",
+            "允许" if product.get("absolute_solver_allowed") else "禁止",
+        )
+        for warning in product.get("warnings") or []:
+            st.warning(str(warning))
+        st.caption(
+            "模型指纹："
+            + str(product.get("model_fingerprint") or preview.get("model_fingerprint") or "")
+        )
     metrics = st.columns(3)
     metrics[0].metric("当前基因 mapping", int(preview.get("mapping_count") or 0))
     metrics[1].metric("可用参数集", int(preview.get("parameter_set_count") or 0))
@@ -403,7 +456,7 @@ def _render_preview(preview: dict[str, Any]) -> None:
         if parameter_sets:
             st.json(parameter_sets)
         else:
-            st.caption("没有完整的 kcat、分子量和基线容量参数，gene-capacity 将不可执行。")
+            st.caption("没有可用参数；核心层会返回明确的 unavailable/not-executable 状态。")
 
 
 def _render_result(result: dict[str, Any]) -> None:
@@ -413,12 +466,18 @@ def _render_result(result: dict[str, Any]) -> None:
     top[1].metric("失败 / 不可执行", int(result.get("failure_count") or 0))
     top[2].metric("目标", str(result.get("target_id") or ""))
     top[3].metric("运行状态", str(result.get("status") or "completed"))
+    st.caption(
+        "产品状态："
+        + ", ".join(str(item) for item in result.get("product_states") or [])
+        + " · 模型指纹："
+        + str(result.get("model_fingerprint") or "")
+    )
     rows = result.get("rows") or []
     failures = result.get("failures") or []
     if rows:
         st.dataframe(rows, use_container_width=True, hide_index=True)
     if failures:
-        st.warning("以下候选未完成 gene-capacity 对照；请查看 missing_information 和 warnings。")
+        st.warning("以下候选未完成所选产品模式；请查看产品状态、missing_information 和 warnings。")
         st.dataframe(failures, use_container_width=True, hide_index=True)
     solver_evidence = _solver_evidence_rows(result)
     if solver_evidence:
@@ -492,6 +551,10 @@ def _render_history(target_id: str) -> None:
             {
                 "run_name": row.get("run_name"),
                 "target_id": row.get("target_id"),
+                "context_id": row.get("context_id"),
+                "model_fingerprint": row.get("model_fingerprint"),
+                "product_states": ", ".join(row.get("product_states") or []),
+                "absolute_capacity_available": row.get("absolute_capacity_available"),
                 "completed_count": row.get("completed_count"),
                 "failure_count": row.get("failure_count"),
                 "status": row.get("status"),

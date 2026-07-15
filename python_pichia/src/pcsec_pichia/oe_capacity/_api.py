@@ -72,7 +72,6 @@ def plan_gene_level_overexpression(
     from pcsec_pichia.oe_capacity.parameters import (
         plan_gene_level_overexpression as _plan,
     )
-
     return _plan(
         model,
         gene_id,
@@ -82,6 +81,33 @@ def plan_gene_level_overexpression(
         catalog,
         parameter_policy,
     )
+
+
+def resolve_oe_product_plan(
+    plan: Any,
+    *,
+    requested_mode: Any,
+    feature_enabled: bool,
+    compare_proxy: bool,
+) -> Any:
+    from pcsec_pichia.oe_capacity.product_tiering import (
+        resolve_oe_product_plan as _resolve,
+    )
+
+    return _resolve(
+        plan,
+        requested_mode=requested_mode,
+        feature_enabled=feature_enabled,
+        compare_proxy=compare_proxy,
+    )
+
+
+def summarize_oe_product_candidate(plan: Any) -> dict[str, object]:
+    from pcsec_pichia.oe_capacity.product_tiering import (
+        summarize_oe_product_candidate as _summarize,
+    )
+
+    return _summarize(plan)
 
 
 def build_oe_capacity_constraints(prepared_model: Any, plan: Any) -> Any:
@@ -155,9 +181,11 @@ __all__ = [
     "build_oe_capacity_constraints",
     "build_oe_dose_spec",
     "plan_gene_level_overexpression",
+    "resolve_oe_product_plan",
     "run_gene_level_oe_comparison",
     "run_gene_level_oe_screen",
     "run_phase2_oe_capacity_acceptance",
+    "summarize_oe_product_candidate",
     "validate_gene_capacity_catalog",
     "verify_oe_capacity_run",
     "write_oe_capacity_outputs",

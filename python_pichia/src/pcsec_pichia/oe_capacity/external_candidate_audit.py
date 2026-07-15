@@ -231,11 +231,18 @@ def load_capacity_asset_snapshot(
     payload = json.loads(raw.decode("utf-8"))
     if not isinstance(payload, dict):
         raise ValueError("OE capacity asset root must be a JSON object.")
-    catalog = load_capacity_anchor_catalog(payload)
+    asset_sha256 = hashlib.sha256(raw).hexdigest()
+    catalog = load_capacity_anchor_catalog(
+        {
+            **payload,
+            "source_ref": str(asset_path),
+            "source_sha256": asset_sha256,
+        }
+    )
     return catalog, {
         "path": str(asset_path),
         "version": str(payload.get("asset_version") or ""),
-        "sha256": hashlib.sha256(raw).hexdigest(),
+        "sha256": asset_sha256,
         "reviewed": bool(catalog.anchors),
     }
 
