@@ -36,9 +36,24 @@ def parse_args() -> argparse.Namespace:
         help="Existing PRIDE quantitative cache to reuse for offline replay.",
     )
     parser.add_argument(
+        "--ecpichia-cache-dir",
+        type=Path,
+        help="Existing ecPichia supplement cache to reuse for offline replay.",
+    )
+    parser.add_argument(
         "--pride-pxd055501",
         action="store_true",
         help="Parse the reviewed PXD055501 G6PDH2 iBAQ evidence profile.",
+    )
+    parser.add_argument(
+        "--ecpichia-assessment",
+        action="store_true",
+        help="Parse reviewed ecPichia Supplementary 8 as assessment-only evidence.",
+    )
+    parser.add_argument(
+        "--ecpichia-supplement-file",
+        type=Path,
+        help="Reviewed Supplementary 8.yml for the initial manual import.",
     )
     parser.add_argument("--growth-rate", type=float, default=0.1)
     parser.add_argument("--carbon-source-id", default="glucose")
@@ -68,7 +83,10 @@ def main() -> int:
             offline_replay=args.offline_replay,
             identity_cache_dir=args.identity_cache_dir,
             quantitative_cache_dir=args.quantitative_cache_dir,
+            ecpichia_cache_dir=args.ecpichia_cache_dir,
             pride_pxd055501=args.pride_pxd055501,
+            ecpichia_assessment=args.ecpichia_assessment,
+            ecpichia_supplement_file=args.ecpichia_supplement_file,
             measurement_file=args.measurement_file,
             source_id=args.source_id,
             source_type=ExternalCapacitySourceType(args.source_type),

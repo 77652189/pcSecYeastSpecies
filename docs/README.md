@@ -5,7 +5,7 @@
 
 项目文档围绕一个原始研发目标组织：通过 KO/OE 和分泌路径改造，提高 hLF、OPN 等目标蛋白在 Pichia 中的分泌表现。
 
-当前系统已经具备 KO/OE 候选生成、证据复核、实验反馈回放、gene-enzyme-reaction capacity 求解，以及外部 baseline capacity 候选的人工导入、审核和显式提升链路，但不能承诺真实发酵产量、mg/L 绝对值或实验成功率。Round 6A 仍在进行：当前只完成 UniProt identity 与人工导入流程，尚未完成真实定量外部来源适配。
+当前系统已经具备 KO/OE 候选生成、证据复核、实验反馈回放、gene-enzyme-reaction capacity 求解，以及外部 baseline capacity 候选的人工导入、审核和显式提升链路，但不能承诺真实发酵产量、mg/L 绝对值或实验成功率。Round 6A 仍在进行：已接入 PRIDE 相对 iBAQ 与 ecPichia supplement 的可审计 source adapter，但绝对 abundance、条件匹配和 `model_flux` 换算链仍未闭合。
 
 ## 当前入口
 

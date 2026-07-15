@@ -10,9 +10,11 @@ from types import SimpleNamespace
 from typing import Any, Callable, Mapping, Sequence
 
 from pcsec_pichia.external_refs.capacity_sources import (
+    ECPICHIA_G6PDH2_SUPPLEMENT_PROFILE,
     ExternalCapacitySourceType,
     PXD055501_G6PDH2_PROFILE,
     RetrievalMode,
+    cache_ecpichia_supplement_source,
     cache_pride_maxquant_source,
     cache_uniprot_identity_source,
 )
@@ -26,6 +28,7 @@ from pcsec_pichia.oe_capacity.external_candidate_io import (
     import_capacity_measurements,
     load_external_capacity_candidate_bundle,
     load_external_capacity_candidate_snapshot,
+    parse_ecpichia_g6pdh2_source_assessment,
     parse_pride_maxquant_g6pdh2_evidence,
     write_external_capacity_candidate_cache,
 )
@@ -66,7 +69,10 @@ class ExternalCapacityAuditRequest:
     offline_replay: bool = False
     identity_cache_dir: Path | None = None
     quantitative_cache_dir: Path | None = None
+    ecpichia_cache_dir: Path | None = None
     pride_pxd055501: bool = False
+    ecpichia_assessment: bool = False
+    ecpichia_supplement_file: Path | None = None
     measurement_file: Path | None = None
     source_id: str = ""
     source_type: ExternalCapacitySourceType = (
@@ -98,6 +104,7 @@ class ExternalCapacityAuditOutputs:
             "audit": str(self.audit_json_path),
             "candidate_count": self.candidate_count,
             "promotion_ready_count": self.promotion_ready_count,
+            "formal_promotion_performed": False,
         }
 
 
@@ -445,6 +452,7 @@ def run_external_capacity_candidate_audit(
     measurements = ()
     source_assessments: list[dict[str, Any]] = []
     pride_evidence = None
+    runtime_condition = _default_host_condition(request)
     if request.pride_pxd055501:
         pride_source = cache_pride_maxquant_source(
             PXD055501_G6PDH2_PROFILE,
@@ -462,6 +470,8 @@ def run_external_capacity_candidate_audit(
         runtime_condition = pride_evidence.measurement.condition
         source_assessments.append(
             {
+                "assessment_id": "pride-pxd055501-relative-ibaq",
+                "source_kind": "relative_abundance",
                 "source_id": pride_source.source_id,
                 "project_accession": PXD055501_G6PDH2_PROFILE.project_accession,
                 "raw_metric": PXD055501_G6PDH2_PROFILE.metric_name,
@@ -495,10 +505,116 @@ def run_external_capacity_candidate_audit(
                 ),
                 "promotion_ready": False,
                 "assessment": "quantitative_relative_only",
+                "quantitative_value_available": True,
+                "target_value_available": True,
+                "capacity_value_available": False,
+                "model_flux_conversion_available": False,
+                "missing_information": [
+                    "absolute_abundance_calibration",
+                    "biomass_normalization",
+                    "paired_condition_matched_kcat",
+                    "formal_glucose_mu_0.1_condition_match",
+                ],
             }
         )
-    else:
-        runtime_condition = _default_host_condition(request)
+    if request.ecpichia_assessment:
+        ecpichia_source = cache_ecpichia_supplement_source(
+            ECPICHIA_G6PDH2_SUPPLEMENT_PROFILE,
+            request.ecpichia_cache_dir or (output_dir / "ecpichia_source"),
+            source_file=request.ecpichia_supplement_file,
+            retrieval_mode=(
+                RetrievalMode.OFFLINE_REPLAY
+                if request.offline_replay
+                else RetrievalMode.MANUAL_IMPORT
+            ),
+        )
+        ecpichia_evidence = parse_ecpichia_g6pdh2_source_assessment(
+            ecpichia_source
+        )
+        capacity_sources.append(ecpichia_source)
+        source_assessments.append(
+            {
+                "assessment_id": "ecpichia-supplementary-8-g6pdh2",
+                "source_kind": "external_enzyme_model_assessment",
+                "source_id": ecpichia_source.source_id,
+                "source_version": ecpichia_source.source_version,
+                "source_url": ecpichia_source.source_url,
+                "doi": ECPICHIA_G6PDH2_SUPPLEMENT_PROFILE.doi,
+                "license_id": ecpichia_source.license_id,
+                "license_url": ecpichia_source.license_url,
+                "terms_reviewed": ecpichia_source.terms_reviewed,
+                "raw_artifact_sha256": ecpichia_source.raw_sha256,
+                "upstream_archive_sha256": (
+                    ECPICHIA_G6PDH2_SUPPLEMENT_PROFILE.upstream_archive_sha256
+                ),
+                "raw_fields": [
+                    "gene_id",
+                    "enzyme_id",
+                    "reaction_id",
+                    "ec_number",
+                    "molecular_weight_g_per_mol",
+                    "kcat_per_s",
+                    "kcat_source_label",
+                    "reaction_protein_coefficient",
+                    "reported_concentration",
+                    "usage_lower_bound",
+                    "protein_pool_lower_bound",
+                ],
+                "raw_values": {
+                    "gene_id": ecpichia_evidence.gene_id,
+                    "enzyme_id": ecpichia_evidence.enzyme_id,
+                    "reaction_id": ecpichia_evidence.reaction_id,
+                    "ec_number": ecpichia_evidence.ec_number,
+                    "molecular_weight_g_per_mol": (
+                        ecpichia_evidence.molecular_weight_g_per_mol
+                    ),
+                    "kcat_per_s": ecpichia_evidence.kcat_per_s,
+                    "kcat_source_label": ecpichia_evidence.kcat_source_label,
+                    "reaction_protein_coefficient": (
+                        ecpichia_evidence.reaction_protein_coefficient
+                    ),
+                    "reported_concentration": (
+                        ecpichia_evidence.reported_concentration
+                    ),
+                    "usage_lower_bound": ecpichia_evidence.usage_lower_bound,
+                    "protein_pool_lower_bound": (
+                        ecpichia_evidence.protein_pool_lower_bound
+                    ),
+                },
+                "raw_units": {
+                    "molecular_weight": "g_per_mol",
+                    "kcat": "per_s",
+                    "reported_concentration": (
+                        ecpichia_evidence.reported_concentration_unit
+                    ),
+                    "gecko_expected_concentration": (
+                        ecpichia_evidence.gecko_expected_concentration_unit
+                    ),
+                },
+                "condition": {
+                    "species": "Komagataella phaffii",
+                    "carbon_source": None,
+                    "culture_mode": None,
+                    "growth_rate_per_h": None,
+                    "temperature_c": None,
+                    "ph": None,
+                    "oxygen_condition": None,
+                    "source_ref": ECPICHIA_G6PDH2_SUPPLEMENT_PROFILE.doi,
+                    "evidence_status": "bibliographic_not_embedded_in_yaml",
+                },
+                "mapping_evidence": list(ecpichia_evidence.mapping_evidence),
+                "conflicts": list(ecpichia_evidence.conflicts),
+                "quantitative_value_available": True,
+                "target_value_available": True,
+                "capacity_value_available": False,
+                "model_flux_conversion_available": False,
+                "promotion_ready": False,
+                "assessment": "review_required_source_conflicts",
+                "missing_information": list(
+                    ecpichia_evidence.missing_information
+                ),
+            }
+        )
     asset_sha = capacity_asset_version(request.repo_root)
     bindings = []
     fingerprints = []
@@ -704,6 +820,44 @@ def _build_audit_payload(
     candidate_manifest: Path,
     candidate_manifest_sha256: str,
 ) -> dict[str, Any]:
+    pride_assessment = next(
+        (
+            item
+            for item in source_assessments
+            if item.get("assessment") == "quantitative_relative_only"
+        ),
+        None,
+    )
+    ecpichia_assessment = next(
+        (
+            item
+            for item in source_assessments
+            if item.get("assessment_id") == "ecpichia-supplementary-8-g6pdh2"
+        ),
+        None,
+    )
+    assessment_missing = tuple(
+        dict.fromkeys(
+            str(value)
+            for item in source_assessments
+            for value in item.get("missing_information") or ()
+        )
+    )
+    candidate_missing = tuple(
+        dict.fromkeys(
+            value for item in candidates for value in item.missing_information
+        )
+    )
+    assessment_conflicts = tuple(
+        dict.fromkeys(
+            str(value)
+            for item in source_assessments
+            for value in item.get("conflicts") or ()
+        )
+    )
+    has_review_ready_candidate = any(
+        item.status is CapacityCandidateStatus.REVIEW_READY for item in candidates
+    )
     return {
         "schema_version": 1,
         "round": "round_6a_external_capacity_candidates",
@@ -723,15 +877,22 @@ def _build_audit_payload(
                 "source": "same-host quantitative Pichia proteomics",
                 "status": (
                     "parsed_relative_quantitative_evidence"
-                    if source_assessments
+                    if pride_assessment is not None
                     else "manual_import_required"
                 ),
-                "quantitative_value_available": bool(source_assessments),
+                "quantitative_value_available": pride_assessment is not None,
+                "target_value_available": pride_assessment is not None,
                 "capacity_value_available": False,
             },
             {
                 "source": "iPichia/ecPichia calibrated enzyme capacity",
-                "status": "license_and_artifact_review_required",
+                "status": (
+                    "parsed_raw_values_review_required"
+                    if ecpichia_assessment is not None
+                    else "formal_file_import_required"
+                ),
+                "quantitative_value_available": ecpichia_assessment is not None,
+                "target_value_available": ecpichia_assessment is not None,
                 "capacity_value_available": False,
             },
             {
@@ -740,15 +901,14 @@ def _build_audit_payload(
                 "capacity_value_available": False,
             },
             *(
-                [
-                    {
-                        **asdict(capacity_sources[0]),
-                        "capacity_value_available": bool(measurements),
-                        "role": "capacity_measurement_source",
-                    }
-                ]
-                if capacity_sources
-                else []
+                {
+                    **asdict(source),
+                    "capacity_value_available": any(
+                        item.source_id == source.source_id for item in measurements
+                    ),
+                    "role": "external_source_or_measurement",
+                }
+                for source in capacity_sources
             ),
         ],
         "model_bindings": [asdict(item) for item in bindings],
@@ -764,26 +924,36 @@ def _build_audit_payload(
                 "UniProt confirms identity but contains no baseline capacity value.",
                 "No reviewed same-host abundance or direct capacity measurement was supplied.",
                 "No traceable abundance x kcat conversion chain is available for glucose mu=0.1.",
-            ]
-            if not candidates
-            else [
-                reason
-                for item in candidates
-                for reason in (*item.rejection_reasons, *item.conflicts)
-            ]
-        ),
-        "missing_information": (
-            [
-                "reviewed quantitative abundance or direct baseline capacity",
-                "source version/hash/license for the capacity-valued artifact",
-                "condition-matched biomass basis and conversion metadata",
+                *assessment_conflicts,
             ]
             if not candidates
             else list(
                 dict.fromkeys(
-                    value
-                    for item in candidates
-                    for value in item.missing_information
+                    (
+                        *(
+                            reason
+                            for item in candidates
+                            for reason in (*item.rejection_reasons, *item.conflicts)
+                        ),
+                        *assessment_conflicts,
+                    )
+                )
+            )
+        ),
+        "missing_information": list(
+            dict.fromkeys(
+                (
+                    *candidate_missing,
+                    *assessment_missing,
+                    *(
+                        ()
+                        if has_review_ready_candidate
+                        else (
+                            "reviewed_absolute_condition_matched_g6pdh2_abundance",
+                            "direct_or_reviewed_komagataella_g6pdh2_kcat",
+                            "reviewed_model_flux_conversion_chain",
+                        )
+                    ),
                 )
             )
         ),
@@ -807,25 +977,32 @@ def _render_audit_markdown(
         else "- Missing: reviewed condition-matched abundance/direct capacity and conversion metadata.\n"
     )
     assessment_lines = ""
-    if source_assessments:
-        assessment = source_assessments[0]
-        assessment_lines = (
-            f"- Quantitative source: {assessment.get('project_accession')} "
-            f"({assessment.get('raw_metric')}, unit={assessment.get('raw_unit')}).\n"
-            f"- Source version/license: {assessment.get('source_version')}; "
+    for assessment in source_assessments:
+        source_name = (
+            assessment.get("project_accession")
+            or assessment.get("assessment_id")
+            or assessment.get("source_id")
+        )
+        assessment_lines += (
+            f"\n## Source assessment: {source_name}\n\n"
+            f"- Status: {assessment.get('assessment')}.\n"
+            f"- Version/license: {assessment.get('source_version')}; "
             f"{assessment.get('license_id')} ({assessment.get('license_url')}).\n"
             f"- Source URL: {assessment.get('source_url')}.\n"
-            f"- Source bundle SHA-256: {assessment.get('source_bundle_sha256')}.\n"
-            f"- Protein-groups SHA-256: "
-            f"{dict(assessment.get('artifact_sha256s') or {}).get('protein_groups')}.\n"
-            f"- Raw replicate values: {assessment.get('raw_values')}.\n"
-            f"- Source condition: {assessment.get('condition')}.\n"
-            f"- Condition source: {assessment.get('condition_source_ref')}.\n"
-            "- Unit chain: iBAQ intensity -> retained raw quantitative evidence; "
-            "model_flux unavailable.\n"
-            "- Boundary: relative quantitative evidence only; absolute abundance, "
-            "biomass normalization, paired kcat, and formal glucose mu=0.1 match are missing.\n"
+            f"- Raw values: {assessment.get('raw_values')}.\n"
+            f"- Raw units: {assessment.get('raw_units') or assessment.get('raw_unit')}.\n"
+            f"- Condition: {assessment.get('condition')}.\n"
+            f"- Mapping evidence: {assessment.get('mapping_evidence')}.\n"
+            f"- Conflicts: {assessment.get('conflicts')}.\n"
+            f"- Missing: {assessment.get('missing_information')}.\n"
+            "- Capacity closure/promotion: unavailable / false.\n"
         )
+        if assessment.get("raw_metric"):
+            assessment_lines += (
+                "- Unit chain: iBAQ intensity -> retained raw quantitative evidence; "
+                "model_flux unavailable.\n"
+                "- Boundary: relative quantitative evidence only.\n"
+            )
     return (
         "# G6PDH2 external capacity candidate audit\n\n"
         f"- Candidate count: {len(candidates)}.\n"

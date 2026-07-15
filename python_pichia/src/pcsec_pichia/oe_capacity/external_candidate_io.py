@@ -5,6 +5,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import shutil
 import statistics
 import tempfile
@@ -59,6 +60,27 @@ class PrideMaxQuantEvidence:
     source_bundle_sha256: str
     artifact_sha256s: Mapping[str, str]
     quantitative_boundary: Mapping[str, Any]
+
+
+@dataclass(frozen=True)
+class EcPichiaG6PDH2Evidence:
+    source: ExternalCapacitySource
+    gene_id: str
+    enzyme_id: str
+    reaction_id: str
+    ec_number: str
+    molecular_weight_g_per_mol: float
+    kcat_per_s: float
+    kcat_source_label: str
+    reaction_protein_coefficient: float
+    reported_concentration: float
+    usage_lower_bound: float
+    protein_pool_lower_bound: float
+    reported_concentration_unit: str
+    gecko_expected_concentration_unit: str
+    mapping_evidence: tuple[str, ...]
+    conflicts: tuple[str, ...]
+    missing_information: tuple[str, ...]
 
 
 def write_external_capacity_candidate_cache(
@@ -351,6 +373,137 @@ def parse_pride_maxquant_g6pdh2_evidence(
         artifact_sha256s=artifact_sha256s,
         quantitative_boundary=quantitative_boundary,
     )
+
+
+def parse_ecpichia_g6pdh2_source_assessment(
+    source: ExternalCapacitySource,
+) -> EcPichiaG6PDH2Evidence:
+    """Parse ecPichia raw YAML values without creating a capacity measurement."""
+
+    source.validate()
+    if source.source_type is not ExternalCapacitySourceType.EXTERNAL_ENZYME_MODEL:
+        raise OECapacityValidationError(
+            "ecPichia parsing requires an external_enzyme_model source."
+        )
+    if source.adapter_id != "pcsec_pichia.ecpichia.supplement_yaml_assessment":
+        raise OECapacityValidationError("unsupported ecPichia supplement adapter_id.")
+    path = Path(source.cache_path)
+    if not path.is_file() or _sha256_file(path) != source.raw_sha256:
+        raise OECapacityValidationError("ecPichia supplement sha256 mismatch.")
+    text = path.read_text(encoding="utf-8")
+    reaction = _yaml_omap_entry(text, "id", "G6PDH2", indent=4)
+    kinetic = _yaml_omap_entry(text, "id", "G6PDH2", indent=2)
+    protein = _yaml_omap_entry(text, "genes", "PAS_chr2-1_0308", indent=2)
+    usage = _yaml_omap_entry(text, "id", "usage_prot_C4R099", indent=4)
+    pool = _yaml_omap_entry(text, "id", "prot_pool_exchange", indent=4)
+
+    gene_id = _yaml_quoted_value(reaction, "gene_reaction_rule")
+    ec_number = _yaml_quoted_value(reaction, "eccodes")
+    enzyme_id = _yaml_quoted_value(protein, "enzymes")
+    protein_coefficient = _yaml_number(reaction, "prot_C4R099")
+    molecular_weight = _yaml_number(protein, "mw")
+    concentration = _yaml_number(protein, "concs")
+    kcat = _yaml_number(kinetic, "kcat")
+    kcat_source = _yaml_quoted_value(kinetic, "source")
+    usage_lower_bound = _yaml_number(usage, "lower_bound")
+    pool_lower_bound = _yaml_number(pool, "lower_bound")
+    if gene_id != "PAS_chr2-1_0308" or enzyme_id != "C4R099":
+        raise OECapacityValidationError("ecPichia G6PDH2 gene/enzyme binding mismatch.")
+    if ec_number != "1.1.1.49":
+        raise OECapacityValidationError("ecPichia G6PDH2 EC number mismatch.")
+    for value, label in (
+        (molecular_weight, "molecular weight"),
+        (concentration, "reported concentration"),
+        (kcat, "kcat"),
+    ):
+        if not math.isfinite(value) or value <= 0:
+            raise OECapacityValidationError(f"ecPichia {label} must be finite and positive.")
+    if protein_coefficient >= 0 or usage_lower_bound >= 0 or pool_lower_bound >= 0:
+        raise OECapacityValidationError(
+            "ecPichia enzyme coefficients and pool bounds require negative GECKO signs."
+        )
+    expected_coefficient = -(molecular_weight / (kcat * 3600.0))
+    if not math.isclose(protein_coefficient, expected_coefficient, rel_tol=1e-12):
+        raise OECapacityValidationError(
+            "ecPichia G6PDH2 protein coefficient is inconsistent with MW/kcat."
+        )
+    if not math.isclose(-usage_lower_bound, concentration, rel_tol=1e-12):
+        raise OECapacityValidationError(
+            "ecPichia usage bound is inconsistent with reported concentration."
+        )
+    return EcPichiaG6PDH2Evidence(
+        source=source,
+        gene_id=gene_id,
+        enzyme_id=enzyme_id,
+        reaction_id="G6PDH2",
+        ec_number=ec_number,
+        molecular_weight_g_per_mol=molecular_weight,
+        kcat_per_s=kcat,
+        kcat_source_label=kcat_source,
+        reaction_protein_coefficient=protein_coefficient,
+        reported_concentration=concentration,
+        usage_lower_bound=usage_lower_bound,
+        protein_pool_lower_bound=pool_lower_bound,
+        reported_concentration_unit="unit_not_declared_in_yaml",
+        gecko_expected_concentration_unit="mg_per_gDCW_by_GECKO_convention",
+        mapping_evidence=(
+            "gene:PAS_chr2-1_0308",
+            "enzyme:C4R099",
+            "reaction:G6PDH2",
+            "ec:1.1.1.49",
+        ),
+        conflicts=(
+            "source_unit_missing_and_supplement_header_requires_review",
+            "supplement_table_yaml_binding_requires_reconciliation",
+            "source_condition_not_verified_for_formal_glucose_mu_0.1",
+        ),
+        missing_information=(
+            "supplement_reuse_license_missing",
+            "lfq_to_absolute_conversion_missing",
+            "biomass_normalization_and_sample_selection_missing",
+            "brenda_record_metadata_missing",
+            "condition_metadata_missing",
+            "formation_flux_conversion_missing",
+            "current_model_capacity_handle_binding_review",
+        ),
+    )
+
+
+def _yaml_omap_entry(text: str, key: str, value: str, *, indent: int) -> str:
+    prefix = " " * indent
+    field_indent = " " * (indent + 2)
+    pattern = re.compile(
+        rf"(?ms)^{re.escape(prefix)}- !!omap\r?\n"
+        rf"{re.escape(field_indent)}- {re.escape(key)}: \"{re.escape(value)}\"\r?\n"
+        rf"(?P<body>.*?)(?=^{re.escape(prefix)}- !!omap|\Z)"
+    )
+    matches = tuple(pattern.finditer(text))
+    if len(matches) != 1:
+        raise OECapacityValidationError(
+            f"ecPichia YAML requires exactly one {key}={value} entry at indent {indent}."
+        )
+    return matches[0].group(0)
+
+
+def _yaml_quoted_value(block: str, key: str) -> str:
+    matches = re.findall(rf"(?m)^\s+- {re.escape(key)}: \"([^\"]+)\"\s*$", block)
+    if len(matches) != 1:
+        raise OECapacityValidationError(
+            f"ecPichia YAML requires exactly one quoted {key} value."
+        )
+    return matches[0]
+
+
+def _yaml_number(block: str, key: str) -> float:
+    matches = re.findall(
+        rf"(?m)^\s+- {re.escape(key)}: (-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)\s*$",
+        block,
+    )
+    if len(matches) != 1:
+        raise OECapacityValidationError(
+            f"ecPichia YAML requires exactly one numeric {key} value."
+        )
+    return _float(matches[0], f"ecPichia {key}")
 
 def _source_artifact_matches(source: ExternalCapacitySource) -> bool:
     path = Path(source.cache_path)
