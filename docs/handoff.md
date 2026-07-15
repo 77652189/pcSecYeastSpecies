@@ -9,42 +9,39 @@
 current_phase: phase_2_gene_level_oe
 current_round: round_6a_external_capacity_candidates
 round_status: in_progress
-current_checkpoint: a0b_quantitative_source
-checkpoint_status: in_progress_absolute_capacity_gap
+current_checkpoint: a0c_ecpichia_provenance_closure
+checkpoint_status: architecture_decision_required
 ```
 
-## 当前事实
+## 当前结论
 
-- A0a 结构收束已完成；模块和调用边界以 [ADR-001](adr/001-external-capacity-candidate-promotion.md#模块和调用边界) 为准。
-- `external_candidates.py` 仅保留兼容重导出；source、schema、IO、evaluation、promotion 和 audit orchestration 已分离。
-- CLI 与 `app/services` 均只通过公开 core API 调用候选 audit/review/promotion；既有公共导出、cache 格式、hash 和 UI/service 契约保持兼容。
-- candidate review 使用同一 manifest/data snapshot；正式 promotion 使用审核 hash 和跨进程资产锁，不能静默覆盖并发更新。
-- UniProt 只确认 `PAS_chr2-1_0308 / G6PDH2` identity，不提供 baseline capacity。
-- 正式容量 registry 仍为空，正式 acceptance 仍为 `passed=false / reviewed_baseline_capacity`。
-- A0b 已接入 PRIDE `PXD055501` MaxQuant 正式 parser/cache：项目版本 `2025-01-30`、许可 `CC0-1.0`，原始 proteinGroups SHA-256 为 `15b814790186146a1137353eceb83332493ccb826a47db0d7f781e1fe9084a26`。
-- `F2QTE5 / ZWF1` 与当前模型 `C4R099 / PAS_chr2-1_0308` 序列 `504/504` 一致；T0 iBAQ 原始值为 `12868000 / 10476000 / 21552000`，在线获取和离线回放均可审计。
-- iBAQ 仅是相对强度；来源条件为 glucose chemostat、`mu=0.075 h^-1`，与正式 `mu=0.1` 不匹配，并缺 absolute abundance、biomass normalization 和配对 kcat。因此候选为 `review_required`，`promotion_ready=false`，不能形成 `model_flux` capacity。
-- A0b 已增加 ecPichia `Supplementary 8.yml` 正式文件导入和离线回放 adapter；YAML SHA-256 为 `317ab62f77c95feb2758f9ad7ed5efe18ff8430c747fbb880c03bb4d6b943d34`，上游 ZIP SHA-256 为 `bea45233dc4feb81295315c4e73ca2ca4c886f648822dda27347be8892a3620c`。
-- 该 YAML 可重复提取 G6PDH2 的 gene `PAS_chr2-1_0308`、enzyme `C4R099`、MW `57689 g/mol`、kcat `8000 s^-1`、reaction coefficient `-0.00200309027777778`、reported concentration `0.752073171936811` 和 protein pool `-219.25`。
-- ecPichia 证据仍有 supplement 表头单位与 GECKO 语义待协调、LFQ 到绝对丰度 provenance 缺失、kcat 仅标记 `brenda`、培养条件不完整、许可不可复用确认和 formation-flux 换算缺口，因此只进入 source assessment，`promotion_ready=false`。
+- A0c 已通过正式 source/cache/parser/evaluation/audit/CLI 路径完成 ecPichia G6PDH2 provenance closure，并支持无网络 replay。
+- `Supplementary 8.yml` 的 `57689 / (8000 × 3600)` 可严格复算 GECKO coefficient；这只证明模型如何使用该 kcat，不证明 abundance 或当前模型 baseline capacity 成立。
+- `Supplementary 11_V2.docx` 与 YAML 在 gene、enzyme、MW 和 concentration 上冲突；表格单位为 `g/L` 且 G6PDH2 concentration 为 `NaN`，YAML 则未声明单位。
+- `kcat=8000 s^-1` 可追至 Thermotoga maritima、thio-NADP+、80°C 的 BRENDA 记录，不能直接适用于 Komagataella `PAS_chr2-1_0308 / C4R099`。
+- hLF/OPN 已建立正式 `glucose_mu_0.1` current-model crosswalk，精确到 `G6PDH2_no_1_fwd` 和 `G6PDH2_no_1_fwd_complex_formation`；但 catalytic flux 到 formation/dilution `model_flux` 的换算仍无直接证据。
+- 正式产物结论为 `architecture_decision_required`：`candidate_count=0`、`promotion_ready_count=0`、`nominal_capacity=null`、`promotion_preview_available=false`。
+- 正式容量 registry 未修改，formal acceptance 仍因 `reviewed_baseline_capacity` 缺口为 `passed=false`；未进入 Round 6B 或 Phase 3。
 
-## 下一 Checkpoint：继续 A0b source acquisition
+## 下一项决策
 
-继续寻找可把 G6PDH2 定量证据闭合为 absolute、biomass-normalized baseline capacity 的来源，或补齐 condition-matched abundance + kcat 换算链。来源优先级、许可、provenance、条件匹配和 promotion 门禁见：
+先决定是否拆分 Phase 2 验收等级：
 
-1. [ADR-001：决策与来源优先级](adr/001-external-capacity-candidate-promotion.md#决策)
-2. [数据与结果政策](data_and_results_policy.md)
-3. [执行计划：Round 6A](pichia_next_plan.md#round-6a外部-baseline-capacity-候选与审核提升)
+1. 保持现有硬门禁，只接受经审核的绝对 baseline capacity；Round 6A 继续阻塞，等待可闭合的同条件绝对 abundance/direct capacity 与 formation conversion 证据。
+2. 新增独立的“相对、未校准 gene-level OE 场景”产品等级，同时保留绝对容量校准为单独未通过门禁；该等级不得解释为绝对产量或正式 capacity。
 
-现有 `PXD055501` candidate 和 ecPichia raw values 只可作为待复核证据，不得提升为正式容量。下一步优先获取直接 Komagataella G6PDH2 absolute abundance、condition-matched direct kcat，或补齐 ecPichia LFQ→mg/gDCW provenance 与当前 formation flux 换算；不得把 UniProt identity、BLAST/RBH、人工 smoke、通用上界、optimal flux 或 fixture 当作容量。Round 6A 保持 `in_progress`。
+在决策完成前，不再增加只重复相对强度、名称或缺单位模型字段的 source adapter，不进入 Round 6B。
 
-## 验证方式
+## 必读材料
 
-- external-candidate focused tests 和全部 `test_oe_capacity*.py`
-- service/UI contract 与 `tests/test_docs_active_boundary.py`
-- `python -m compileall -q python_pichia/src`
-- CLI/import 边界、`git diff --check`、`local_runs/` ignore 和保护目录检查
+1. [ADR-001：证据闭合与停止决策](adr/001-external-capacity-candidate-promotion.md#证据闭合与停止决策)
+2. [执行计划：A0c 与状态迁移](pichia_next_plan.md#a0c-ecpichia-provenance-closure)
+3. [数据与结果治理策略](data_and_results_policy.md#oe-capacity-参数与映射)
+4. ignored 运行产物：`local_runs/oe_capacity/round6a/a0c_ecpichia_provenance/formal_run/g6pdh2_ecpichia_provenance_gap.json`
 
-## 停止线
+## 验证与停止线
 
-当前已完成 A0b 的 PRIDE relative candidate 与 ecPichia formal source-assessment 路径，但 absolute capacity 缺口未闭合；未执行正式 promotion，未开始 Round 6B 或 Phase 3，也不生成 Phase 3 提示词。
+- 重新运行 A0c focused tests、全部 `test_oe_capacity*.py`、service/UI contract、文档边界测试和 CLI offline replay。
+- 运行 `compileall`、`git diff --check`、`local_runs/` ignore、密钥、依赖和保护目录检查。
+- 不得用通用上界、baseline optimal flux、固定 `1.0`、PRIDE iBAQ、未确认单位的 ecPichia 值或 fixture 伪造容量。
+- 不得进入 Round 6B、Phase 3，也不得生成 Phase 3 Round 0 提示词。

@@ -79,6 +79,20 @@ class EcPichiaSupplementSourceProfile:
     reaction_id: str
 
 
+@dataclass(frozen=True)
+class EcPichiaSupplementTableProfile:
+    source_id: str
+    source_url: str
+    source_version: str
+    doi: str
+    artifact_filename: str
+    artifact_sha256: str
+    upstream_archive_sha256: str
+    license_id: str
+    license_url: str
+    target_reaction_id: str
+
+
 PXD055501_G6PDH2_PROFILE = PrideMaxQuantSourceProfile(
     project_accession="PXD055501",
     protein_groups_filename="lfq_proteinGroups_PRIDE.txt",
@@ -120,6 +134,23 @@ ECPICHIA_G6PDH2_SUPPLEMENT_PROFILE = EcPichiaSupplementSourceProfile(
     gene_id="PAS_chr2-1_0308",
     enzyme_id="C4R099",
     reaction_id="G6PDH2",
+)
+
+
+ECPICHIA_G6PDH2_TABLE_PROFILE = EcPichiaSupplementTableProfile(
+    source_id="ecpichia:supplementary-11-v2:g6pdh2-table",
+    source_url=(
+        "https://ars.els-cdn.com/content/image/"
+        "1-s2.0-S1369703X25003146-mmc1.zip"
+    ),
+    source_version="doi:10.1016/j.bej.2025.109940;PII:S1369703X25003146",
+    doi="10.1016/j.bej.2025.109940",
+    artifact_filename="Supplementary 11_V2.docx",
+    artifact_sha256="a9be5490ead9a3b0b4b4982a88892edfc4a03d9c5ba4b8998db989931b517bf5",
+    upstream_archive_sha256="bea45233dc4feb81295315c4e73ca2ca4c886f648822dda27347be8892a3620c",
+    license_id="elsevier_tdm_only_not_reuse_approved",
+    license_url="https://www.elsevier.com/legal/tdmrep-license",
+    target_reaction_id="G6PDH2",
 )
 
 
@@ -511,6 +542,89 @@ def cache_ecpichia_supplement_source(
     return source
 
 
+def cache_ecpichia_supplement_table_source(
+    profile: EcPichiaSupplementTableProfile,
+    output_dir: str | Path,
+    *,
+    source_file: str | Path | None = None,
+    retrieval_mode: RetrievalMode = RetrievalMode.MANUAL_IMPORT,
+) -> ExternalCapacitySource:
+    """Cache the ecPichia DOCX parameter table for provenance replay."""
+
+    _validate_ecpichia_table_profile(profile)
+    root = Path(output_dir)
+    raw_dir = root / "raw"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    cached_path = raw_dir / "ecpichia-supplementary-11-v2.docx"
+    metadata_path = root / "ecpichia-supplementary-11-v2.source.json"
+    if retrieval_mode is RetrievalMode.OFFLINE_REPLAY:
+        if not cached_path.is_file() or not metadata_path.is_file():
+            raise _validation_error(
+                "offline ecPichia supplement table cache is incomplete."
+            )
+        cached = _source_from_dict(_load_json_object(metadata_path))
+        cached.validate()
+        if _sha256_file(cached_path) != profile.artifact_sha256:
+            raise _validation_error(
+                "offline ecPichia supplement table sha256 mismatch."
+            )
+        source = replace(
+            cached,
+            retrieval_mode=RetrievalMode.OFFLINE_REPLAY,
+            cache_path=str(cached_path),
+            raw_sha256=_sha256_file(cached_path),
+        )
+        _validate_ecpichia_table_source_coherence(source, profile)
+        return source
+    if retrieval_mode is not RetrievalMode.MANUAL_IMPORT:
+        raise _validation_error(
+            "ecPichia supplement table requires manual_import or offline_replay."
+        )
+    if source_file is None:
+        raise _validation_error(
+            "ecPichia supplement table manual import requires source_file."
+        )
+    source_path = Path(source_file)
+    if not source_path.is_file():
+        raise _validation_error(
+            f"ecPichia supplement table file is missing: {source_path}"
+        )
+    if _sha256_file(source_path) != profile.artifact_sha256:
+        raise _validation_error(
+            "ecPichia supplement table sha256 does not match reviewed profile."
+        )
+    if source_path.resolve() != cached_path.resolve():
+        _atomic_copy_file(source_path, cached_path)
+    source = ExternalCapacitySource(
+        source_id=profile.source_id,
+        source_type=ExternalCapacitySourceType.EXTERNAL_ENZYME_MODEL,
+        source_version=profile.source_version,
+        source_url=profile.source_url,
+        retrieved_at=utc_now_iso(),
+        query=json.dumps(
+            {"target_reaction_id": profile.target_reaction_id},
+            sort_keys=True,
+        ),
+        raw_sha256=_sha256_file(cached_path),
+        license_id=profile.license_id,
+        license_url=profile.license_url,
+        retrieval_mode=RetrievalMode.MANUAL_IMPORT,
+        cache_path=str(cached_path),
+        adapter_id="pcsec_pichia.ecpichia.supplement_docx_assessment",
+        adapter_version="1",
+        terms_reviewed=False,
+        warnings=(
+            "tdm_license_does_not_approve_asset_reuse",
+            "supplement_table_conflicts_with_yaml",
+            "assessment_only_not_capacity_measurement",
+        ),
+    )
+    source.validate()
+    _validate_ecpichia_table_source_coherence(source, profile)
+    _atomic_write_json(metadata_path, _json_ready(asdict(source)))
+    return source
+
+
 def _validate_pride_profile(profile: PrideMaxQuantSourceProfile) -> None:
     for field_name in (
         "project_accession",
@@ -555,6 +669,27 @@ def _validate_ecpichia_profile(profile: EcPichiaSupplementSourceProfile) -> None
     _require_sha256(
         profile.upstream_archive_sha256,
         "ecPichia upstream_archive_sha256",
+    )
+
+
+def _validate_ecpichia_table_profile(
+    profile: EcPichiaSupplementTableProfile,
+) -> None:
+    for field_name in (
+        "source_id",
+        "source_url",
+        "source_version",
+        "doi",
+        "artifact_filename",
+        "license_id",
+        "license_url",
+        "target_reaction_id",
+    ):
+        _require_text(getattr(profile, field_name), field_name)
+    _require_sha256(profile.artifact_sha256, "ecPichia table artifact_sha256")
+    _require_sha256(
+        profile.upstream_archive_sha256,
+        "ecPichia table upstream_archive_sha256",
     )
 
 
@@ -773,6 +908,34 @@ def _validate_ecpichia_source_coherence(
             )
 
 
+def _validate_ecpichia_table_source_coherence(
+    source: ExternalCapacitySource,
+    profile: EcPichiaSupplementTableProfile,
+) -> None:
+    expected = {
+        "source_id": profile.source_id,
+        "source_type": ExternalCapacitySourceType.EXTERNAL_ENZYME_MODEL,
+        "source_version": profile.source_version,
+        "source_url": profile.source_url,
+        "raw_sha256": profile.artifact_sha256,
+        "license_id": profile.license_id,
+        "license_url": profile.license_url,
+        "adapter_id": "pcsec_pichia.ecpichia.supplement_docx_assessment",
+        "adapter_version": "1",
+        "terms_reviewed": False,
+        "query": json.dumps(
+            {"target_reaction_id": profile.target_reaction_id},
+            sort_keys=True,
+        ),
+    }
+    for field_name, expected_value in expected.items():
+        if getattr(source, field_name) != expected_value:
+            raise _validation_error(
+                "ecPichia table source metadata does not match reviewed "
+                f"{field_name}."
+            )
+
+
 def _source_from_dict(item: Mapping[str, Any]) -> ExternalCapacitySource:
     return ExternalCapacitySource(
         source_id=str(item.get("source_id") or ""),
@@ -899,7 +1062,9 @@ def _require_sha256(value: str, field_name: str) -> None:
 
 
 __all__ = [
+    "ECPICHIA_G6PDH2_TABLE_PROFILE",
     "ECPICHIA_G6PDH2_SUPPLEMENT_PROFILE",
+    "EcPichiaSupplementTableProfile",
     "EcPichiaSupplementSourceProfile",
     "ExternalCapacitySource",
     "ExternalCapacitySourceValidationError",
@@ -908,6 +1073,7 @@ __all__ = [
     "PrideMaxQuantSourceProfile",
     "RetrievalMode",
     "cache_ecpichia_supplement_source",
+    "cache_ecpichia_supplement_table_source",
     "cache_pride_maxquant_source",
     "cache_uniprot_identity_source",
 ]

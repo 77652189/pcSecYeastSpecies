@@ -1,7 +1,7 @@
 # pcSecPichia 数据与结果治理策略
 
 状态：active  
-最后更新：2026-07-14
+最后更新：2026-07-15
 
 ## 目录职责
 
@@ -46,6 +46,8 @@
 - 缺失参数使用显式区间和 low/nominal/high 场景；不得用未标注的默认值伪装成测量真值。
 - 外部下载、参数候选、mapping audit 和 Phase 2 screen 输出默认写入 `local_runs/oe_capacity/`；联网抓取和正式 screen 求解必须分离，求解只读取冻结的本地资产快照。
 - 只有人工复核 license、provenance、映射和参数后，才能通过独立 checkpoint 提升到稳定科学资产目录。
+- provenance closure 的成功与失败都必须形成结构化产物：成功时保存原始字段、逐步换算 trace、适用性、冲突和 promotion preview；失败时保存已查来源、缺失字段、不可换算原因和停止决策。
+- 同一候选的后续来源若只重复提供相对强度、名称或缺单位的模型字段，不得作为继续扩展 adapter 的理由。进入 `architecture_decision_required` 后，应先完成产品验收层级决策。
 
 ## LLM 数据边界
 

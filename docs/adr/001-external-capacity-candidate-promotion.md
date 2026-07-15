@@ -50,6 +50,27 @@ Round 6A 的真实来源 checkpoint 至少需要一个公开定量来源完成�
 
 在尚未完成上述来源接入时，不得把 Round 6A 标记为 `awaiting_candidate_review`，也不得重新把提供容量数值的责任默认交回研发组。此时状态保持 `in_progress`。
 
+## 证据闭合与停止决策
+
+接入一个公开定量来源只证明 source workflow 可用，不等于已经获得正式 baseline capacity。对同一候选连续获得相对丰度、外部模型字段或间接动力学证据后，必须进入一次有边界的 provenance closure，不得无限增加同类 adapter。
+
+provenance closure 必须逐项回答：
+
+- abundance/concentration 的物理单位、biomass basis、归一化方法和原始测量来源是什么；
+- kcat 是否能追溯到明确的 enzyme、reaction/substrate、宿主或转移关系、条件和原始记录；
+- 外部模型 coefficient 的定义和生成公式是什么，是否能由公开字段独立复算；
+- 外部 gene/enzyme/reaction 如何映射到当前模型 formation/dilution handle；
+- 从原始量到 `model_flux` capacity 的每一步单位是否闭合；
+- 菌株、培养基、碳源和生长率差异如何进入 applicability、uncertainty 和 warning；
+- source artifact、version、hash、license 和 reviewer 是否完整。
+
+closure 只有两个合法出口：
+
+1. **evidence chain closed**：生成可重复的候选、换算 trace 和 promotion preview；仍需明确人工批准后才能更新正式资产。
+2. **evidence chain unresolved**：生成结构化 gap report，并将当前 checkpoint 标记为 `architecture_decision_required`。此后不得继续接入只提供相同类型间接证据的来源，必须先决定是否调整 Phase 2 的产品验收层级。
+
+`architecture_decision_required` 不代表允许降低科学门禁。若后续拆分验收等级，绝对容量校准必须继续保持独立状态；相对 OE 场景也必须明确标为相对、未校准且不能用于绝对产量解释。
+
 ## 模块和调用边界
 
 - `external_refs/capacity_sources.py` 拥有联网获取、许可元数据和原始 cache。

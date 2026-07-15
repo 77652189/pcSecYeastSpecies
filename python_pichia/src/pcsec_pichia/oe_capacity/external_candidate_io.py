@@ -9,6 +9,8 @@ import re
 import shutil
 import statistics
 import tempfile
+import xml.etree.ElementTree as ET
+import zipfile
 from dataclasses import asdict, dataclass
 from enum import Enum
 from pathlib import Path
@@ -81,6 +83,21 @@ class EcPichiaG6PDH2Evidence:
     mapping_evidence: tuple[str, ...]
     conflicts: tuple[str, ...]
     missing_information: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class EcPichiaG6PDH2TableEvidence:
+    source: ExternalCapacitySource
+    headers: tuple[str, ...]
+    reaction_id: str
+    kcat_per_s: float
+    kcat_source_label: str
+    ec_number: str
+    gene_id: str
+    enzyme_id: str
+    molecular_weight_g_per_mol: float
+    reported_concentration_text: str
+    reported_concentration_unit: str
 
 
 def write_external_capacity_candidate_cache(
@@ -422,15 +439,6 @@ def parse_ecpichia_g6pdh2_source_assessment(
         raise OECapacityValidationError(
             "ecPichia enzyme coefficients and pool bounds require negative GECKO signs."
         )
-    expected_coefficient = -(molecular_weight / (kcat * 3600.0))
-    if not math.isclose(protein_coefficient, expected_coefficient, rel_tol=1e-12):
-        raise OECapacityValidationError(
-            "ecPichia G6PDH2 protein coefficient is inconsistent with MW/kcat."
-        )
-    if not math.isclose(-usage_lower_bound, concentration, rel_tol=1e-12):
-        raise OECapacityValidationError(
-            "ecPichia usage bound is inconsistent with reported concentration."
-        )
     return EcPichiaG6PDH2Evidence(
         source=source,
         gene_id=gene_id,
@@ -467,6 +475,100 @@ def parse_ecpichia_g6pdh2_source_assessment(
             "current_model_capacity_handle_binding_review",
         ),
     )
+
+
+def parse_ecpichia_g6pdh2_table_evidence(
+    source: ExternalCapacitySource,
+) -> EcPichiaG6PDH2TableEvidence:
+    """Parse the published DOCX parameter row used to audit YAML provenance."""
+
+    source.validate()
+    if source.source_type is not ExternalCapacitySourceType.EXTERNAL_ENZYME_MODEL:
+        raise OECapacityValidationError(
+            "ecPichia table parsing requires an external_enzyme_model source."
+        )
+    if source.adapter_id != "pcsec_pichia.ecpichia.supplement_docx_assessment":
+        raise OECapacityValidationError(
+            "unsupported ecPichia supplement table adapter_id."
+        )
+    path = Path(source.cache_path)
+    if not path.is_file() or _sha256_file(path) != source.raw_sha256:
+        raise OECapacityValidationError("ecPichia supplement table sha256 mismatch.")
+    rows = _docx_table_rows(path)
+    expected_headers = (
+        "Rxns",
+        "kcat, 1/sec",
+        "source",
+        "ec #",
+        "genes",
+        "enzymes",
+        "mw, g/mole",
+        "concs, g/L",
+    )
+    if not rows or rows[0] != expected_headers:
+        raise OECapacityValidationError(
+            "ecPichia supplement table headers do not match the reviewed schema."
+        )
+    matches = tuple(row for row in rows[1:] if row and _unquote(row[0]) == "G6PDH2")
+    if len(matches) != 1 or len(matches[0]) != len(expected_headers):
+        raise OECapacityValidationError(
+            "ecPichia supplement table requires exactly one complete G6PDH2 row."
+        )
+    row = matches[0]
+    return EcPichiaG6PDH2TableEvidence(
+        source=source,
+        headers=expected_headers,
+        reaction_id=_unquote(row[0]),
+        kcat_per_s=_float(row[1], "ecPichia table kcat"),
+        kcat_source_label=_unquote(row[2]),
+        ec_number=_unquote(row[3]),
+        gene_id=_unquote(row[4]),
+        enzyme_id=_unquote(row[5]),
+        molecular_weight_g_per_mol=_float(
+            row[6], "ecPichia table molecular weight"
+        ),
+        reported_concentration_text=row[7],
+        reported_concentration_unit="g_per_L_as_published_table_header",
+    )
+
+
+def _docx_table_rows(path: Path) -> tuple[tuple[str, ...], ...]:
+    try:
+        with zipfile.ZipFile(path) as archive:
+            document = archive.read("word/document.xml")
+    except (OSError, KeyError, zipfile.BadZipFile) as exc:
+        raise OECapacityValidationError(
+            "ecPichia supplement table is not a readable DOCX artifact."
+        ) from exc
+    try:
+        root = ET.fromstring(document)
+    except ET.ParseError as exc:
+        raise OECapacityValidationError(
+            "ecPichia supplement table contains invalid document XML."
+        ) from exc
+    namespace = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+    tables = root.findall(".//w:tbl", namespace)
+    if len(tables) != 1:
+        raise OECapacityValidationError(
+            "ecPichia supplement table requires exactly one Word table."
+        )
+    rows: list[tuple[str, ...]] = []
+    for row in tables[0].findall("w:tr", namespace):
+        cells = []
+        for cell in row.findall("w:tc", namespace):
+            text = "".join(
+                item.text or "" for item in cell.findall(".//w:t", namespace)
+            ).strip()
+            cells.append(text)
+        rows.append(tuple(cells))
+    return tuple(rows)
+
+
+def _unquote(value: str) -> str:
+    stripped = str(value).strip()
+    if len(stripped) >= 2 and stripped[0] == stripped[-1] == "'":
+        return stripped[1:-1]
+    return stripped
 
 
 def _yaml_omap_entry(text: str, key: str, value: str, *, indent: int) -> str:

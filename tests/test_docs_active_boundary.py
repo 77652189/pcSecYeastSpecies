@@ -79,24 +79,24 @@ def test_next_plan_runs_external_capacity_candidates_before_final_acceptance() -
     assert "Round 6B：hLF/OPN 正式重验收" in text
     assert "不得进入 Phase 3" in text
     assert "不得生成 Phase 3 Round 0 提示词" in text
-    assert "继续 Round 6A 的 A0b quantitative source acquisition" in current_next_step
-    assert "PXD055501" in current_next_step
-    assert "ecPichia supplement adapter" in current_next_step
-    assert "不是 absolute baseline capacity" in current_next_step
+    assert "处理 A0c 的 `architecture_decision_required`" in current_next_step
+    assert "architecture_decision_required" in current_next_step
+    assert "停止增加同类 source adapter" in current_next_step
     assert "执行 Round 6A 的 A0a" not in current_next_step
 
 
-def test_handoff_points_to_quantitative_source_checkpoint() -> None:
+def test_handoff_points_to_ecpichia_provenance_closure_checkpoint() -> None:
     text = (REPO_ROOT / "docs" / "handoff.md").read_text(encoding="utf-8")
 
     assert "current_round: round_6a_external_capacity_candidates" in text
     assert "round_status: in_progress" in text
-    assert "current_checkpoint: a0b_quantitative_source" in text
-    assert "checkpoint_status: in_progress_absolute_capacity_gap" in text
-    assert "A0a 结构收束已完成" in text
-    assert "PXD055501" in text
+    assert "current_checkpoint: a0c_ecpichia_provenance_closure" in text
+    assert "checkpoint_status: architecture_decision_required" in text
+    assert "architecture_decision_required" in text
     assert "Supplementary 8.yml" in text
-    assert "formation-flux 换算缺口" in text
-    assert "promotion_ready=false" in text
-    assert "Round 6A 保持 `in_progress`" in text
-    assert "未开始 Round 6B 或 Phase 3" in text
+    assert "Supplementary 11_V2.docx" in text
+    assert "Thermotoga maritima" in text
+    assert "nominal_capacity=null" in text
+    assert "promotion_preview_available=false" in text
+    assert "未进入 Round 6B 或 Phase 3" in text
+    assert "不再增加只重复相对强度" in text

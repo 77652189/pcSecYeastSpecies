@@ -1,7 +1,7 @@
 # pcSecPichia 下一阶段执行计划
 
 状态：active  
-最后更新：2026-07-14
+最后更新：2026-07-15
 
 ## 当前执行位置
 
@@ -9,6 +9,8 @@
 current_phase: phase_2_gene_level_oe
 current_round: round_6a_external_capacity_candidates
 round_status: in_progress
+current_checkpoint: a0c_ecpichia_provenance_closure
+checkpoint_status: architecture_decision_required
 ```
 
 执行会话必须从这里记录的阶段和轮次继续。完成一轮后，只更新到下一轮；不得在新会话中自动重置为 Phase 1 Round 0。
@@ -427,6 +429,34 @@ service/UI 不得绕过这些 API 自行解释 GPR、换算剂量或修改约束
 
 A0b 当前结果：已通过正式 adapter/cache/parser 接入 PRIDE `PXD055501`，为 G6PDH2 保留 T0 iBAQ 原始值、CC0 许可、项目版本、原始文件 hash、培养条件、`504/504` sequence crosswalk 和不可转换的单位链；同时增加 ecPichia `Supplementary 8.yml` 的正式文件导入和离线回放，保留 gene/enzyme/reaction、MW、kcat、GECKO coefficient、reported concentration、protein pool、artifact hash 和上游 ZIP hash。PRIDE 只有相对 iBAQ；ecPichia 仍缺可审核的 LFQ→absolute abundance provenance、确定单位、完整条件、可复用许可、直接 kcat provenance 和当前 formation-flux 换算。因此两者均 `promotion_ready=false`，Round 6A 继续 `in_progress`，不得进入 Round 6B。
 
+#### A0c：ecPichia provenance closure
+
+A0c 是 Round 6A 的限界闭合轮，不是第三次宽泛 source acquisition。主候选固定为 ecPichia G6PDH2；PRIDE 仅作为独立表达证据和条件对照。本轮不接入只重复提供相对强度、名称或模型字段的新来源。
+
+固定执行顺序：
+
+1. 审计 ecPichia 论文方法、补充材料、正式仓库和 GECKO 版本语义，确认 concentration、protein pool、coefficient 的单位、biomass basis 和生成方式。
+2. 用 MW、kcat 和时间单位独立复算 GECKO coefficient；任何不一致必须进入 conflict，不能选择性忽略。
+3. 追踪 G6PDH2 kcat 的直接来源，至少保留 source record、enzyme/reaction/substrate、organism、条件、版本和转移关系；只有 `brenda` 标签不构成完整 provenance。
+4. 建立外部 enzyme/reaction 到当前 `PAS_chr2-1_0308 / C4R099` 及 formation/dilution handle 的可审计 crosswalk。
+5. 形成逐步单位换算 trace，将 concentration/abundance 与 kcat 转为当前模型 `model_flux` capacity；无法闭合任一维度时不得产生 nominal capacity。
+6. 对宿主、菌株、培养基、碳源和 `mu` 差异生成 applicability、low/nominal/high uncertainty 和 warning，不复制为虚假的 target-specific 参数。
+7. 运行联网 fetch、冻结 cache、离线 replay、candidate evaluation 和 promotion preview；promotion 仍需明确审核批准。
+8. 运行 review/fix/verify，最终写出 evidence-chain report 或 gap report，并进入一个且仅一个完成出口。
+
+A0c 验收：
+
+- 关键外部陈述均能回溯到正式文件、论文、数据库记录或规范，并保存 URL/version/hash/license/retrieved_at。
+- coefficient 可由公开字段和明确公式复算，单位链测试覆盖正确值、错误单位、缺字段和条件冲突。
+- current-model crosswalk 精确到 gene、enzyme、reaction、formation/dilution handle 和模型指纹。
+- 在线路径与无网络 replay 生成相同的标准化 source assessment。
+- 没有完整链时不会生成 nominal `model_flux` capacity，不会修改正式 registry。
+- 本轮不得以继续搜索结束，必须进入以下一个出口：
+  - `evidence_chain_closed`：生成 promotion preview；明确批准并成功提升后进入 Round 6B `ready`。
+  - `architecture_decision_required`：保存 gap report，停止增加同类 source adapter，下一轮先决定是否拆分绝对容量与相对 OE 场景的验收等级。
+
+A0c 当前结果：已完成 ecPichia `Supplementary 8.yml` 与 `Supplementary 11_V2.docx` 的 hash 固定、正式解析、在线导入和离线 replay，并建立 hLF/OPN 的 `glucose_mu_0.1` current-model crosswalk。GECKO coefficient 可严格复算，但表格与 YAML 的 gene/enzyme/MW/concentration 冲突；concentration 的 `g/L`、未声明 YAML 单位和缺失 biomass conversion 无法闭合；`kcat=8000 s^-1` 来自 Thermotoga/thio-NADP+/80°C 记录，不能作为 Komagataella direct kcat；catalytic flux 到 formation/dilution `model_flux` 也缺直接转换证据。因此完成出口固定为 `architecture_decision_required`，不生成 nominal capacity 或 promotion preview，正式 registry 不变，Round 6A 保持 `in_progress`。
+
 ### Round 6B：hLF/OPN 正式重验收
 
 Round 6A 产生并批准容量资产后，使用正式 runner 新建四个固定 smoke：hLF/OPN 各一个 `PAS_chr2-1_0308` executable case 和一个 `PAS_chr1-4_0458` boundary case。runner 必须自行验证 target、context、gene、资产 hash、scenario/proxy 证据和相关回归；只有 `passed=true` 才能将状态推进到 Phase 3 Round 0。
@@ -434,6 +464,7 @@ Round 6A 产生并批准容量资产后，使用正式 runner 新建四个固定
 状态迁移固定为：
 
 - Round 6A 功能完成但没有已批准候选：`round_6a_external_capacity_candidates / awaiting_candidate_review`。
+- A0c 证据链无法闭合：`round_6a_external_capacity_candidates / architecture_decision_required`，不得继续堆叠同类来源。
 - 正式容量资产已批准：`round_6b_hlf_opn_acceptance / ready`，立即运行正式验收。
 - Round 6B 未通过：`round_6b_hlf_opn_acceptance / awaiting_acceptance`，保留真实缺口，不回退伪参数。
 - Round 6B `passed=true`：推进到 `phase_3_secretory_resources / round_0_architecture / ready`。
@@ -505,4 +536,4 @@ Phase 2 完成必须满足：
 
 ## 当前下一步
 
-继续 Round 6A 的 A0b quantitative source acquisition：现有 PRIDE `PXD055501` 已提供真实可审计 iBAQ candidate，ecPichia supplement adapter 也已保留 G6PDH2 原始定量字段，但它们不是 absolute baseline capacity，也不能直接绑定当前 formation handle。下一步优先获取直接 Komagataella G6PDH2 absolute abundance、condition-matched direct kcat，或补齐 ecPichia LFQ→mg/gDCW provenance 与 formation-flux 换算；在此之前保持 `reviewed_baseline_capacity` 缺口和 `round_status: in_progress`。不得进入 Round 6B 或 Phase 3，也不得生成 Phase 3 Round 0 提示词。
+处理 A0c 的 `architecture_decision_required`：决定是否继续保持“审核绝对 baseline capacity”作为唯一 Phase 2 门禁，或新增独立且明确未校准的相对 OE 场景验收等级。决策前停止增加同类 source adapter，保持 `round_6a_external_capacity_candidates / in_progress`，不得进入 Round 6B 或 Phase 3，也不得生成 Phase 3 Round 0 提示词。

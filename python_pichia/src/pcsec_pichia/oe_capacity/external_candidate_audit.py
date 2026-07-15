@@ -10,10 +10,12 @@ from types import SimpleNamespace
 from typing import Any, Callable, Mapping, Sequence
 
 from pcsec_pichia.external_refs.capacity_sources import (
+    ECPICHIA_G6PDH2_TABLE_PROFILE,
     ECPICHIA_G6PDH2_SUPPLEMENT_PROFILE,
     ExternalCapacitySourceType,
     PXD055501_G6PDH2_PROFILE,
     RetrievalMode,
+    cache_ecpichia_supplement_table_source,
     cache_ecpichia_supplement_source,
     cache_pride_maxquant_source,
     cache_uniprot_identity_source,
@@ -22,12 +24,14 @@ from pcsec_pichia.loading import load_pcsec_pichia_inputs
 from pcsec_pichia.oe_capacity.external_candidate_evaluation import (
     build_capacity_candidate,
     build_capacity_model_binding,
+    evaluate_ecpichia_g6pdh2_provenance,
 )
 from pcsec_pichia.oe_capacity.external_candidate_io import (
     CANDIDATE_MANIFEST_FILENAME,
     import_capacity_measurements,
     load_external_capacity_candidate_bundle,
     load_external_capacity_candidate_snapshot,
+    parse_ecpichia_g6pdh2_table_evidence,
     parse_ecpichia_g6pdh2_source_assessment,
     parse_pride_maxquant_g6pdh2_evidence,
     write_external_capacity_candidate_cache,
@@ -70,9 +74,12 @@ class ExternalCapacityAuditRequest:
     identity_cache_dir: Path | None = None
     quantitative_cache_dir: Path | None = None
     ecpichia_cache_dir: Path | None = None
+    ecpichia_table_cache_dir: Path | None = None
     pride_pxd055501: bool = False
     ecpichia_assessment: bool = False
+    ecpichia_provenance_closure: bool = False
     ecpichia_supplement_file: Path | None = None
+    ecpichia_table_file: Path | None = None
     measurement_file: Path | None = None
     source_id: str = ""
     source_type: ExternalCapacitySourceType = (
@@ -98,6 +105,9 @@ class ExternalCapacityAuditOutputs:
     candidate_manifest_path: Path
     candidate_count: int
     promotion_ready_count: int
+    completion_outcome: str = "in_progress"
+    provenance_gap_json_path: Path | None = None
+    provenance_gap_markdown_path: Path | None = None
 
     def summary(self) -> dict[str, object]:
         return {
@@ -105,6 +115,12 @@ class ExternalCapacityAuditOutputs:
             "candidate_count": self.candidate_count,
             "promotion_ready_count": self.promotion_ready_count,
             "formal_promotion_performed": False,
+            "completion_outcome": self.completion_outcome,
+            "provenance_gap": (
+                str(self.provenance_gap_json_path)
+                if self.provenance_gap_json_path is not None
+                else None
+            ),
         }
 
 
@@ -452,6 +468,9 @@ def run_external_capacity_candidate_audit(
     measurements = ()
     source_assessments: list[dict[str, Any]] = []
     pride_evidence = None
+    ecpichia_evidence = None
+    ecpichia_table_evidence = None
+    provenance_closure = None
     runtime_condition = _default_host_condition(request)
     if request.pride_pxd055501:
         pride_source = cache_pride_maxquant_source(
@@ -517,7 +536,7 @@ def run_external_capacity_candidate_audit(
                 ],
             }
         )
-    if request.ecpichia_assessment:
+    if request.ecpichia_assessment or request.ecpichia_provenance_closure:
         ecpichia_source = cache_ecpichia_supplement_source(
             ECPICHIA_G6PDH2_SUPPLEMENT_PROFILE,
             request.ecpichia_cache_dir or (output_dir / "ecpichia_source"),
@@ -615,6 +634,21 @@ def run_external_capacity_candidate_audit(
                 ),
             }
         )
+    if request.ecpichia_provenance_closure:
+        ecpichia_table_source = cache_ecpichia_supplement_table_source(
+            ECPICHIA_G6PDH2_TABLE_PROFILE,
+            request.ecpichia_table_cache_dir or (output_dir / "ecpichia_table_source"),
+            source_file=request.ecpichia_table_file,
+            retrieval_mode=(
+                RetrievalMode.OFFLINE_REPLAY
+                if request.offline_replay
+                else RetrievalMode.MANUAL_IMPORT
+            ),
+        )
+        ecpichia_table_evidence = parse_ecpichia_g6pdh2_table_evidence(
+            ecpichia_table_source
+        )
+        capacity_sources.append(ecpichia_table_source)
     asset_sha = capacity_asset_version(request.repo_root)
     bindings = []
     fingerprints = []
@@ -662,6 +696,103 @@ def run_external_capacity_candidate_audit(
         bindings.append(binding)
         fingerprints.append(binding.model_fingerprint)
         catalogs[target_id] = runtime.gene_capacity_catalog
+    if request.ecpichia_provenance_closure:
+        formal_context_id = _context_id(request.carbon_source_id, request.growth_rate)
+        closure_mapping_evidence = (
+            "ecpichia_yaml_gene:PAS_chr2-1_0308",
+            "ecpichia_yaml_enzyme:C4R099",
+            "ecpichia_yaml_reaction:G6PDH2",
+            "current_model_formation:G6PDH2_no_1_fwd_complex_formation",
+        )
+        if all(binding.context_id == formal_context_id for binding in bindings):
+            formal_bindings = [
+                replace(
+                    binding,
+                    external_gene_id=G6PDH2_GENE_ID,
+                    external_protein_id="C4R099",
+                    external_enzyme_id="C4R099",
+                    mapping_evidence=tuple(
+                        dict.fromkeys(
+                            (*binding.mapping_evidence, *closure_mapping_evidence)
+                        )
+                    ),
+                )
+                for binding in bindings
+            ]
+        else:
+            formal_bindings = []
+            for target_id in request.target_ids:
+                formal_runtime = prepare_external_candidate_runtime(
+                    request.repo_root,
+                    target_id=target_id,
+                    growth_rate=request.growth_rate,
+                    carbon_source_id=request.carbon_source_id,
+                    relative_uncertainty=request.relative_uncertainty,
+                    expected_asset_sha256=asset_sha,
+                )
+                formal_bindings.append(
+                    build_capacity_model_binding(
+                        formal_runtime.gene_capacity_catalog,
+                        target_id=target_id,
+                        context_id=formal_context_id,
+                        gene_id=G6PDH2_GENE_ID,
+                        external_gene_id=G6PDH2_GENE_ID,
+                        external_protein_id="C4R099",
+                        external_enzyme_id="C4R099",
+                        mapping_evidence=closure_mapping_evidence,
+                    )
+                )
+        provenance_closure = evaluate_ecpichia_g6pdh2_provenance(
+            ecpichia_evidence,
+            ecpichia_table_evidence,
+            model_bindings=tuple(formal_bindings),
+            formal_context_id=formal_context_id,
+        )
+        source_assessments.append(
+            {
+                "assessment_id": "a0c-ecpichia-g6pdh2-provenance-closure",
+                "assessment": provenance_closure.completion_outcome,
+                "source_id": ECPICHIA_G6PDH2_SUPPLEMENT_PROFILE.source_id,
+                "source_version": ECPICHIA_G6PDH2_SUPPLEMENT_PROFILE.source_version,
+                "source_url": ECPICHIA_G6PDH2_SUPPLEMENT_PROFILE.source_url,
+                "license_id": ECPICHIA_G6PDH2_TABLE_PROFILE.license_id,
+                "license_url": ECPICHIA_G6PDH2_TABLE_PROFILE.license_url,
+                "raw_values": {
+                    "yaml": {
+                        "gene_id": ecpichia_evidence.gene_id,
+                        "enzyme_id": ecpichia_evidence.enzyme_id,
+                        "molecular_weight_g_per_mol": ecpichia_evidence.molecular_weight_g_per_mol,
+                        "kcat_per_s": ecpichia_evidence.kcat_per_s,
+                        "reported_concentration": ecpichia_evidence.reported_concentration,
+                    },
+                    "published_table": {
+                        "gene_id": ecpichia_table_evidence.gene_id,
+                        "enzyme_id": ecpichia_table_evidence.enzyme_id,
+                        "molecular_weight_g_per_mol": ecpichia_table_evidence.molecular_weight_g_per_mol,
+                        "kcat_per_s": ecpichia_table_evidence.kcat_per_s,
+                        "reported_concentration": ecpichia_table_evidence.reported_concentration_text,
+                    },
+                },
+                "raw_units": {
+                    "yaml_concentration": ecpichia_evidence.reported_concentration_unit,
+                    "published_table_concentration": ecpichia_table_evidence.reported_concentration_unit,
+                },
+                "condition": {
+                    "formal_context_id": formal_context_id,
+                    "source_condition": "not_embedded_in_published_artifacts",
+                },
+                "mapping_evidence": [asdict(item) for item in formal_bindings],
+                "coefficient_trace": dict(provenance_closure.coefficient_trace),
+                "unit_trace": list(provenance_closure.conditional_unit_trace),
+                "conflicts": list(provenance_closure.source_conflicts),
+                "missing_information": list(provenance_closure.missing_information),
+                "nominal_capacity": None,
+                "promotion_preview_available": False,
+                "promotion_ready": False,
+                "capacity_value_available": False,
+                "model_flux_conversion_available": False,
+            }
+        )
     candidates = ()
     if pride_evidence is not None:
         candidate = build_capacity_candidate(
@@ -799,12 +930,30 @@ def run_external_capacity_candidate_audit(
     audit_markdown_path.write_text(
         _render_audit_markdown(candidates, source_assessments), encoding="utf-8"
     )
+    gap_json_path = None
+    gap_markdown_path = None
+    completion_outcome = "in_progress"
+    if provenance_closure is not None:
+        completion_outcome = provenance_closure.completion_outcome
+        gap_json_path = output_dir / "g6pdh2_ecpichia_provenance_gap.json"
+        gap_json_path.write_text(
+            json.dumps(provenance_closure.to_dict(), indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        gap_markdown_path = output_dir / "g6pdh2_ecpichia_provenance_gap.md"
+        gap_markdown_path.write_text(
+            _render_ecpichia_provenance_gap(provenance_closure.to_dict()),
+            encoding="utf-8",
+        )
     return ExternalCapacityAuditOutputs(
         audit_json_path=audit_json_path,
         audit_markdown_path=audit_markdown_path,
         candidate_manifest_path=candidate_outputs.manifest_path,
         candidate_count=len(candidates),
         promotion_ready_count=promotion_ready_count,
+        completion_outcome=completion_outcome,
+        provenance_gap_json_path=gap_json_path,
+        provenance_gap_markdown_path=gap_markdown_path,
     )
 
 
@@ -858,6 +1007,15 @@ def _build_audit_payload(
     has_review_ready_candidate = any(
         item.status is CapacityCandidateStatus.REVIEW_READY for item in candidates
     )
+    provenance_assessment = next(
+        (
+            item
+            for item in source_assessments
+            if item.get("assessment_id")
+            == "a0c-ecpichia-g6pdh2-provenance-closure"
+        ),
+        None,
+    )
     return {
         "schema_version": 1,
         "round": "round_6a_external_capacity_candidates",
@@ -866,7 +1024,17 @@ def _build_audit_payload(
         "formation_handle": G6PDH2_FORMATION_HANDLE,
         "targets": list(request.target_ids),
         "context_id": _context_id(request.carbon_source_id, request.growth_rate),
+        "completion_outcome": (
+            provenance_assessment.get("assessment")
+            if provenance_assessment is not None
+            else "in_progress"
+        ),
         "source_assessments": [dict(item) for item in source_assessments],
+        "formal_model_bindings": (
+            list(provenance_assessment.get("mapping_evidence") or ())
+            if provenance_assessment is not None
+            else []
+        ),
         "sources_checked": [
             {
                 **asdict(identity_source),
@@ -1013,6 +1181,35 @@ def _render_audit_markdown(
         + missing_line
         + "- Promotion: not performed.\n"
         + "- Forbidden fallbacks: 1000 upper bound, optimal flux, fixed 1.0, fixture were not used.\n"
+    )
+
+
+def _render_ecpichia_provenance_gap(payload: Mapping[str, Any]) -> str:
+    trace = payload["coefficient_trace"]
+    bindings = payload["model_bindings"]
+    return (
+        "# A0c ecPichia G6PDH2 provenance gap\n\n"
+        f"- Completion outcome: `{payload['completion_outcome']}`.\n"
+        f"- GECKO coefficient reproduced: `{trace['matches']}`; "
+        f"expected `{trace['expected_coefficient_mg_h_per_mmol']}`.\n"
+        f"- Formal current-model bindings: `{len(bindings)}` at `glucose_mu_0.1`.\n"
+        "- Nominal capacity: unavailable.\n"
+        "- Promotion preview: unavailable.\n\n"
+        "## Frozen source artifacts\n\n"
+        + "".join(
+            f"- `{item['source_id']}`: `{item['raw_sha256']}`; "
+            f"license `{item['license_id']}`; retrieved `{item['retrieved_at']}`.\n"
+            for item in payload["source_artifacts"]
+        )
+        + "\n"
+        "## Conflicts\n\n"
+        + "".join(f"- `{item}`\n" for item in payload["source_conflicts"])
+        + "\n## Missing information\n\n"
+        + "".join(f"- `{item}`\n" for item in payload["missing_information"])
+        + "\n## Boundary\n\n"
+        "The conditional catalytic-flux calculation is retained only as an "
+        "audit trace. It is not a reviewed abundance, current-model formation "
+        "capacity, or promotion candidate.\n"
     )
 
 

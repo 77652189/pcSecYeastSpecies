@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import math
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Mapping, Sequence
 
 from pcsec_pichia.oe_capacity.external_candidate_io import (
+    EcPichiaG6PDH2Evidence,
+    EcPichiaG6PDH2TableEvidence,
     _sha256_file,
     _source_artifact_matches,
 )
@@ -25,6 +29,197 @@ from pcsec_pichia.oe_capacity.schema import (
     GeneCapacityCatalog,
     OECapacityValidationError,
 )
+
+
+@dataclass(frozen=True)
+class EcPichiaProvenanceClosure:
+    completion_outcome: str
+    source_artifacts: tuple[Mapping[str, object], ...]
+    coefficient_trace: Mapping[str, object]
+    conditional_unit_trace: tuple[Mapping[str, object], ...]
+    model_bindings: tuple[CapacityModelBinding, ...]
+    source_conflicts: tuple[str, ...]
+    missing_information: tuple[str, ...]
+    nominal_capacity: None = None
+    promotion_preview_available: bool = False
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            **asdict(self),
+            "model_bindings": [asdict(item) for item in self.model_bindings],
+        }
+
+
+def evaluate_ecpichia_g6pdh2_provenance(
+    yaml_evidence: EcPichiaG6PDH2Evidence,
+    table_evidence: EcPichiaG6PDH2TableEvidence,
+    *,
+    model_bindings: Sequence[CapacityModelBinding],
+    formal_context_id: str,
+) -> EcPichiaProvenanceClosure:
+    """Close A0c by separating reproducible GECKO math from unclosed provenance."""
+
+    bindings = tuple(model_bindings)
+    expected_coefficient = yaml_evidence.molecular_weight_g_per_mol / (
+        yaml_evidence.kcat_per_s * 3600.0
+    )
+    observed_coefficient = abs(yaml_evidence.reaction_protein_coefficient)
+    coefficient_matches = math.isclose(
+        observed_coefficient, expected_coefficient, rel_tol=1e-12, abs_tol=1e-15
+    )
+    usage_matches = math.isclose(
+        abs(yaml_evidence.usage_lower_bound),
+        yaml_evidence.reported_concentration,
+        rel_tol=1e-12,
+        abs_tol=1e-15,
+    )
+    conflicts = list(yaml_evidence.conflicts)
+    conflicts.extend(
+        (
+            "kcat_nonphysiological_cofactor_thio_nadp",
+            "kcat_cross_domain_thermotoga_to_komagataella",
+            "kcat_assay_temperature_80c_mismatch",
+            "kcat_recombinant_enzyme_context",
+            "gecko_fuzzy_match_origin_missing",
+            "sabio_brenda_value_disagreement",
+        )
+    )
+    if not coefficient_matches:
+        conflicts.append("yaml_coefficient_mw_kcat_formula_mismatch")
+    if not usage_matches:
+        conflicts.append("yaml_usage_bound_concentration_mismatch")
+    table_yaml_fields = (
+        ("gene", yaml_evidence.gene_id, table_evidence.gene_id),
+        ("enzyme", yaml_evidence.enzyme_id, table_evidence.enzyme_id),
+        (
+            "molecular_weight",
+            yaml_evidence.molecular_weight_g_per_mol,
+            table_evidence.molecular_weight_g_per_mol,
+        ),
+    )
+    for field_name, yaml_value, table_value in table_yaml_fields:
+        if yaml_value != table_value:
+            conflicts.append(f"supplement_table_yaml_{field_name}_conflict")
+    if table_evidence.reported_concentration_text.strip().lower() in {"", "nan"}:
+        conflicts.append("supplement_table_g6pdh2_concentration_missing")
+    if table_evidence.reported_concentration_unit != "g_per_L_as_published_table_header":
+        conflicts.append("supplement_table_concentration_unit_unrecognized")
+    if table_evidence.kcat_source_label.strip().lower() == "brenda":
+        missing = ["ecpichia_yaml_brenda_record_binding_missing"]
+    else:
+        missing = ["direct_kcat_record_metadata_missing"]
+    missing.extend(
+        item
+        for item in yaml_evidence.missing_information
+        if item
+        not in {
+            "brenda_record_metadata_missing",
+            "current_model_capacity_handle_binding_review",
+        }
+    )
+    missing.extend(
+        (
+            "concentration_unit_conflict_g_per_L_vs_mg_per_gDCW",
+            "ecpichia_model_adapter_version_missing",
+            "protein_pool_parameter_provenance_missing",
+            "measured_protein_pool_compensation_unverified",
+            "formal_glucose_mu_0.1_condition_evidence_missing",
+            "formation_dilution_model_flux_conversion_missing",
+            "gecko_brenda_release_missing_from_ecpichia",
+            "direct_komagataella_g6pdh2_kcat_missing",
+        )
+    )
+    for binding in bindings:
+        binding.validate()
+        if binding.context_id != formal_context_id:
+            conflicts.append("current_model_binding_context_mismatch")
+        if (
+            binding.gene_id != "PAS_chr2-1_0308"
+            or binding.enzyme_id != "G6PDH2_no_1_fwd_complex"
+            or binding.reaction_id != "G6PDH2_no_1_fwd"
+            or binding.formation_or_dilution_reaction_id
+            != "G6PDH2_no_1_fwd_complex_formation"
+        ):
+            conflicts.append("current_model_g6pdh2_crosswalk_mismatch")
+    if not bindings:
+        missing.append("current_model_g6pdh2_crosswalk_missing")
+    hypothetical_flux = (
+        yaml_evidence.reported_concentration / expected_coefficient
+        if coefficient_matches
+        else None
+    )
+    return EcPichiaProvenanceClosure(
+        completion_outcome="architecture_decision_required",
+        source_artifacts=tuple(
+            {
+                "source_id": evidence.source.source_id,
+                "source_version": evidence.source.source_version,
+                "source_url": evidence.source.source_url,
+                "retrieved_at": evidence.source.retrieved_at,
+                "raw_sha256": evidence.source.raw_sha256,
+                "license_id": evidence.source.license_id,
+                "license_url": evidence.source.license_url,
+                "terms_reviewed": evidence.source.terms_reviewed,
+                "retrieval_mode": evidence.source.retrieval_mode.value,
+                "adapter_id": evidence.source.adapter_id,
+            }
+            for evidence in (yaml_evidence, table_evidence)
+        ),
+        coefficient_trace={
+            "formula": "molecular_weight_g_per_mol / (kcat_per_s * 3600)",
+            "molecular_weight_g_per_mol": yaml_evidence.molecular_weight_g_per_mol,
+            "kcat_per_s": yaml_evidence.kcat_per_s,
+            "expected_coefficient_mg_h_per_mmol": expected_coefficient,
+            "observed_absolute_coefficient": observed_coefficient,
+            "matches": coefficient_matches,
+            "gecko_reference": {
+                "version": "3.2.5",
+                "commit": "7d09beb6556810147625cac78d411aeace7ac4fe",
+                "license": "MIT",
+            },
+            "kcat_provenance_assessment": {
+                "brenda_release": "2026.1",
+                "brenda_license": "CC BY 4.0",
+                "brenda_url": "https://www.brenda-enzymes.org/enzyme.php?ecno=1.1.1.49",
+                "brenda_page_sha256": "c9165b3701cde24abc381254f595b4d1d1ca84c11587a9620bc22459546c3083",
+                "brenda_retrieved_at": "2026-07-15T14:12:00+09:00",
+                "literature_reference": "655612",
+                "literature_page_sha256": "94aaf581e9d30676751788d68aeb542fef2143730069d40118e9d25f8e456f03",
+                "literature_doi": "10.1111/j.1574-6968.2002.tb11443.x",
+                "organism": "Thermotoga maritima",
+                "substrate": "thio-NADP+",
+                "assay": "pH 7.4, 80 C, recombinant enzyme",
+                "applicable_to_komagataella": False,
+                "gecko_max_kcat_sha256": "1e0aa18bb9079cbbe00a8f1b0bb75b949f43d1624ae7464af1236ab4d9e1ceb3",
+            },
+        },
+        conditional_unit_trace=(
+            {
+                "step": "yaml_concentration_assumption",
+                "raw_value": yaml_evidence.reported_concentration,
+                "declared_unit": yaml_evidence.reported_concentration_unit,
+                "conditional_assumption": "mg_per_gDCW_by_GECKO_convention",
+                "accepted_for_promotion": False,
+            },
+            {
+                "step": "conditional_catalytic_flux",
+                "formula": "assumed_mg_per_gDCW / coefficient_mg_h_per_mmol",
+                "conditional_value": hypothetical_flux,
+                "unit": "mmol_per_gDCW_per_h",
+                "accepted_as_current_model_capacity": False,
+            },
+            {
+                "step": "current_model_formation_conversion",
+                "input": "conditional catalytic flux",
+                "output": None,
+                "unit": "model_flux",
+                "status": "unavailable",
+            },
+        ),
+        model_bindings=bindings,
+        source_conflicts=tuple(dict.fromkeys(conflicts)),
+        missing_information=tuple(dict.fromkeys(missing)),
+    )
 
 
 def capacity_context_id(condition: HostCondition) -> str:
