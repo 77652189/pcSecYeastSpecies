@@ -34,6 +34,7 @@ class RunInfo:
     is_stale: bool
     scope: str = "gene"
     csv_path: str | None = None
+    error_count: int = 0
 
     @property
     def progress_label(self) -> str:
@@ -185,6 +186,7 @@ def _read_run_info(status_path: Path) -> RunInfo | None:
         is_stale=is_stale,
         scope=str(payload.get("scope") or "gene"),
         csv_path=payload.get("csv_path"),
+        error_count=int(payload.get("error_count") or 0),
     )
 
 

@@ -233,6 +233,14 @@ def _render_results_section(paths, runs: list[RunInfo]) -> None:
 
     frame = analysis.load_gene_tradeoff_csv(str(csv_path))
     target_ids = sorted(frame.target_id.dropna().unique().tolist())
+    if not target_ids:
+        st.warning(f"运行 {run_name} 已标记为完成，但 {csv_path.name} 里没有任何可解析的靶点结果（target_id 全部缺失，或结果文件是空的）。")
+        if selected_run.error_count:
+            st.caption(
+                f"status.json 记录了 {selected_run.error_count} 个任务失败，可能是所有候选都建模/求解失败导致没有写入任何结果行；"
+                f"可查看同目录下的 run.log 排查具体原因。"
+            )
+        return
     per_target_results = {target_id: analysis.analyze_single_target(frame, target_id) for target_id in target_ids}
 
     tabs = st.tabs([f"靶点：{target_id}" for target_id in target_ids] + (["靶点间差异"] if len(target_ids) >= 2 else []))

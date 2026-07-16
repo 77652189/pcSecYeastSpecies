@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import json
+
+from pcsec_pichia.core.paths import ProjectPaths
+
 from app.services.genome_wide_screen_registry import (
     RunInfo,
     latest_runs_by_group,
+    list_runs,
     older_runs_by_group,
     run_group_key,
     run_scope_family,
@@ -141,3 +146,40 @@ def test_result_run_split_does_not_show_superseded_done_run_as_latest() -> None:
 
     assert [run.run_name for run in latest_done] == ["gene_hlf"]
     assert [run.run_name for run in older_done] == ["catalog_old"]
+
+
+def test_list_runs_reads_error_count_from_status_json(tmp_path) -> None:
+    """The screen runner writes error_count whenever some tasks fail (e.g. every candidate
+    for a target failed to solve, leaving a "done" run with zero result rows). list_runs()
+    used to drop this field entirely, so the UI had no way to explain such a run instead of
+    just crashing on an empty target list.
+    """
+    run_dir = tmp_path / "local_runs" / "ui_all_tasks_failed"
+    run_dir.mkdir(parents=True)
+    (run_dir / "status.json").write_text(
+        json.dumps(
+            {
+                "status": "done",
+                "done": 5,
+                "total": 5,
+                "targets": ["hLF"],
+                "mode": "fast",
+                "pid": None,
+                "updated_at": "2026-07-15T18:55:23",
+                "scope": "gene",
+                "csv_path": str(run_dir / "gene_tradeoff_rows.csv"),
+                "error_count": 5,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    [run] = list_runs(ProjectPaths(repo_root=tmp_path))
+
+    assert run.error_count == 5
+
+
+def test_list_runs_defaults_error_count_to_zero_when_absent() -> None:
+    """Legacy/backfilled status.json payloads never had this field; it must not crash
+    or become None, since RunInfo.error_count is read as a plain int by the UI."""
+    assert _run("legacy").error_count == 0
