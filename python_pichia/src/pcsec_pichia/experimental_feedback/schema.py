@@ -6,7 +6,7 @@ import json
 import math
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 class ExperimentalFeedbackError(ValueError):
@@ -21,21 +21,39 @@ class UnitValidationError(SchemaValidationError):
     """Raised when a measurement uses an unregistered canonical unit."""
 
 
+# Named once here so adapters (fermentation_template.py) and consumers (calibration.py)
+# reference the same constant instead of retyping matching string literals — renaming one
+# without the others used to fail silently (calibration would just report 0 eligible records).
+ASSAY_TYPE_TITER = "titer"
+ASSAY_TYPE_BIOMASS = "biomass"
+ASSAY_TYPE_SPECIFIC_PRODUCTIVITY = "specific_productivity"
+ASSAY_TYPE_GROWTH_RATE = "growth_rate"
+ASSAY_TYPE_TIME = "time"
+ASSAY_TYPE_VIABILITY = "viability"
+ASSAY_TYPE_OD600 = "od600"
+ASSAY_TYPE_UPR = "upr"
+
 CANONICAL_UNITS = {
-    "titer": "mg/L",
-    "biomass": "gDCW/L",
-    "specific_productivity": "mg/gDCW/h",
-    "growth_rate": "1/h",
-    "time": "h",
-    "viability": "%",
-    "od600": "OD600",
+    ASSAY_TYPE_TITER: "mg/L",
+    ASSAY_TYPE_BIOMASS: "gDCW/L",
+    ASSAY_TYPE_SPECIFIC_PRODUCTIVITY: "mg/gDCW/h",
+    ASSAY_TYPE_GROWTH_RATE: "1/h",
+    ASSAY_TYPE_TIME: "h",
+    ASSAY_TYPE_VIABILITY: "%",
+    ASSAY_TYPE_OD600: "OD600",
+    ASSAY_TYPE_UPR: "relative_units",
 }
 
+COMPARTMENT_EXTRACELLULAR = "extracellular"
+COMPARTMENT_INTRACELLULAR = "intracellular"
+COMPARTMENT_WHOLE_CULTURE = "whole_culture"
+COMPARTMENT_NOT_APPLICABLE = "not_applicable"
+
 SUPPORTED_COMPARTMENTS = {
-    "extracellular",
-    "intracellular",
-    "whole_culture",
-    "not_applicable",
+    COMPARTMENT_EXTRACELLULAR,
+    COMPARTMENT_INTRACELLULAR,
+    COMPARTMENT_WHOLE_CULTURE,
+    COMPARTMENT_NOT_APPLICABLE,
 }
 
 
@@ -77,6 +95,12 @@ class FermentationDataStatus(str, Enum):
     OTHER_EXCLUDED = "other_excluded"
 
 
+class ModificationConfirmationStatus(str, Enum):
+    NOT_CONFIRMED = "not_confirmed"
+    CONFIRMED_SUCCESS = "confirmed_success"
+    CONFIRMED_FAILED = "confirmed_failed"
+
+
 @dataclass(frozen=True)
 class HostContext:
     species: str
@@ -91,19 +115,17 @@ class HostContext:
 
 @dataclass(frozen=True)
 class ConditionContext:
-    medium: str
-    carbon_source: str
-    culture_mode: str
-    temperature_c: float | None
-    ph: float | None
-    oxygen_or_agitation: str
-    sampling_time_h: float | None
+    """Fermentation condition, recorded as free text (real template: single "发酵条件" field).
+
+    Candidate/control comparability is judged by matching this description verbatim, not by
+    decomposed numeric sub-fields the lab does not actually record per run.
+    """
+
+    condition_description: str
+    sampling_time_h: float | None = None
 
     def validate(self) -> None:
-        for field_name in ("medium", "carbon_source", "culture_mode", "oxygen_or_agitation"):
-            _require_text(getattr(self, field_name), f"condition.{field_name}")
-        _validate_optional_number(self.temperature_c, "condition.temperature_c")
-        _validate_optional_number(self.ph, "condition.ph")
+        _require_text(self.condition_description, "condition.condition_description")
         _validate_optional_number(self.sampling_time_h, "condition.sampling_time_h")
         if self.sampling_time_h is not None and self.sampling_time_h < 0:
             raise SchemaValidationError("condition.sampling_time_h must be non-negative when provided.")
@@ -122,6 +144,7 @@ class ExperimentRecord:
     clone_id: str = ""
     parent_control_group_id: str = ""
     operator_id: str = ""
+    notes: str = ""
     fermentation_data_status: FermentationDataStatus = FermentationDataStatus.NORMAL
     quality_status: QualityStatus = QualityStatus.VALID
     quality_reason: str = ""
@@ -214,6 +237,8 @@ class InterventionRecord:
     prediction_run_id: str = ""
     evidence_id: str = ""
     design_label: str = ""
+    confirmation_status: ModificationConfirmationStatus = ModificationConfirmationStatus.NOT_CONFIRMED
+    confirmation_method: str = ""
     warnings: tuple[str, ...] = ()
     schema_version: int = SCHEMA_VERSION
 
@@ -223,6 +248,17 @@ class InterventionRecord:
         _require_text(self.intervention_id, "intervention_id")
         if not isinstance(self.intervention_type, InterventionType):
             raise SchemaValidationError("intervention_type must be an InterventionType value.")
+        if not isinstance(self.confirmation_status, ModificationConfirmationStatus):
+            raise SchemaValidationError(
+                "confirmation_status must be a ModificationConfirmationStatus value."
+            )
+        if (
+            self.confirmation_status is not ModificationConfirmationStatus.NOT_CONFIRMED
+            and not self.confirmation_method
+        ):
+            raise SchemaValidationError(
+                "confirmation_method is required once confirmation_status is no longer not_confirmed."
+            )
         if not isinstance(self.component_index, int) or isinstance(self.component_index, bool) or self.component_index < 1:
             raise SchemaValidationError("component_index must be at least 1.")
         if self.intervention_type is InterventionType.KO:
@@ -255,6 +291,7 @@ class MeasurementRecord:
     canonical_value: float | None
     canonical_unit: str
     status: MeasurementStatus
+    dilution_factor: float | None = None
     technical_replicate_id: str = ""
     status_reason: str = ""
     excluded: bool = False
@@ -285,6 +322,9 @@ class MeasurementRecord:
             )
         _validate_optional_number(self.raw_value, "raw_value")
         _validate_optional_number(self.canonical_value, "canonical_value")
+        _validate_optional_number(self.dilution_factor, "dilution_factor")
+        if self.dilution_factor is not None and self.dilution_factor <= 0:
+            raise SchemaValidationError("dilution_factor must be positive when provided.")
         expected_unit = CANONICAL_UNITS.get(self.assay_type)
         if expected_unit is None:
             raise UnitValidationError(f"unsupported assay_type: {self.assay_type}")
@@ -455,6 +495,18 @@ __all__ = [
     "SCHEMA_VERSION",
     "CANONICAL_UNITS",
     "SUPPORTED_COMPARTMENTS",
+    "ASSAY_TYPE_TITER",
+    "ASSAY_TYPE_BIOMASS",
+    "ASSAY_TYPE_SPECIFIC_PRODUCTIVITY",
+    "ASSAY_TYPE_GROWTH_RATE",
+    "ASSAY_TYPE_TIME",
+    "ASSAY_TYPE_VIABILITY",
+    "ASSAY_TYPE_OD600",
+    "ASSAY_TYPE_UPR",
+    "COMPARTMENT_EXTRACELLULAR",
+    "COMPARTMENT_INTRACELLULAR",
+    "COMPARTMENT_WHOLE_CULTURE",
+    "COMPARTMENT_NOT_APPLICABLE",
     "ConditionContext",
     "ExperimentBundle",
     "ExperimentImportManifest",
@@ -467,6 +519,7 @@ __all__ = [
     "InterventionType",
     "MeasurementRecord",
     "MeasurementStatus",
+    "ModificationConfirmationStatus",
     "PredictionLinkRecord",
     "PredictionLinkStatus",
     "QualityStatus",

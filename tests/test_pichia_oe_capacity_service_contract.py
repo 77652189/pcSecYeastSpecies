@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import ast
 from pathlib import Path
 from threading import Event, Thread
 from types import SimpleNamespace
@@ -26,8 +25,6 @@ from pcsec_pichia.oe_capacity import (
 )
 
 from app.services import pichia_oe_capacity_service as service
-from app.ui.views import oe_capacity as oe_capacity_view
-from app.ui.common import OE_CAPACITY_PAGE
 from pcsec_pichia.screens import prepare_screen_inputs
 
 
@@ -89,55 +86,6 @@ def test_preview_uses_core_product_summary_without_mutating_mapping_status(
     assert preview["mappings"][0]["execution_status"] == "gene_level_executable"
     assert preview["product"]["product_state"] == "absolute_unavailable"
     assert "reviewed_baseline_capacity" in preview["product"]["missing_information"]
-
-
-def test_oe_capacity_page_is_registered_in_navigation_and_entrypoint() -> None:
-    common = (REPO_ROOT / "app" / "ui" / "common.py").read_text(encoding="utf-8")
-    entrypoint = (REPO_ROOT / "app" / "ui" / "streamlit_app.py").read_text(
-        encoding="utf-8"
-    )
-
-    assert OE_CAPACITY_PAGE in common
-    assert "render_oe_capacity" in entrypoint
-    assert "elif page == OE_CAPACITY_PAGE" in entrypoint
-
-
-def test_oe_capacity_view_uses_service_only_and_target_scoped_session_keys() -> None:
-    view_path = REPO_ROOT / "app" / "ui" / "views" / "oe_capacity.py"
-    source = view_path.read_text(encoding="utf-8")
-    module_ast = ast.parse(source)
-    imported_modules: set[str] = set()
-    for node in ast.walk(module_ast):
-        if isinstance(node, ast.ImportFrom) and node.module:
-            imported_modules.add(node.module)
-        elif isinstance(node, ast.Import):
-            imported_modules.update(alias.name for alias in node.names)
-
-    assert "app.services.pichia_oe_capacity_service" in imported_modules
-    assert not any(
-        module.startswith(("pcsec_pichia", "python_pichia"))
-        for module in imported_modules
-    )
-    for text in (
-        "oe_capacity_target_id",
-        "oe_capacity_form_state_by_target",
-        "oe_capacity_last_previews_by_target",
-        "oe_capacity_last_runs_by_target",
-        "oe_capacity_candidate_selection_by_target",
-        "oe_capacity_promotion_preview_by_target",
-            '"gene_id": "oe_capacity_widget_gene_id"',
-            '"product_mode": "oe_capacity_widget_product_mode"',
-        '"scenarios": "oe_capacity_widget_scenarios"',
-        "on_change=_sync_form_field",
-        "on_change=_switch_target_form",
-        "reviewed_baseline_capacity",
-            "运行所选 OE 产品模式",
-        "不会自动修改 recommendation tier",
-        "我明确批准以上候选写入正式容量资产",
-    ):
-        assert text in source
-    assert "st.cache_data" not in source
-    assert "st.cache_resource" not in source
 
 
 def test_service_cache_key_includes_target_context_and_uncertainty() -> None:
@@ -419,56 +367,6 @@ def test_service_preserves_failed_run_status_when_solver_raises(
     assert loaded["target_id"] == "hLF"
 
 
-def test_target_switch_persists_each_form_independently(monkeypatch) -> None:
-    session_state: dict[str, object] = {}
-    monkeypatch.setattr(
-        oe_capacity_view,
-        "st",
-        SimpleNamespace(session_state=session_state),
-    )
-
-    oe_capacity_view._load_widget_form("hLF")
-    session_state[oe_capacity_view.FORM_WIDGET_KEYS["gene_id"]] = "HLF_GENE"
-    session_state[oe_capacity_view.FORM_WIDGET_KEYS["multiplier"]] = 3.0
-    session_state[oe_capacity_view.TARGET_KEY] = "OPN_ALPHA_FULL_PROJECT"
-    oe_capacity_view._switch_target_form()
-
-    assert session_state[oe_capacity_view.FORM_WIDGET_KEYS["gene_id"]] == "PAS_chr2-1_0047"
-    session_state[oe_capacity_view.FORM_WIDGET_KEYS["gene_id"]] = "OPN_GENE"
-    session_state[oe_capacity_view.FORM_WIDGET_KEYS["scenarios"]] = ["nominal"]
-    session_state[oe_capacity_view.TARGET_KEY] = "hLF"
-    oe_capacity_view._switch_target_form()
-
-    assert session_state[oe_capacity_view.FORM_WIDGET_KEYS["gene_id"]] == "HLF_GENE"
-    assert session_state[oe_capacity_view.FORM_WIDGET_KEYS["multiplier"]] == 3.0
-    states = session_state[oe_capacity_view.FORM_STATE_KEY]
-    assert states["OPN_ALPHA_FULL_PROJECT"]["gene_id"] == "OPN_GENE"
-    assert states["OPN_ALPHA_FULL_PROJECT"]["scenarios"] == ["nominal"]
-
-
-def test_target_switch_persists_candidate_selection_independently(monkeypatch) -> None:
-    session_state: dict[str, object] = {}
-    monkeypatch.setattr(
-        oe_capacity_view,
-        "st",
-        SimpleNamespace(session_state=session_state),
-    )
-
-    oe_capacity_view._load_widget_form("hLF")
-    oe_capacity_view._load_candidate_selection("hLF")
-    session_state[oe_capacity_view.CANDIDATE_WIDGET_KEY] = ["hlf-candidate"]
-    oe_capacity_view._sync_candidate_selection("hLF")
-    session_state[oe_capacity_view.TARGET_KEY] = "OPN_ALPHA_FULL_PROJECT"
-    oe_capacity_view._switch_target_form()
-    assert session_state[oe_capacity_view.CANDIDATE_WIDGET_KEY] == []
-
-    session_state[oe_capacity_view.CANDIDATE_WIDGET_KEY] = ["opn-candidate"]
-    oe_capacity_view._sync_candidate_selection("OPN_ALPHA_FULL_PROJECT")
-    session_state[oe_capacity_view.TARGET_KEY] = "hLF"
-    oe_capacity_view._switch_target_form()
-    assert session_state[oe_capacity_view.CANDIDATE_WIDGET_KEY] == ["hlf-candidate"]
-
-
 def test_run_directory_is_reserved_before_runtime_preparation(
     tmp_path: Path,
     monkeypatch,
@@ -518,53 +416,3 @@ def test_run_directory_is_reserved_before_runtime_preparation(
     assert not thread.is_alive()
     assert len(first_errors) == 1
     assert isinstance(first_errors[0], RuntimeError)
-
-
-def test_solver_evidence_flattens_failed_scenarios_and_proxy_attempts() -> None:
-    result = {
-        "rows": [
-            {
-                "gene_id": "G1",
-                "screen_status": "partial_failure",
-                "scenario_results": [
-                    {
-                        "parameter_scenario": "high",
-                        "baseline": {
-                            "success": True,
-                            "solver_status": "optimal",
-                            "secretion_objective": 1.0,
-                            "message": "",
-                        },
-                        "perturbed": {
-                            "success": False,
-                            "solver_status": "infeasible",
-                            "secretion_objective": None,
-                            "message": "capacity infeasible",
-                        },
-                        "failure_reason": "high scenario failed",
-                    }
-                ],
-                "proxy_attempts": [
-                    {
-                        "attempt_id": "R_FAIL",
-                        "success": False,
-                        "solver_status": "error",
-                        "secretion_objective": None,
-                        "message": "reaction missing",
-                    }
-                ],
-            }
-        ]
-    }
-
-    evidence = oe_capacity_view._solver_evidence_rows(result)
-
-    assert [row["result_type"] for row in evidence] == [
-        "scenario_baseline",
-        "scenario_perturbed",
-        "proxy_attempt",
-    ]
-    assert evidence[1]["solver_status"] == "infeasible"
-    assert evidence[1]["failure_reason"] == "high scenario failed"
-    assert evidence[2]["candidate"] == "R_FAIL"
-    assert evidence[2]["message"] == "reaction missing"

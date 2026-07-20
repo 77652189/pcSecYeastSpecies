@@ -89,7 +89,7 @@ if ($ConfigureFirewallOnly) {
     exit
 }
 
-if (-not (Test-FirewallRuleReady)) {
+if ($env:CODEX_AUTORESTORE_SKIP_FIREWALL -ne "1" -and -not (Test-FirewallRuleReady)) {
     Ensure-FirewallRule
 }
 

@@ -10,22 +10,17 @@ ACTIVE_DOCS = {
     "data_and_results_policy.md",
     "handoff.md",
     "pichia_current_architecture_and_requirements.md",
-    "pichia_next_plan.md",
     "README.md",
 }
 
 
 def test_execution_plan_is_the_project_priority_control() -> None:
     index = (REPO_ROOT / "docs" / "README.md").read_text(encoding="utf-8")
-    technical_plan = (REPO_ROOT / "docs" / "pichia_next_plan.md").read_text(
-        encoding="utf-8"
-    )
     handoff = (REPO_ROOT / "docs" / "handoff.md").read_text(encoding="utf-8")
 
-    assert "项目级执行与预算计划" in index
+    assert "项目级执行计划" in index
     assert "技术计划不得绕过它扩大范围" in index
-    assert "docs/EXECUTION_PLAN.md" in technical_plan
-    assert "项目级执行与预算计划" in handoff
+    assert "项目级执行计划" in handoff
 
 NON_ACTIVE_REFERENCE_DOCS = {
     "cobrapy_phase0_baseline_assessment_2026-07-06.md",
@@ -35,6 +30,7 @@ NON_ACTIVE_REFERENCE_DOCS = {
     "pichia_homology_crosswalk_architecture.md",
     "pichia_ko_oe_genome_screen_design_2026-07-02.md",
     "pichia_medium_mixed_carbon_objective_plan_2026-06-30.md",
+    "pichia_next_plan.md",
     "pichia_online_external_reference_architecture.md",
     "pichia_python_hlf_design_decisions.md",
     "pichia_python_hlf_project_710_alignment_status_2026-06-26.md",
@@ -80,39 +76,22 @@ def test_obsolete_migration_plans_are_deleted_not_kept_as_active_debt() -> None:
     assert all_doc_names.isdisjoint(DELETED_OBSOLETE_MIGRATION_DOCS)
 
 
-def test_next_plan_routes_to_secretory_resource_round_0() -> None:
-    text = (REPO_ROOT / "docs" / "pichia_next_plan.md").read_text(encoding="utf-8")
-    current_state = text.split("```yaml", 1)[1].split("```", 1)[0]
-    current_next_step = text.split("## 当前下一步", 1)[1]
-
-    assert "current_program: mvp_directions_1_to_3" in current_state
-    assert "current_slice: direction_3_secretory_resource_round_0" in current_state
-    assert "slice_status: ready" in current_state
-    assert "从 Phase 1 Round 0 开始" not in text
-    assert "Round 6A：外部 baseline capacity 候选与审核提升" in text
-    assert "Round 6B：hLF/OPN 绝对容量重验收（条件路径）" in text
-    assert "direction_3_secretory_resource_round_0" in current_next_step
-    assert "docs/EXECUTION_PLAN.md" in current_next_step
-    assert "不实现完整机制求解" in current_next_step
-    assert "执行 Round 6A 的 A0a" not in current_next_step
-
-
 def test_docs_readme_routes_to_secretory_resource_round_0() -> None:
     text = (REPO_ROOT / "docs" / "README.md").read_text(encoding="utf-8")
 
     assert "方向 1 与方向 2 产品分层已经验收" in text
-    assert "当前授权切片是方向 3" in text
-    assert "当前授权切片是研发组真实发酵模板回填收口" not in text
+    assert "方向 3 的 secretory resource Round 0 架构与可执行契约" in text
 
 
 def test_handoff_points_to_secretory_resource_round_0() -> None:
     text = (REPO_ROOT / "docs" / "handoff.md").read_text(encoding="utf-8")
 
-    assert "current_slice: direction_3_secretory_resource_round_0" in text
-    assert "slice_status: ready" in text
+    assert "current_slice: direction_3_erad_constraint_activation" in text
+    assert "slice_status: complete_kept_optional" in text
+    assert "direction_3_round0_status: complete" in text
     assert "absolute_capacity_status: unavailable_waiting_for_qualified_evidence" in text
     assert "direction_2_status: accepted_product_tiering_closed" in text
-    assert "只执行 `direction_3_secretory_resource_round_0`" in text
+    assert "`direction_3_secretory_resource_round_0` 已完成并通过验收" in text
     assert "不得实现完整 secretory mechanism 求解" in text
     assert "不得自动进入方向 3 的机制实现" in text
 

@@ -15,6 +15,8 @@ from pcsec_pichia.experimental_feedback.quality import (
     validate_experiment_bundle,
 )
 from pcsec_pichia.experimental_feedback.schema import (
+    ASSAY_TYPE_TITER,
+    COMPARTMENT_EXTRACELLULAR,
     ExperimentBundle,
     FermentationDataStatus,
     InterventionType,
@@ -29,7 +31,8 @@ from pcsec_pichia.experimental_feedback.schema import (
 
 @dataclass(frozen=True)
 class CalibrationConfig:
-    primary_assay_type: str = "titer"
+    primary_assay_type: str = ASSAY_TYPE_TITER
+    primary_compartment: str = COMPARTMENT_EXTRACELLULAR
     increase_threshold_ratio: float = 1.05
     decrease_threshold_ratio: float = 0.95
     top_k: tuple[int, ...] = (5, 10)
@@ -40,6 +43,8 @@ class CalibrationConfig:
     def validate(self) -> None:
         if not self.primary_assay_type:
             raise SchemaValidationError("primary_assay_type must be non-empty.")
+        if not self.primary_compartment:
+            raise SchemaValidationError("primary_compartment must be non-empty.")
         numeric_values = (
             self.increase_threshold_ratio,
             self.decrease_threshold_ratio,
@@ -268,6 +273,7 @@ def _build_records(
                 measurement
                 for measurement in measurements_by_experiment.get(experiment_id, [])
                 if measurement.assay_type == config.primary_assay_type
+                and measurement.compartment == config.primary_compartment
             ]
             base = _record_base(experiment, intervention, links, measurements)
             if experiment.fermentation_data_status is not FermentationDataStatus.NORMAL:
@@ -392,6 +398,13 @@ def _record_base(
 
 
 def _ineligible(base: dict[str, object], reason: str) -> CalibrationRecord:
+    # `reason` strings (plain codes like "control_match_missing", or "prefix:value" codes
+    # like "fermentation_data_status:contamination") are relied on by
+    # app/ui/views/experiment_feedback.py's humanization of ineligibility_reasons. The UI
+    # can't import this module (facade boundary, enforced by
+    # test_pichia_experiment_feedback_ui_contract.py), so it keeps its own matching prefix
+    # list instead — if this format changes, update that list too, or it silently falls
+    # back to showing the raw code.
     return CalibrationRecord(
         **base,
         control_experiment_ids=(),
@@ -437,17 +450,11 @@ def _experiment_context_complete(experiment: object) -> bool:
         host.species,
         host.strain,
         host.parent_strain,
-        condition.medium,
-        condition.carbon_source,
-        condition.culture_mode,
-        condition.oxygen_or_agitation,
+        condition.condition_description,
     )
     if any(str(value).strip().lower() in {"", "missing", "unknown"} for value in text_values):
         return False
-    return all(
-        value is not None
-        for value in (condition.temperature_c, condition.ph, condition.sampling_time_h)
-    )
+    return condition.sampling_time_h is not None
 
 
 def _measurement_signature(measurement: MeasurementRecord) -> tuple[str, str, str, str]:

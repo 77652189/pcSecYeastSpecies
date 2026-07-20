@@ -85,7 +85,7 @@ flowchart TD
 | 筛查工具 | [`python_pichia/tools/`](python_pichia/tools/) | 全基因组和局部 KO/OE 筛查脚本 |
 | 服务层 | [`app/services/`](app/services/) | 请求映射、后台任务、基因目录、筛查预览和仿真门面 |
 | UI 层 | [`app/ui/`](app/ui/) | Streamlit 页面和研发可读展示 |
-| 工作文档 | [`docs/README.md`](docs/README.md), [`docs/pichia_next_plan.md`](docs/pichia_next_plan.md) | 当前范围、架构和下一步计划 |
+| 工作文档 | [`docs/README.md`](docs/README.md) | 当前范围、架构和执行计划 |
 
 ## 快速开始
 
@@ -171,7 +171,7 @@ python -m pytest -q python_pichia\tests\test_pipeline_entrypoints.py python_pich
 python -m pytest -q tests\test_pichia_secretion_service_contract.py
 ```
 
-慢速求解/模型检查由环境变量显式开启，详见 [下一步规划](docs/pichia_next_plan.md)。
+慢速求解/模型检查由环境变量显式开启，详见 [当前需求与架构](docs/pichia_current_architecture_and_requirements.md#慢速测试网关)。
 
 ## 文档
 
@@ -179,7 +179,6 @@ python -m pytest -q tests\test_pichia_secretion_service_contract.py
 |---|---|
 | [文档索引](docs/README.md) | 当前文档入口和归档记录 |
 | [当前需求与架构](docs/pichia_current_architecture_and_requirements.md) | 目标蛋白工作流、科学边界和系统分层 |
-| [下一步规划](docs/pichia_next_plan.md) | BLAST/RBH cache、Shadow LP 后端切换和证据整合优先级 |
 | [BLAST/RBH 同源映射架构](docs/pichia_homology_crosswalk_architecture.md) | 酿酒酵母到 Pichia 的离线同源证据层设计 |
 | [数据与结果治理策略](docs/data_and_results_policy.md) | 保护目录、运行产物和归档规则 |
 

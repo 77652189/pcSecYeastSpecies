@@ -40,7 +40,7 @@ def test_exact_prediction_link_requires_target_gene_type_run_and_evidence() -> N
         target_id="hLF",
         host=HostContext("Komagataella phaffii", "X33", "X33"),
         batch_id="B01",
-        condition=ConditionContext("BMMY", "methanol", "shake_flask", 30.0, 6.0, "250 rpm", 72.0),
+        condition=ConditionContext("BMMY, methanol, shake_flask, 250 rpm", 72.0),
         context_id="methanol-bmmy-72h",
     )
     intervention = InterventionRecord(
@@ -79,7 +79,7 @@ def test_linkage_preserves_ambiguous_missing_and_context_mismatch_states() -> No
         )
     )
     host = HostContext("Komagataella phaffii", "X33", "X33")
-    condition = ConditionContext("BMMY", "methanol", "shake_flask", 30.0, 6.0, "250 rpm", 72.0)
+    condition = ConditionContext("BMMY, methanol, shake_flask, 250 rpm", 72.0)
     experiments = (
         ExperimentRecord("HLF-A", "hLF", host, "B1", condition, context_id="ctx-hlf"),
         ExperimentRecord("OPN-A", "OPN", host, "B2", condition, context_id="ctx-opn"),

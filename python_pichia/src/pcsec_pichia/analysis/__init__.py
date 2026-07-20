@@ -163,6 +163,11 @@ def analyze_target_protein_lp_attribution(
             "LP sensitivity is a Python draft based on SciPy HiGHS marginals; it is not MATLAB/SoPlex fully aligned shadow pricing.",
             "The maximization problem is solved through SciPy minimization, so signs should be interpreted as draft sensitivity evidence.",
             "Only compressed top-N attribution rows are written to reports and summaries.",
+            "A large marginal on a lower bound (bound_type='lower') reflects a floor/minimum-requirement constraint; "
+            "overexpression relaxes upper-bound capacity ceilings and will not resolve a binding lower bound - check "
+            "bound_type before treating a large top_bound_marginals entry as an OE-testable lead (confirmed in "
+            "practice: PDI1-alone and ribosome assembly both showed large lower-bound marginals but ~0 measured OE "
+            "effect in reaction_oe_tradeoff).",
         ),
     )
 

@@ -1,49 +1,72 @@
 # pcSecPichia Handoff
 
 状态：active
-最后更新：2026-07-15
+最后更新：2026-07-20
 
 ## 当前执行位置
 
 ```yaml
 current_program: mvp_directions_1_to_3
-current_slice: direction_3_secretory_resource_round_0
-slice_status: ready
+current_slice: direction_3_erad_constraint_activation
+slice_status: complete_kept_optional
+direction_3_round0_status: complete
 direction_1_status: accepted_waiting_for_real_data_replay
 direction_2_status: accepted_product_tiering_closed
+direction_5_status: local_acceptance_dimension_only_top1_stable_lower_ranks_mixed
 relative_oe_status: available_uncalibrated_with_independent_solver_path
 absolute_capacity_status: unavailable_waiting_for_qualified_evidence
+target_protein_degradation_pathway_status: not_authorized_no_reliable_gene_identity_or_kinetics
+oe_capacity_streamlit_page_status: removed_kept_as_library_and_internal_tool_only
+direction_1_fermentation_template_status: adr_003_implemented
+direction_1_ui_localization_status: implemented
 ```
 
 ## 当前状态
 
-- A0c 已完成，现有 PRIDE/ecPichia 证据不能形成审核后的绝对 baseline capacity；正式 registry 未修改。
-- ADR-002 已接受相对 OE 决策层与绝对容量研究层分离。绝对容量继续保持 unavailable，不再扩大同类低信息来源接入。
-- 方向 1 已通过验收：研发发酵宽表 CSV/XLSX/JSONL 已接入 canonical validation、cache、prediction linkage、calibration eligibility 和报告链路。
-- 脱敏回放覆盖正常、污染、培养失败、检测失败、其他排除、亲本对照、独立培养重复和阴性结果；失败/排除原值保留且不进入校准。
-- 尚未读取获批真实研发数据；真实数据到来后只执行独立回填 checkpoint，不重新开启方向 1 开发。
-- 方向 2 已验收：核心层统一判定 reaction proxy、relative uncalibrated、absolute unavailable 和 not executable；report、service 与 Streamlit 只透传和展示。
-- relative uncalibrated 使用独立的 current-model enzyme-coupling 成对求解，不读取 formation 通用上界或 baseline optimal flux；absolute 公共入口反查 runtime 审核 catalog、asset hash/version 和 baseline 数值。
-- hLF/OPN G6PDH2 新鲜 smoke 均为 `relative_uncalibrated`，绝对模式稳定为 `absolute_unavailable`；正式绝对容量 acceptance 仍为 `passed=false`，正式 registry 未修改。
+- 方向 1 已验收；获批真实数据到来后只执行独立回填 checkpoint。
+- 方向 2 已验收：四种 OE 产品状态由核心层统一判定，report/service/Streamlit 只透传；hLF/OPN relative smoke 和 absolute 求解前拒绝均通过。
+- 绝对容量研究层仍缺 `reviewed_baseline_capacity`，正式 registry 未修改；该缺口不阻塞当前 Round 0。
+- 方向 3 Round 0 已完成：`pcsec_pichia.secretory_resources` 冻结了全部七类资源（含此前延后的 `er_quality_control`、`target_specific_cost`）的架构与可执行契约，hLF/OPN 均可生成独立 coverage 并通过 validation，无 unavailable/conflict。不实现完整机制求解、组合搜索或完整跨条件排名。**补充核实**：逐一核对了每类资源的 handle 是否在 `enzymedataSEC_PP.mat`（真实、非占位 kcat）里有对应条目——七类里有 6 类（转运、二硫键、糖基化、囊泡运输、folding_chaperone、er_quality_control）确认已有真实 kcat 数据（其中前 4 类已经无条件参与正式模型的每次求解，与本层架构无关；er_quality_control 的数据存在但约束生成默认关闭；folding_chaperone 因此把状态从 evidence_only 改为 executable，evidence_class 仍保留 classifier_inferred 因为 handle 识别方式本身仍是弱匹配）。**唯一真正没有数据的是 target_specific_cost 的 kdeg**（目标蛋白自身降解速率，非酶动力学）——已用回归测试锁定这三个结论（100%/部分/0% 匹配），防止未来数据集变化时被静默破坏。
+- 方向 5：作为方向 2 的局部验收维度（非独立产品），用 `python_pichia/tools/run_oe_capacity_condition_robustness_check.py` 对 hLF/OPN 各跑了一次小范围（`PAS_chr2-1_0308`/`PAS_chr1-4_0458`/`PAS_chr2-1_0047` 三个已有验收用例基因 × glucose-mu0.1/glucose-mu0.15/glycerol-mu0.1 三个条件）相对排名稳定性检查，复用现成的 `submit_oe_capacity_screen`，结果见 `local_runs/oe_capacity/condition_robustness/*-report.json`（ignored，不进版本库）。发现：hLF 三个条件下排序完全一致；OPN 在两个 glucose 条件下排序一致，换到 glycerol 后末两位基因互换（`PAS_chr2-1_0308`/`PAS_chr2-1_0047`），第一名不变。所有涉及基因的 delta 量级都很小（~1e-6 到 1e-9），OPN 的互换发生在两个都接近该量级、正负号都不稳的候选之间；glycerol 配方本身标记为 `draft_carbon_source_boundary`（非 glucose 的 `corrected_reference`）。**后续已验证并确认是数值噪声，不是真实条件敏感性**：把 glycerol/mu_0.1 这个场景换三种 LP 求解算法重跑（默认 HiGHS、显式 `highs-ds` 对偶单纯形、`highs-ipm` 内点法），默认和 `highs-ds` 结果完全一致（`PAS_chr2-1_0047` 排前），换成 `highs-ipm` 排名直接反转（`PAS_chr2-1_0308` 排前），且两个候选的 delta 量级同时缩小两个数量级（从 ~1e-8 变成 ~1e-10）——排名和量级都随求解算法改变，说明这是退化解/数值精度边界效应，不是真实的生物学条件依赖效应。结论：OPN 的 top-1 稳定，末两位候选之间的顺序在 glycerol 下不具备参考价值，不能作为候选优先级的证据使用。
+- 文档/测试治理清理：修复了 6 个改动前就存在的失败测试（`start_pcSecYeastSpecies_lan.bat` 被误删导致的桌面快捷方式修复脚本失效、`docs/data_and_results_policy.md`/架构文档/`pichia_next_plan.md` 的几处措辞与测试期望不一致、`pichia_next_plan.md` 缺失慢速测试网关说明、`app/services` 下 5 个已存在的 service 文件与 4 个 probe 直接依赖文件未登记进 `test_review_package_boundaries.py` 的边界名单）。均为历史遗留，与本轮新代码无关；逐一核实内容后登记/修正，未放宽任何边界判定。全量回归确认 0 失败（仓库根 `tests/` 323 passed，`python_pichia/tests/` 548 passed）。
+- 探索性分析（复用既有能力，非新产品）：(1) 确认单候选 pipeline 里 `analyze_target_protein_lp_attribution` 本来就无条件计算 LP 敏感度归因，只是批量筛查路径和报告默认不透出；用它对 hLF/OPN 各跑一次，发现 hLF 的最大 bound marginal 在 `sec_Pdi1p_complex_formation`（PDI1 相关），OPN 的最大 bound marginal 在 `Mach_Ribosome_complex_formation`（核糖体装配）——两个 target 指向不同瓶颈，方向上与下一条 chaperone/DSB 过表达测试一致。(2) 用 `python_pichia/tools/run_chaperone_dsb_oe_yield_check.py` 对基因目录里 `CAT_ER_FOLDING`/`CAT_DSB` 的 8 个反应级候选跑过表达测试：hLF 下 `PDI1/ERO1/ERV2` 三元复合体（`sec_PDI1_ERV2_Ero1p_complex_formation`）有真实 +8.15% 分泌提升，其余候选（含目录标注"最重要 OE 靶点之一"的 KAR2/BiP）基本零效果；OPN 下全部 8 个候选均无效果（<0.1%）。两条结果均已用现有、已测试的筛查原语跑出，未产生新的候选排名产品，只是分析记录，见 `local_runs/`（ignored）。目标蛋白表达强度扫描（"下一个瓶颈会不会切换"）只完成了数据获取，逐点归因分析尚未做，结论未定。
+- **单基因评分可信度问题分类**：把方向 4 门槛卡在"缺可信单基因评分"这句话拆成三类具体原因——A 缺真实数据（基因身份置信度、kcat 真实不确定性、剂量-倍数标定、非默认培养条件成熟度，均等外部输入，不是工程缺口）、B 模型自身建模精度上限（多亚基复合体被合并成一个反应，拆不开归因到单个基因，改动成本高且需要单独论证，不值得现在动）、C 分析方法本身的漏洞（LP 下界 marginal 被误当成 OE 候选线索——已确认踩过两次：hLF 的 `sec_Pdi1p_complex_formation` 单独反应、hLF/OPN 的 `Mach_Ribosome_complex_formation`/`Mach_Ribosome_Assembly_Factors_complex_formation`，均为下界 marginal 很大但 `reaction_oe_tradeoff` 测出的真实 OE 效果 ≈0，因为下界是最低要求类约束，OE 放宽的是上限，不会缓解下界卡点）。C 类已修复：`analyze_target_protein_lp_attribution` 的 `warnings` 里新增这条规则，架构文档同步补充说明。A/B 类不在当前投入范围。
+- **kcat/GPR 数据溯源核实**：查了原始 MATLAB 代码（`Code/pcSecPichia/CoreFunction/collectkcats.m`/`searchkcat.m`），确认 kcat 来自 BRENDA 数据库，按 EC 号（源自 UniProt/KEGG 注释）匹配，且原作者设计了一套真实的 0-4 置信度评分（4=物种+底物都匹配，3=只物种匹配，2=只底物匹配，1=EC 号有报道但都不匹配取全局中位数，0=BRENDA 无此 EC 号，取全体酶 kcat 中位数顶替）；GPR 基于一个已有的 Pichia 基础代谢模型（非 pcSecPichia 自建），代码注释署名 Yu Chen/Feiran Li（2021-11）。看不出任何后续更新机制，是建模时的一次性快照。**关键缺口**：实际核对 `Enzymedata/pcSecPichia/enzymedataSEC_PP.mat` 的字段，确认置信度分数（`kcat_conf`/`subunit_kcat_conf`）没有被保留，只留最终 `kcat` 数值；原始 BRENDA 数据快照和 EC 号对照表（`ec_number.xlsx`）也都不在仓库里，无法直接重算。计划尝试：重新抓一份 BRENDA 数据+重建 EC 号对照，照 `searchkcat.m` 现成算法重新算置信度——这仍然是对外部数据源的一次有边界的探索性尝试，参照之前 Sed5/PDImt 同类尝试的命中率，不保证有结果。**已探测三条路，全部撞墙**：BRENDA 网页确认 Pichia PDI 有真实条目（UniProt B3VSN1/Q9C1Z8），但实际 kcat 数值藏在 JS 动态加载表格里，简单抓取拿不到，官方 SOAP API 需要注册账号；SABIO-RK（架构文档已列为可选来源）当前环境连不上，三次不同请求全部连接失败；UniProt 接口本身能连，但 Pichia 和酿酒酵母的 PDI1 条目都没有附带 kcat 数值（UniProt 的动力学参数字段本身只覆盖一小部分酶，PDI 不在其中）。跟 Sed5 一样，是路径找对但现实条件不具备的死路，不是没试够。
+- **外部 GPR 扩充候选：走完一轮正式审核，产出真实审核产物，未修改任何正式模型资产**。背景：BRENDA/Yeast8/9 都确认不覆盖 PDI1/ERO1/ERV2/KAR2 这类分泌通路基因（不分物种，代谢模型天生不管这类非代谢机器）；转而用`local_runs/`里之前ecPichia调研留下的合并模型文件（Kp1.0+iAUKM合并，Chalmers/Kerkhoven团队，"ecpichia-supplementary-8.yml"）核对基因集合重叠度：当前模型1025个基因 vs ecPichia 1054个，重叠1021个（99.6%），当前模型独有4个（target蛋白自身构建体伪基因，非真实Pichia基因，属正常差异），ecPichia独有33个（27个标准`PAS_...`命名，真实代谢酶，含GPR规则）。用现成的`external_refs/gpr_candidates.py`+`gpr_source_priority.py`正式流程（不是新写的审核逻辑）跑了这27个基因的56条反应关联，全部产出`external_gpr_candidate`类状态（1条gene_mapping_required、55条reaction_mapping_required，0冲突）——**结论是反应ID命名空间不兼容，即使基因集合高度重叠，仍需要人工做反应级别的crosswalk才能真正合并，不能直接导入**。正式产物见`local_runs/external_refs/ecpichia_gpr_expansion_review/`（gitignored）：`gpr_source_priority.json`/`gpr_source_priority_report.md`/`gpr_source_conflicts.jsonl`。license仍标注`needs_manual_review`（继承自`model_inventory.py`原始记录，未重新核实）。**已补做人工反应crosswalk**（用`Model/pcSecPichia.mat`原始文件的`rxnNames`按名称比对，而非只按反应ID）：27个候选基因里，7个的ecPichia反应名称能在当前模型里精确匹配到已有反应，20个匹配不到（可能是真正的新反应，也可能是命名差异导致简单精确匹配漏掉，未做模糊匹配）。**其中一条是干净的、可直接考虑的候选**：`PAS_chr2-2_0019`（D-arabitol dehydrogenase，来自ecPichia）对应当前模型反应`DABTDEH`，而`DABTDEH`在当前模型里**GPR是空的（`grRules='[]'`）**——即这个反应本来就存在于当前模型，只是没有任何基因关联，属于最干净的"补空"型候选，不是新增反应。其余6个匹配（`AMPTASECG`系列、`pepat`系列、`AGL_PP`/`PAL_PP`、`udpg4e`）当前模型已有其他基因作为该反应的同工酶，这几个候选基因是"可能的额外同工酶"，价值低于补空型。crosswalk结果存于`local_runs/external_refs/ecpichia_gpr_expansion_review/reaction_name_crosswalk.json`。**仍然没有修改任何受保护资产**——是否要把`PAS_chr2-2_0019`接入`DABTDEH`的GPR，需要新的项目级决定，不是这轮审核自动执行的。**最终决定：审核完成，暂不提升（not promoted）**。理由：这27个基因是比较基因集合差异时的副产品，不是通过任何secretion相关分析找出来的，没有证据表明会影响hLF/OPN候选排名；license仍是`needs_manual_review`未解决；20个连反应名都对不上，真要加需要新增反应/代谢物/化学计量，成本和风险远高于这轮读取比对。除非未来有具体分析指向这27个基因里某一个真的影响分泌，否则不主动投入formal promotion。这轮GPR外部来源调研（BRENDA/Yeast8/9/ecPichia）到此收尾。
+- **基因级 OE 容量对照 Streamlit 页面已整体移除**：核实发现该页面"表达容量倍数"是人工输入（跟全基因组筛查的固定 2x 倍数本质相同，只是可调），"low/nominal/high 不确定性场景"是全局统一的 ±20% 假设（非按基因的真实测量不确定性），"类别输入"和"启动子/拷贝数查表"两种输入模式当前均无法驱动真实求解——形式上比实际严谨程度更高，容易误导。已删除 `app/ui/views/oe_capacity.py`、导航入口、`genome_wide_screen.py` 里的跳转按钮，清理了 `app/core/i18n.py` 里随之失效的翻译字典。`app/services/pichia_oe_capacity_service.py` 和 `python_pichia.oe_capacity` 库本身未删除，仍可作为内部工具/脚本直接调用；对应测试拆分为纯 service 层的 `tests/test_pichia_oe_capacity_service_contract.py`。是否需要重新做一个不过度包装的版本，留待以后决定。
+- **方向 1 发酵反馈模板已按 [ADR-003](adr/003-fermentation-feedback-minimal-fields.md) 完成实现**：`schema.py`/`fermentation_template.py`/`calibration.py`/`quality.py`/`io.py` 已改完，全量回归通过（仓库根 `tests/` 319 passed；`python_pichia/tests/` 549 passed，20 skipped，0 failed）。字段改动：`ConditionContext` 的 medium/carbon_source/culture_mode/temperature_c/ph/oxygen_or_agitation 六个分解字段收敛为单个 `condition_description` 自由文本字段（对应现场"发酵条件"），`sampling_time_h` 保留但不再要求逐行填写（现场固定 72h）；新增 `MeasurementRecord.dilution_factor`（ELISA 稀释倍数，纯审计字段，假设现场"产量"数值本身已是稀释校正后的最终浓度，未跟研发组逐字确认）；"是否超标曲"接入已有的 `MeasurementStatus.ABOVE_RANGE`；新增 `ExperimentRecord.notes`（备注原文完整保留，"数据状态"默认 NORMAL、不做任何自动文本解析——对应用户就"备注→状态映射"明确选择的方案）；新增 `InterventionRecord.confirmation_status`/`confirmation_method`（改造确认，三态：未确认/确认成功/确认失败，补齐 ADR-003 指出的唯一缺口）；`technical_replicate_id` 从可导入列中去掉（六个核心处理文件确认无一处消费）；`biological_replicate_id`（现场"重复编号"）不再作为导入必填项，缺失时按行号自动派生，真正的跨批次身份判定规则仍留待真实数据（见下）；`SCHEMA_VERSION` 从 1 bump 到 2（无历史真实数据受影响）。**实现过程中发现并修复两个真实 bug**（不是测试脚手架问题）：① `calibration.py` 原来只按 `assay_type=="titer"` 过滤候选检测记录，一行现在会产出胞外+胞内两条 titer，导致已有的"信号不明确"保护机制（signature ambiguity check）把全部候选误判成不可校准——新增 `CalibrationConfig.primary_compartment`（默认 `extracellular`）区分；② `io.py` 的 JSON 往返逻辑（`_record_from_dict`）漏了把新增的 `confirmation_status` 字段从序列化字符串转回枚举，导致任何走 JSONL 缓存/canonical envelope 往返的 intervention 记录校验失败。ADR-003 明确保留待定的两个问题（对照如何跟候选配对、单克隆编号是否跨批次稳定唯一）**仍然 open**，未被这次实现悄悄假设掉。
+- **文档治理清理（2026-07-20）**：① 移除"预算+人日+授权"这套框架的措辞——用户指出这套流程已经名存实亡（决策实际就是用户直接拍板，不需要人日核算和三段式审批仪式）；`EXECUTION_PLAN.md` 标题从"项目级执行与预算计划"改为"项目级执行计划"，删掉人日预算表和"当前授权/条件授权/未授权"分类，改成"范围内/会在什么情况下处理/明确不做"的朴素状态描述；`README.md`/`handoff.md`/`pichia_next_plan.md`/`pichia_current_architecture_and_requirements.md` 里引用这套措辞或旧标题的地方同步更新；决定背后的科学/技术理由（比如降解通路不做是因为基因身份低置信度）一条没删，只是不再套预算审批的壳。② 归档 `pichia_next_plan.md` 到 `docs/archive/`——核实发现这份文档虽然名字叫"下一阶段执行计划"，实际内容 90% 是已完成的 `direction_3_secretory_resource_round_0` 技术细节，文档自己的开场白也承认"作为历史参考保留"，属于该走归档流程但没人做这一步清理的遗留问题；仍在使用的内容（慢速测试网关的 3 个环境变量说明）迁移到 `pichia_current_architecture_and_requirements.md` 新增的"慢速测试网关"小节，避免内容被archived 而不再可发现；`docs/data_and_results_policy.md` 补了一句"历史 Results/ 迁移、Git LFS 改造或仓库历史瘦身不属于当前数据治理范围"承接原来挂在 next_plan 里的那句话。相应更新了 `test_docs_active_boundary.py`（ACTIVE_DOCS 集合、移除专测该文件内容的测试）、`test_review_package_boundaries.py`（active_docs 锚点列表）、`test_data_results_boundaries.py`（改读 data_and_results_policy.md）、`test_slow_test_gates.py`（改读架构文档），以及根目录 `README.md`/`README.zh.md`/`python_pichia/README.md` 里指向旧路径的失效链接。全量回归确认：仓库根 `tests/` 318 passed（比之前少 1 个是因为移除了专测已归档文件内容的测试，不是新增失败），0 failed。
+- **实验反馈闭环 Streamlit 界面本地化：已完成实现**（2026-07-20）。实际打开 `app/ui/views/experiment_feedback.py` 逐个标签页核实（截图+DOM文本核对，非猜测）发现的缺口：4 个标签页里 3 个（"Validation / Conflicts"、"Linkage"、"Calibration"）是纯英文标签；指标标签中英文混用；`st.dataframe`/`st.json` 直接暴露 Python 内部字段名（`candidate_value`、`ineligibility_reasons`、`control_match_missing`）和原始配置 JSON；没有"这批数据说明了什么"的结论先行摘要。**已全部改完**：4 个标签页改为"导入 / 修正"/"数据校验"/"预测匹配"/"历史数据核对"；新增结论先行摘要区块（`_render_summary`，读取现有 validation/linkage/calibration 数据自动组装成 3-6 句中文摘要：候选与对照数量、可核对/不可核对分布及主要原因、命中数、样本量不足提示，不产生新判定，不写回模型）；所有 dataframe 列名、枚举值（改造类型 KO/OE/control、匹配状态 matched/ambiguous 等、发酵状态、检测状态、是否可核对、方向 increase/decrease）都改成中文；避免使用"校准"措辞（沿用 ADR-003 已定的"历史数据核对"），改用"可核对/不可核对"而非"Eligible/不可校准"这类混用。范围严格限制在呈现层：`app/services/pichia_experiment_feedback_service.py`、`schema.py`、`fermentation_template.py`、`calibration.py`、`linkage.py` 一行未动。同步修正了 `tests/test_pichia_experiment_feedback_ui_contract.py` 里锁定旧英文文案的断言（该测试本身的结构性检查——facade 边界、session key 稳定性、无直接 pcsec_pichia 依赖——未放宽，只更新了文案断言的具体内容）。已用真实浏览器实测验证（非只读代码）：`preview_start` 启动 Streamlit、实际点开一个已有真实结构的 run（`round5-xlsx-acceptance-20260713-142616`），逐标签页截图/DOM 文本核对确认摘要和三张数据表（Top-K、证据等级、核对记录明细）都正确渲染成中文。回归：根目录 `tests/` 319 passed、0 failed（含更新后的 UI/service contract 测试）。
+- **experimental_feedback 代码整理（2026-07-20，无行为变更）**：`io.py` 的 `_record_from_dict` 原来逐个字段硬编码枚举转换，漏一个（`confirmation_status`）就静默炸 JSON 往返——改成 `_coerce_enum_fields()` 用 dataclass 注解自省，以后加新枚举字段自动覆盖；`schema.py` 把散落在 `fermentation_template.py`/`calibration.py` 里的 assay_type/compartment 裸字符串（`"titer"`/`"od600"`/`"extracellular"` 等）提成命名常量并被这两个文件引用，堵住"改一处漏改另一处会导致 calibration 静默 0 命中"的坑；`calibration._ineligible` 的 reason code 格式和 UI 端 `experiment_feedback.py` 手工维护的前缀解析列表互相加了对照注释（UI 受 facade 边界限制不能 import pcsec_pichia，只能手工同步，注释点明这一点）。行为无变化，`python_pichia/tests/` 549 passed/20 skipped、根目录 `tests/` 318 passed 均通过。
+- **分泌机器 GPR 机制核实并写入架构文档（2026-07-20）**：直接加载 `Model/pcSecPichia.mat` 核实——GPR 只覆盖约 2732 个代谢反应，分泌机器层（chaperone/translocon/糖基化/COPII/核糖体/蛋白酶体等 2793 个复合体形成反应）**0 个有 GPR**，其酶也不在模型基因节点里。因此存在两条筛查路径：GPR 驱动的全基因组基因筛查只能触达代谢基因；分泌机器只能走 curated catalog 在**复合体/反应层面**筛查（直接调形成反应的 bound 或 kcat），通过分泌耦合约束传导到目标蛋白分泌——这套是真实有效的（PDI/ERO1/ERV2 复合体 OE 使 hLF +8.15%、OPN 几乎不变，走的正是这条），只是干预以复合体而非基因表达，使用时需人工翻译成"过表达对应基因"。已把这段准确描述写进 `pichia_current_architecture_and_requirements.md`"基因、GPR 与证据"小节，纠正了此前可能给人"分泌机器反应挂了基因、KO 走 GPR 传导"的错误印象。唯一被"没有基因"真正卡死的干预仍是目标蛋白降解（删液泡蛋白酶减少产物降解），已记在"当前主要缺口"第 3 条。
 
-## 已授权切片
+## 最近完成的技术工作
 
-只执行 `direction_3_secretory_resource_round_0`：冻结 secretory resource layer 的资源池、单位、来源、适用条件、不确定性、开关、基线回归和 hLF/OPN 不可用状态契约。
+`direction_3_secretory_resource_round_0` 已完成并通过验收（见下）。随后完成的 `direction_3_erad_constraint_activation`：验证了 hLF 的求解可行性、理解了已知的 MATLAB 兼容性差异、决定 ERAD/misfolding 约束保持可选（不改默认值）。**明确不做**目标蛋白降解通路（PEP4/PRB1/YPS 家族）建模——基因身份本身低置信度待复核、没有合理动力学路径，等真实湿实验结果，不是"以后再看"。进入方向 4，或将方向 5 从"局部验收维度"扩展为完整跨条件排名产品，由用户决定何时推进，不会自动展开为下一轮实现提示词。
 
-本切片不得实现完整 secretory mechanism 求解、进入组合搜索或完整跨条件排名，也不得用文献基因名单直接生成约束。
+本切片（ERAD 约束验证与激活）的范围只到验证与激活决定：不得实现完整 secretory mechanism 求解、进入组合搜索或完整跨条件排名，也不得用文献基因名单直接生成约束，也不得把目标蛋白降解通路建模接进来——这些边界在 Round 0 期间没有被突破，本轮完成时同样没有被突破。
 
 ## 必读材料
 
-1. [项目级执行与预算计划：方向 3 Round 0 成功条件与授权边界](EXECUTION_PLAN.md#方向-3-round-0-成功条件)
+1. [项目级执行计划：方向 3 Round 0 成功条件、ERAD 激活成功条件与范围边界](EXECUTION_PLAN.md#方向-3-round-0-成功条件)
 2. [当前架构：实验校准层与产品验收分层](pichia_current_architecture_and_requirements.md#产品验收分层)
-3. [Phase 3：分泌资源与蛋白稳态约束](pichia_next_plan.md#phase-3分泌资源与蛋白稳态约束)
+3. [Round 0 数据契约与层级边界（历史技术规格，已归档）](archive/pichia_next_plan.md#round-0-数据契约)
 4. [ADR-002：相对 OE 与绝对容量分层](adr/002-relative-oe-and-absolute-capacity-layers.md)
 5. [数据与结果治理策略](data_and_results_policy.md)
 
-## 验收与停止线
+## Round 0 验收与停止线（已完成，历史记录）
 
-- Round 0 只冻结可执行契约和边界，必须明确代谢层、protein resource、secretory resource 与实验校准层的所有权。
-- 每类资源池必须声明单位、来源、适用条件、不确定性、开关和 baseline/feature-off 回归。
-- 文献基因名单、外部注释或同源关系不能直接提升为可执行约束；无合格参数时必须 unavailable/not executable。
-- hLF/OPN 的目标特异成本与不可用状态必须分开表达。
-- 完成 review/fix/verify 后更新状态并停止；不得自动进入方向 3 的机制实现或方向 4。
+- Round 0 只冻结可执行契约和边界，必须明确代谢层、protein resource、secretory resource 与实验校准层的所有权。——已满足：七类资源均引用 `pcsec_pichia.core.target_protein_plan`/`pcsec_pichia.probe` 的既有 handle，未复制或改名任何现有模型逻辑。
+- 每类资源池必须声明单位、来源、适用条件、不确定性、开关和 baseline/feature-off 回归。——已满足：`SecretoryResource`/`SecretoryResourceCatalog` 的 `validate()` 强制这些字段，feature-off 返回空 catalog 有测试覆盖。
+- 文献基因名单、外部注释或同源关系不能直接提升为可执行约束；无合格参数时必须 unavailable/not executable。——已满足：`validate_secretory_resource_catalog` 的 `category_out_of_round0_scope`/`forbidden_handle_literal` 门禁没有被放宽。
+- hLF/OPN 的目标特异成本与不可用状态必须分开表达。——已满足：`target_specific_cost` 的 `model_handles` 按 `protein_id` 天然不重叠，并有回归测试 `test_target_specific_cost_never_shares_handles_across_targets` 直接断言 hLF/OPN 不共享 handle。
+- 完成 review/fix/verify 后更新状态并停止；不得自动进入方向 3 的机制实现或方向 4。——本次更新到此停止，未生成方向 3 机制实现或方向 4 的后续提示词。
+- 验证 focused tests、只读 hLF/OPN coverage smoke、`compileall`、保护目录、依赖、密钥和 ignore 边界。——已验证：`python_pichia/tests/` 548 passed/19 skipped/0 failed；仓库根 `tests/` 317 passed（另外 6 个失败经 `git diff HEAD` 核实为改动前已存在、与本次改动的文件无关）；`compileall` 通过；`Code/Model/Enzymedata/Results/Data` 无改动；无新增依赖；`local_runs/` 输出保持 ignored。
+
+## ERAD 约束验证与激活验收线（已完成）
+
+- hLF 和 OPN 都要有真实求解可行性验证。——已满足：新增 `test_pipeline_runs_builtin_hlf_with_optional_constraints`，与已有的 OPN 版本一起跑通，两个 target 都 `success=True`、`constraint_counts["misfolding"]==1418`、`matlab_alignment_status=="aligned_except_known_matlab_compatibility_differences"`。
+- 必须先理解 `aligned_except_known_matlab_compatibility_differences` 这条已知差异的性质。——已确认：`pcsec_pichia.alignment` 模块把这条差异记录为"corrected"（`misfolding_dilution_bounds`：旧 MATLAB artifact 把大部分 dilution_misfolding 变量强行封为 0，Python 版本纠正后保持开放），是已经复核过的修正，不是未解释的偏差；hLF/OPN 各自的已知例外数（3/4）也在测试里锁定。
+- 默认开启还是保持可选，需要明确记录的决定和理由。——**决定：保持可选，不改默认值**。理由：(1) 现有 5%-14% 的排名影响只在 ERAD/蛋白酶体通路相关的候选上验证过，对其余绝大多数基因没有已知收益；(2) 打开后每次求解多 1418 行约束，全基因组筛查会对不相关的基因也承担这个开销；(3) 改默认值会静默改变方向 2 现有候选排名的语义，属于第 7 节明确禁止的行为。决定和理由已经写进 `engines/base.py` 的 `enable_misfolding_constraint` 字段注释旁，不只是存在文档里。
+- 现有 hLF/OPN 回归（product tiering、relative smoke、genome-wide screen）必须继续通过。——已验证：product tiering/acceptance/pipeline-entrypoint 测试全部通过，全量 `python_pichia/tests/` 和仓库根 `tests/` 回归见下方验证记录。
+- 目标蛋白降解通路（PEP4/PRB1/YPS）不在这轮范围内。——本轮未触碰。

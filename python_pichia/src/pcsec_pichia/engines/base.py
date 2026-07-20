@@ -30,6 +30,19 @@ class PichiaSimulationRequest:
     compatibility_mode: CompatibilityMode = DEFAULT_COMPATIBILITY_MODE
     glycosylation_mode: GlycosylationMode = "native"
     enable_ribosome_translation_constraint: bool = False
+    # direction_3_erad_constraint_activation (2026-07-17): stays optional, not
+    # a new default. Real kcat backs these 1418 rows and hLF/OPN both stay
+    # feasible with it on (test_pipeline_runs_builtin_{hlf,opn}_with_optional_
+    # constraints); a small ERAD/proteasome candidate set showed 5%-14% real
+    # secretion_ratio_vs_wildtype swings when toggled. Flipping the default
+    # anyway would (a) silently change every existing direction-2 screen's
+    # candidate-ranking semantics without an explicit opt-in, which
+    # EXECUTION_PLAN.md's ERAD acceptance line forbids, and (b) add 1418
+    # constraint rows to every solve genome-wide, including the vast majority
+    # of genes that never touch the ERAD/misfolding pathway and gain nothing
+    # from it. Turn this on explicitly per-run when a candidate is already
+    # known/suspected ERAD/proteasome-pathway-adjacent (see
+    # services/gene_catalog.py's CAT_ERAD/CAT_PROTEASOME), not globally.
     enable_misfolding_constraint: bool = False
     growth_points: tuple[float, ...] = ()  # empty = auto grid around mu; see pipeline._growth_points
     ko_gene_ids: tuple[str, ...] = ()

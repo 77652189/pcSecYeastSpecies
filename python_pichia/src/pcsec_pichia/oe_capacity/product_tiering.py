@@ -141,9 +141,8 @@ def _relative_plan(plan: OECapacityPlan, *, compare_proxy: bool) -> OECapacityPl
             dict.fromkeys(
                 (
                     *plan.warnings,
-                    "Relative OE applies a dimensionless factor to the targeted "
-                    "current-model enzyme-capacity coupling; it does not represent "
-                    "a measured kcat, true expression fold-change, or absolute capacity.",
+                    "相对OE只是把当前模型里目标反应的酶容量耦合乘上一个无量纲系数，"
+                    "不代表实测kcat、真实表达倍数或绝对容量。",
                 )
             )
         ),

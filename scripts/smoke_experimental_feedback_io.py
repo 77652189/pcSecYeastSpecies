@@ -22,15 +22,7 @@ from pcsec_pichia.experimental_feedback import (
 
 
 def _records() -> tuple[tuple[str, object], ...]:
-    condition = ConditionContext(
-        "sanitized_defined_medium",
-        "methanol",
-        "shake_flask",
-        30.0,
-        6.0,
-        "sanitized agitation setting",
-        72.0,
-    )
+    condition = ConditionContext("sanitized defined medium, methanol, shake flask, sanitized agitation setting", 72.0)
     host = HostContext("Komagataella phaffii", "sanitized-strain", "sanitized-parent")
     return (
         ("experiment", ExperimentRecord("IO-HLF-1", "hLF", host, "IO-B1", condition)),

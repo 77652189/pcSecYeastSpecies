@@ -263,7 +263,7 @@ def test_ranking_assessment_counts_only_records_with_rank_and_observed_ratio() -
 
 def _single_candidate_bundle(*, candidate_value: float, control_value: float) -> ExperimentBundle:
     host = HostContext("Komagataella phaffii", "X33", "X33")
-    condition = ConditionContext("BMMY", "methanol", "shake_flask", 30.0, 6.0, "250 rpm", 72.0)
+    condition = ConditionContext("BMMY, methanol, shake_flask, 250 rpm", 72.0)
     experiments = (
         ExperimentRecord("HLF-CONTROL", "hLF", host, "B01", condition, context_id="ctx-hlf"),
         ExperimentRecord("HLF-CANDIDATE", "hLF", host, "B01", condition, context_id="ctx-hlf"),
@@ -305,7 +305,7 @@ def _measurement(experiment_id: str, measurement_id: str, value: float) -> Measu
 
 def _metric_fixture() -> tuple[ExperimentBundle, object]:
     host = HostContext("Komagataella phaffii", "X33", "X33")
-    condition = ConditionContext("BMMY", "methanol", "shake_flask", 30.0, 6.0, "250 rpm", 72.0)
+    condition = ConditionContext("BMMY, methanol, shake_flask, 250 rpm", 72.0)
     specs = (
         ("HLF-CONTROL-M", "hLF", "B01", "ctx-hlf"),
         ("HLF-HIT", "hLF", "B01", "ctx-hlf"),

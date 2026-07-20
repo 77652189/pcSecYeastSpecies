@@ -8,9 +8,11 @@
 - `Data/`：人工确认、可追溯、允许长期维护的稳定输入和 curated scientific data。
 - `Model/`：人工确认的 GEM / pcSec 模型资产。
 - `Enzymedata/`：人工确认的酶容量和资源约束资产。
-- `Results/`：legacy MATLAB results，只读参考，不作为当前 Python / Streamlit 输出目录。
-- `local_runs/`：运行产物、临时缓存、外部下载、smoke、报告和待复核实验导入，默认 ignored。
+- `Results/` 是 legacy MATLAB results，只读参考，不是当前 Python 或 Streamlit 的默认输出目录。
+- `local_runs/` 是当前 Python、Streamlit、MATLAB harness 运行产物、临时缓存、外部下载、smoke、报告和待复核实验导入的统一落地目录，默认 ignored。
 - `docs/archive/`：已完成计划、阶段验证和被 active 文档吸收的历史设计，默认不进入公开版本控制。
+
+历史 `Results/` 迁移、Git LFS 改造或仓库历史瘦身不属于当前数据治理范围。
 
 ## 实验反馈数据
 
@@ -65,8 +67,8 @@
 
 ## 提交规则
 
-- LP、solver output、BLAST cache、外部下载、Streamlit run、LLM report 和 smoke 默认进入 `local_runs/`。
-- 大文件进入 Git 前必须说明来源、可再生成性、license、人工复核状态和为什么不是运行产物。
+- 新生成的 LP、solver output、BLAST cache、外部下载、Streamlit run、LLM report 和 smoke 默认进入 `local_runs/`。
+- 大文件进入 Git 前必须说明来源、可再生成性、license、人工复核状态和为什么不是运行产物；仓库当前未启用 Git LFS，在没有独立评审前不得用它绕开这条规则直接提交大型二进制资产。
 - `Data/Model/Enzymedata/Results` 的任何修改都必须明确声明为科学资产变更。
 - 不提交包含真实实验人员身份、客户信息或未经批准的原始实验数据。
 

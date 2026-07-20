@@ -7,7 +7,13 @@ from dataclasses import dataclass
 from typing import Any, Iterable, Mapping, Sequence
 
 from pcsec_pichia.experimental_feedback.schema import (
+    ASSAY_TYPE_OD600,
+    ASSAY_TYPE_TITER,
+    ASSAY_TYPE_UPR,
     CANONICAL_UNITS,
+    COMPARTMENT_EXTRACELLULAR,
+    COMPARTMENT_INTRACELLULAR,
+    COMPARTMENT_WHOLE_CULTURE,
     ConditionContext,
     ExperimentRecord,
     FermentationDataStatus,
@@ -16,12 +22,13 @@ from pcsec_pichia.experimental_feedback.schema import (
     InterventionType,
     MeasurementRecord,
     MeasurementStatus,
+    ModificationConfirmationStatus,
     QualityStatus,
     SchemaValidationError,
 )
 
 
-FERMENTATION_TEMPLATE_ADAPTER_ID = "pcsec_pichia.fermentation_template.v1"
+FERMENTATION_TEMPLATE_ADAPTER_ID = "pcsec_pichia.fermentation_template.v2"
 
 
 @dataclass(frozen=True)
@@ -33,27 +40,44 @@ class FermentationTemplateImport:
 
 _ALIASES: Mapping[str, tuple[str, ...]] = {
     "experiment_id": ("experiment_id", "实验编号"),
-    "clone_id": ("clone_id", "克隆编号", "克隆id", "克隆ID"),
+    "clone_id": ("clone_id", "克隆编号", "单克隆编号", "克隆id", "克隆ID"),
     "target_id": ("target_id", "目标蛋白", "目标蛋白ID"),
     "target_name": ("target_name", "目标蛋白名称"),
     "batch_id": ("batch_id", "批次", "发酵批次", "批次编号"),
     "context_id": ("context_id", "预测条件ID", "条件ID"),
     "host_species": ("host_species", "宿主物种", "物种"),
-    "host_strain": ("host_strain", "宿主菌株", "菌株"),
-    "parent_strain": ("parent_strain", "亲本菌株"),
-    "medium": ("medium", "培养基"),
-    "carbon_source": ("carbon_source", "碳源"),
-    "culture_mode": ("culture_mode", "培养方式", "培养模式"),
-    "temperature_c": ("temperature_c", "温度_C", "温度(°C)", "温度"),
-    "ph": ("ph", "pH", "PH"),
-    "oxygen_or_agitation": ("oxygen_or_agitation", "转速或供氧", "转速", "供氧"),
+    "host_strain": ("host_strain", "发酵菌株", "宿主菌株", "菌株"),
+    "parent_strain": ("parent_strain", "本底菌株", "亲本菌株"),
+    "condition_description": ("condition_description", "发酵条件"),
     "sampling_time_h": ("sampling_time_h", "取样时间_h", "取样时间(h)", "取样时间"),
-    "assay_type": ("assay_type", "检测类型"),
+    "od600_value": ("od600_value", "72h-OD600", "OD600"),
+    "upr_value": ("upr_value", "72h-UPR", "UPR"),
+    "extracellular_titer_value": (
+        "extracellular_titer_value",
+        "72h-胞外产量mg/L",
+        "胞外产量mg/L",
+        "胞外产量",
+    ),
+    "extracellular_dilution_factor": (
+        "extracellular_dilution_factor",
+        "胞外ELISA稀释倍数",
+        "胞外稀释倍数",
+    ),
+    "extracellular_above_range": ("extracellular_above_range", "胞外是否超标曲"),
+    "intracellular_titer_value": (
+        "intracellular_titer_value",
+        "72h-胞内产量mg/L",
+        "胞内产量mg/L",
+        "胞内产量",
+    ),
+    "intracellular_dilution_factor": (
+        "intracellular_dilution_factor",
+        "胞内ELISA稀释倍数",
+        "胞内稀释倍数",
+    ),
+    "intracellular_above_range": ("intracellular_above_range", "胞内是否超标曲"),
+    "notes": ("notes", "备注"),
     "assay_method": ("assay_method", "检测方法"),
-    "compartment": ("compartment", "检测区室", "区室"),
-    "measurement_value": ("measurement_value", "检测值", "滴度", "产量", "titer"),
-    "measurement_unit": ("measurement_unit", "单位", "检测单位"),
-    "technical_replicate_id": ("technical_replicate_id", "技术重复编号"),
     "modification_plan": ("modification_plan", "改造方案", "改造方案（含对应基因）"),
     "intervention_type": ("intervention_type", "改造类型"),
     "gene_id": ("gene_id", "对应基因", "基因ID", "gene"),
@@ -71,6 +95,8 @@ _ALIASES: Mapping[str, tuple[str, ...]] = {
     "promoter": ("promoter", "启动子"),
     "induction_mode": ("induction_mode", "诱导方式"),
     "copy_number": ("copy_number", "拷贝数"),
+    "confirmation_status": ("confirmation_status", "改造确认"),
+    "confirmation_method": ("confirmation_method", "确认方式", "改造确认方式"),
     "status_reason": ("status_reason", "状态原因"),
     "exclusion_reason": ("exclusion_reason", "排除原因"),
 }
@@ -86,6 +112,27 @@ _STATUS_ALIASES = {
     "检测失败": FermentationDataStatus.ASSAY_FAILED,
     "other_excluded": FermentationDataStatus.OTHER_EXCLUDED,
     "其他排除": FermentationDataStatus.OTHER_EXCLUDED,
+}
+
+_CONFIRMATION_STATUS_ALIASES = {
+    "": ModificationConfirmationStatus.NOT_CONFIRMED,
+    "未确认": ModificationConfirmationStatus.NOT_CONFIRMED,
+    "not_confirmed": ModificationConfirmationStatus.NOT_CONFIRMED,
+    "已确认成功": ModificationConfirmationStatus.CONFIRMED_SUCCESS,
+    "确认成功": ModificationConfirmationStatus.CONFIRMED_SUCCESS,
+    "confirmed_success": ModificationConfirmationStatus.CONFIRMED_SUCCESS,
+    "已确认失败": ModificationConfirmationStatus.CONFIRMED_FAILED,
+    "确认失败": ModificationConfirmationStatus.CONFIRMED_FAILED,
+    "confirmed_failed": ModificationConfirmationStatus.CONFIRMED_FAILED,
+}
+
+_TRUE_FLAG_VALUES = {"是", "true", "yes", "y", "1"}
+_FALSE_FLAG_VALUES = {"否", "false", "no", "n", "0", ""}
+
+_DEFAULT_ASSAY_METHODS = {
+    ASSAY_TYPE_OD600: "OD600",
+    ASSAY_TYPE_UPR: "UPR_marker",
+    ASSAY_TYPE_TITER: "ELISA",
 }
 
 
@@ -121,9 +168,6 @@ def map_fermentation_template_rows(
     required_template_fields = {
         "clone_id",
         "modification_plan",
-        "data_status",
-        "parent_control_group_id",
-        "replicate_id",
     }
     missing_headers = sorted(required_template_fields - seen_headers - set(supplied_metadata))
     if missing_headers:
@@ -165,10 +209,16 @@ def _records_from_row(
     clone_id = _required_text(row, "clone_id", row_number)
     target_id = _required_text(row, "target_id", row_number)
     batch_id = _required_text(row, "batch_id", row_number)
-    replicate_id = _required_text(row, "replicate_id", row_number)
-    control_group_id = _required_text(row, "parent_control_group_id", row_number)
-    data_status = _data_status(row.get("data_status"), row_number=row_number)
+    replicate_id = _text(row.get("replicate_id")) or f"row{row_number}"
+    control_group_id = _text(row.get("parent_control_group_id"))
+    raw_data_status = _text(row.get("data_status"))
+    data_status = (
+        _data_status(raw_data_status, row_number=row_number)
+        if raw_data_status
+        else FermentationDataStatus.NORMAL
+    )
     intervention_type, gene_id, design_label = _intervention(row, row_number=row_number)
+    condition_description = _text(row.get("condition_description")) or "unknown"
     experiment_id = _text(row.get("experiment_id")) or _generated_experiment_id(
         target_id=target_id,
         batch_id=batch_id,
@@ -180,25 +230,13 @@ def _records_from_row(
             _text(row.get("host_species")),
             _text(row.get("host_strain")),
             _text(row.get("parent_strain")),
-            _text(row.get("medium")),
-            _text(row.get("carbon_source")),
-            _text(row.get("culture_mode")),
-            _text(row.get("temperature_c")),
-            _text(row.get("ph")),
-            _text(row.get("oxygen_or_agitation")),
-            _text(row.get("sampling_time_h")),
+            condition_description,
         ),
     )
+    sampling_time_h = _optional_float(row.get("sampling_time_h"), "sampling_time_h", row_number)
     condition = ConditionContext(
-        medium=_text(row.get("medium")) or "unknown",
-        carbon_source=_text(row.get("carbon_source")) or "unknown",
-        culture_mode=_text(row.get("culture_mode")) or "unknown",
-        temperature_c=_optional_float(row.get("temperature_c"), "temperature_c", row_number),
-        ph=_optional_float(row.get("ph"), "ph", row_number),
-        oxygen_or_agitation=_text(row.get("oxygen_or_agitation")) or "unknown",
-        sampling_time_h=_optional_float(
-            row.get("sampling_time_h"), "sampling_time_h", row_number
-        ),
+        condition_description=condition_description,
+        sampling_time_h=72.0 if sampling_time_h is None else sampling_time_h,
     )
     quality_status, quality_reason = _quality_status(data_status, row)
     experiment = ExperimentRecord(
@@ -216,6 +254,7 @@ def _records_from_row(
         biological_replicate_id=replicate_id,
         clone_id=clone_id,
         parent_control_group_id=control_group_id,
+        notes=_text(row.get("notes")),
         fermentation_data_status=data_status,
         quality_status=quality_status,
         quality_reason=quality_reason,
@@ -223,6 +262,7 @@ def _records_from_row(
     warnings: tuple[str, ...] = ()
     if intervention_type is InterventionType.OE and row.get("copy_number") in (None, ""):
         warnings = ("copy_number_unknown",)
+    confirmation_status, confirmation_method = _confirmation(row, row_number=row_number)
     intervention = InterventionRecord(
         experiment_id=experiment_id,
         intervention_id="CONTROL-1" if intervention_type is InterventionType.CONTROL else "INTERVENTION-1",
@@ -245,54 +285,105 @@ def _records_from_row(
         prediction_run_id=_text(row.get("prediction_run_id")),
         evidence_id=_text(row.get("evidence_id")),
         design_label=design_label,
+        confirmation_status=confirmation_status,
+        confirmation_method=confirmation_method,
         warnings=warnings,
     )
-    assay_type = _text(row.get("assay_type")) or "titer"
-    canonical_unit = CANONICAL_UNITS.get(assay_type)
-    if canonical_unit is None:
-        raise SchemaValidationError(
-            f"unsupported assay_type at fermentation template row {row_number}: {assay_type}"
-        )
-    raw_value = _optional_float(row.get("measurement_value"), "measurement_value", row_number)
-    raw_unit = _text(row.get("measurement_unit")) or canonical_unit
-    measurement_status, excluded, status_reason = _measurement_status(
-        data_status,
-        raw_value=raw_value,
-        row=row,
-    )
-    technical_replicate_id = _text(row.get("technical_replicate_id")) or "T1"
     raw_fields_json = json.dumps(
         {str(key): _json_scalar(value) for key, value in raw_row.items()},
         ensure_ascii=False,
         sort_keys=True,
     )
-    measurement = MeasurementRecord(
-        experiment_id=experiment_id,
-        measurement_id=f"{assay_type}-{technical_replicate_id}",
-        assay_type=assay_type,
-        assay_method=_text(row.get("assay_method")) or "unknown",
-        compartment=_text(row.get("compartment")) or "extracellular",
+    measurements = tuple(
+        _build_measurement(
+            experiment_id=experiment_id,
+            assay_type=assay_type,
+            compartment=compartment,
+            value_key=value_key,
+            dilution_key=dilution_key,
+            above_range_key=above_range_key,
+            row=row,
+            row_number=row_number,
+            data_status=data_status,
+            raw_fields_json=raw_fields_json,
+            source_sheet=source_sheet,
+        )
+        for assay_type, compartment, value_key, dilution_key, above_range_key in (
+            (ASSAY_TYPE_OD600, COMPARTMENT_WHOLE_CULTURE, "od600_value", None, None),
+            (ASSAY_TYPE_UPR, COMPARTMENT_INTRACELLULAR, "upr_value", None, None),
+            (
+                ASSAY_TYPE_TITER,
+                COMPARTMENT_EXTRACELLULAR,
+                "extracellular_titer_value",
+                "extracellular_dilution_factor",
+                "extracellular_above_range",
+            ),
+            (
+                ASSAY_TYPE_TITER,
+                COMPARTMENT_INTRACELLULAR,
+                "intracellular_titer_value",
+                "intracellular_dilution_factor",
+                "intracellular_above_range",
+            ),
+        )
+    )
+    return (
+        ("experiment", experiment),
+        ("intervention", intervention),
+    ) + tuple(("measurement", measurement) for measurement in measurements)
+
+
+def _build_measurement(
+    *,
+    experiment_id: str,
+    assay_type: str,
+    compartment: str,
+    value_key: str,
+    dilution_key: str | None,
+    above_range_key: str | None,
+    row: Mapping[str, object],
+    row_number: int,
+    data_status: FermentationDataStatus,
+    raw_fields_json: str,
+    source_sheet: str,
+) -> MeasurementRecord:
+    canonical_unit = CANONICAL_UNITS[assay_type]
+    raw_value = _optional_float(row.get(value_key), value_key, row_number)
+    dilution_factor = (
+        _optional_float(row.get(dilution_key), dilution_key, row_number)
+        if dilution_key is not None
+        else None
+    )
+    above_range = (
+        _parse_bool_flag(row.get(above_range_key), field_name=above_range_key, row_number=row_number)
+        if above_range_key is not None
+        else False
+    )
+    measurement_status, excluded, status_reason = _measurement_status(
+        data_status,
         raw_value=raw_value,
-        raw_unit=raw_unit,
-        canonical_value=(
-            raw_value
-            if raw_unit == canonical_unit and measurement_status is MeasurementStatus.VALID
-            else None
-        ),
+        above_range=above_range,
+        row=row,
+    )
+    return MeasurementRecord(
+        experiment_id=experiment_id,
+        measurement_id=f"{assay_type}-{compartment}",
+        assay_type=assay_type,
+        assay_method=_text(row.get("assay_method")) or _DEFAULT_ASSAY_METHODS[assay_type],
+        compartment=compartment,
+        raw_value=raw_value,
+        raw_unit=canonical_unit,
+        canonical_value=(raw_value if measurement_status is MeasurementStatus.VALID else None),
         canonical_unit=canonical_unit,
         status=measurement_status,
-        technical_replicate_id=technical_replicate_id,
+        dilution_factor=dilution_factor,
+        technical_replicate_id="",
         status_reason=status_reason,
         excluded=excluded,
         exclusion_reason=(status_reason if excluded else ""),
         source_row_number=row_number,
         source_sheet=source_sheet,
         raw_fields_json=raw_fields_json,
-    )
-    return (
-        ("experiment", experiment),
-        ("intervention", intervention),
-        ("measurement", measurement),
     )
 
 
@@ -388,6 +479,37 @@ def _intervention(
     )
 
 
+def _confirmation(
+    row: Mapping[str, object], *, row_number: int
+) -> tuple[ModificationConfirmationStatus, str]:
+    raw_status = _text(row.get("confirmation_status"))
+    status = _CONFIRMATION_STATUS_ALIASES.get(raw_status) or _CONFIRMATION_STATUS_ALIASES.get(
+        raw_status.lower()
+    )
+    if status is None:
+        raise SchemaValidationError(
+            f"invalid confirmation_status at fermentation template row {row_number}: {raw_status}"
+        )
+    method = _text(row.get("confirmation_method"))
+    if status is not ModificationConfirmationStatus.NOT_CONFIRMED and not method:
+        raise SchemaValidationError(
+            f"confirmation_method is required at fermentation template row {row_number} "
+            f"once confirmation_status is {status.value}."
+        )
+    return status, method
+
+
+def _parse_bool_flag(value: object, *, field_name: str, row_number: int) -> bool:
+    normalized = _text(value).lower()
+    if normalized in _TRUE_FLAG_VALUES:
+        return True
+    if normalized in _FALSE_FLAG_VALUES:
+        return False
+    raise SchemaValidationError(
+        f"{field_name} at fermentation template row {row_number} must be a yes/no flag, got: {value!r}"
+    )
+
+
 def _data_status(value: object, *, row_number: int) -> FermentationDataStatus:
     normalized = _text(value)
     status = _STATUS_ALIASES.get(normalized) or _STATUS_ALIASES.get(normalized.lower())
@@ -414,6 +536,7 @@ def _measurement_status(
     status: FermentationDataStatus,
     *,
     raw_value: float | None,
+    above_range: bool,
     row: Mapping[str, object],
 ) -> tuple[MeasurementStatus, bool, str]:
     explicit_reason = _text(row.get("status_reason")) or _text(row.get("exclusion_reason"))
@@ -425,6 +548,12 @@ def _measurement_status(
         FermentationDataStatus.OTHER_EXCLUDED,
     }:
         return MeasurementStatus.EXCLUDED, True, explicit_reason or status.value
+    if above_range:
+        return (
+            MeasurementStatus.ABOVE_RANGE,
+            False,
+            explicit_reason or "超出ELISA标准曲线可定量范围（现场标记超标曲）",
+        )
     if raw_value is None:
         return MeasurementStatus.MISSING, False, explicit_reason or "measurement_value_missing"
     return MeasurementStatus.VALID, False, ""

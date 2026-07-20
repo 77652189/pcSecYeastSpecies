@@ -131,7 +131,7 @@ def test_service_passes_form_metadata_to_wide_template_core_adapter(tmp_path) ->
     manifest = json.loads(
         (run_dir / "validated" / "manifest.json").read_text(encoding="utf-8")
     )
-    assert manifest["adapter_id"] == "pcsec_pichia.fermentation_template.v1"
+    assert manifest["adapter_id"] == "pcsec_pichia.fermentation_template.v2"
     assert manifest["import_metadata"] == {"batch_id": "B01", "target_id": "hLF"}
     assert (run_dir / "inbox" / fixture.name).read_bytes() == fixture.read_bytes()
 
@@ -151,7 +151,7 @@ def test_service_remains_a_facade_without_template_science_rules() -> None:
 
 def _experiment_csv_bytes(tmp_path) -> bytes:
     host = HostContext("Komagataella phaffii", "X33", "X33")
-    condition = ConditionContext("BMMY", "methanol", "shake_flask", 30.0, 6.0, "250 rpm", 72.0)
+    condition = ConditionContext("BMMY, methanol, shake_flask, 250 rpm", 72.0)
     rows = (
         ("experiment", ExperimentRecord("UI-CONTROL", "hLF", host, "B01", condition, context_id="ctx-hlf-ui")),
         ("experiment", ExperimentRecord("UI-CANDIDATE", "hLF", host, "B01", condition, context_id="ctx-hlf-ui")),

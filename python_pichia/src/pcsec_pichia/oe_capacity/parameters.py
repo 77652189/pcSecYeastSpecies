@@ -525,7 +525,7 @@ def plan_gene_level_overexpression(
             else OEExecutionStatus.GENE_LEVEL_EXECUTABLE
         )
         warnings.append(
-            "Relative gene capacity is uncalibrated and does not define an absolute model_flux anchor."
+            "相对gene-capacity结果未经校准，不构成绝对model_flux锚点。"
         )
     elif proxy_reactions:
         mode = OEExecutionMode.REACTION_PROXY
@@ -535,8 +535,8 @@ def plan_gene_level_overexpression(
             else OEExecutionStatus.PROXY_ONLY
         )
         warnings.append(
-            "Absolute gene capacity is unavailable without a reviewed baseline anchor; "
-            "reaction proxy remains a separate directional evidence path."
+            "缺少审核过的baseline锚点，绝对gene-capacity不可用；"
+            "reaction proxy是另一条独立的方向性证据路径。"
         )
     else:
         mode = OEExecutionMode.NOT_EXECUTABLE

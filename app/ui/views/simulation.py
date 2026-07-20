@@ -6,11 +6,53 @@ import streamlit as st
 
 from app.services.pichia_background_tasks import clear_last_result, submit_background_simulation
 from app.services.pichia_secretion_schema import SecretionRunRequest
-from app.ui.common import PATHS
+from app.ui.common import PATHS, request_navigation
 from app.ui.views.simulation_builder import render_target_build_form
 from app.ui.views.simulation_gene_inputs import render_gene_perturbation_form
 from app.ui.views.simulation_matlab_reference import render_matlab_reference
 from app.ui.views.simulation_results import render_pichia_results
+
+
+def _prefill_field_values(candidate_id: str, intervention_type: str, candidate_kind: str) -> dict[str, str]:
+    """Pure routing decision behind apply_simulation_prefill - which draft field gets candidate_id.
+
+    "gene" (full-genome screen rows, OE capacity gene ids) goes to the gene-ID inputs, which
+    resolve through GPR; everything else ("catalog_reaction" from the curated catalog screen,
+    "complex_oe_hypothesis" from the hypothetical whole-complex OE test, and any future
+    non-gene candidate_kind) goes to the reaction-ID inputs, since those rows' id field
+    actually holds a direct reaction id with no gene to resolve. Allowlisting "gene" rather
+    than denylisting "catalog_reaction" so a new non-gene candidate_kind fails safe (reaction
+    routing) instead of silently landing in the wrong box.
+    """
+    is_gene = candidate_kind == "gene"
+    return {
+        "pichia_draft_ko_genes": candidate_id if (is_gene and intervention_type == "KO") else "",
+        "pichia_draft_ko_reactions": candidate_id if (not is_gene and intervention_type == "KO") else "",
+        "pichia_draft_oe_genes": candidate_id if (is_gene and intervention_type == "OE") else "",
+        "pichia_draft_oe_reactions": candidate_id if (not is_gene and intervention_type == "OE") else "",
+    }
+
+
+def apply_simulation_prefill(
+    target_id: str, candidate_id: str, intervention_type: str, candidate_kind: str = "gene"
+) -> None:
+    """Pre-fill this page's session_state with one candidate and jump here.
+
+    Shared by every page that wants a "verify this candidate in simulation"
+    button (genome-wide screen, OE capacity comparison, ...), so there is one
+    owner for how the draft build form gets pre-filled instead of each caller
+    re-deriving the same routing rules.
+
+    Replaces (not appends to) the KO/OE draft fields so the simulation isolates
+    exactly this one candidate instead of mixing in whatever was left over from a
+    previous exploration.
+    """
+    st.session_state["pichia_tab_selector"] = "仿真构建"
+    st.session_state["pichia_draft_build_mode"] = "快速选择（内置模板）"
+    st.session_state["pichia_template"] = target_id
+    st.session_state.update(_prefill_field_values(candidate_id, intervention_type, candidate_kind))
+    request_navigation("仿真验证")
+    st.rerun()
 
 
 def render_simulation() -> None:

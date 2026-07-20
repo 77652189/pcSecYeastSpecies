@@ -40,7 +40,7 @@ def main() -> int:
         )
     )
     host = HostContext("Komagataella phaffii", "sanitized-strain", "sanitized-parent")
-    condition = ConditionContext("sanitized-medium", "methanol", "shake_flask", 30.0, 6.0, "sanitized", 72.0)
+    condition = ConditionContext("sanitized-medium, methanol, shake_flask, sanitized agitation", 72.0)
     bundle = ExperimentBundle(
         experiments=(
             ExperimentRecord("LINK-HLF", "hLF", host, "B1", condition, context_id="ctx-hlf"),

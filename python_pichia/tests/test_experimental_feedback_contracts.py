@@ -43,12 +43,7 @@ def test_bundle_preserves_combination_intervention_components() -> None:
         ),
         batch_id="B01",
         condition=ConditionContext(
-            medium="BMMY",
-            carbon_source="methanol",
-            culture_mode="shake_flask",
-            temperature_c=30.0,
-            ph=6.0,
-            oxygen_or_agitation="250 rpm",
+            condition_description="BMMY, methanol, shake_flask, 250 rpm",
             sampling_time_h=72.0,
         ),
     )
@@ -199,7 +194,7 @@ def test_import_manifest_and_quality_status_are_explicit() -> None:
     )
 
     manifest.validate()
-    assert manifest.schema_version == 1
+    assert manifest.schema_version == 2
     assert QualityStatus.INVALID.value == "invalid"
 
 
@@ -210,7 +205,7 @@ def test_custom_target_name_and_unknown_oe_copy_number_are_not_silently_defaulte
         target_name="sanitized custom target",
         host=HostContext("Komagataella phaffii", "X33", "X33"),
         batch_id="B01",
-        condition=ConditionContext("BMMY", "methanol", "shake_flask", 30.0, 6.0, "250 rpm", 72.0),
+        condition=ConditionContext("BMMY, methanol, shake_flask, 250 rpm", 72.0),
     )
     oe_without_warning = InterventionRecord(
         experiment_id=custom.experiment_id,

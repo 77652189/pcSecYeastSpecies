@@ -59,19 +59,19 @@ def test_experiment_feedback_view_exposes_all_required_states_and_exports() -> N
     ).read_text(encoding="utf-8")
 
     for text in (
-        "Validation / Conflicts",
-        "Linkage",
-        "Calibration",
-        "ambiguous",
-        "missing_prediction",
-        "context_mismatch",
-        "不可校准",
+        "数据校验",
+        "预测匹配",
+        "历史数据核对",
+        "有歧义",
+        "无对应预测",
+        "条件不匹配",
+        "不可核对",
         "export_experiment_feedback_issues",
         "export_experiment_feedback_report",
-        "下载 prediction-vs-experiment 报告",
+        "下载预测 vs 实验核对报告",
         "ranking_assessment",
         "comparable_rank_pair_count",
-        "排序证据不足",
+        "样本量不足",
         "仅作描述性展示",
     ):
         assert text in source

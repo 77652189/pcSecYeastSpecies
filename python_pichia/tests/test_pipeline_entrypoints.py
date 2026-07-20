@@ -444,6 +444,39 @@ def test_pipeline_runs_builtin_opn_with_optional_constraints(tmp_path: Path) -> 
 
 
 @slow_pipeline
+def test_pipeline_runs_builtin_hlf_with_optional_constraints(tmp_path: Path) -> None:
+    # direction_3_erad_constraint_activation acceptance: hLF must have the same
+    # real feasibility check as OPN (test_pipeline_runs_builtin_opn_with_
+    # optional_constraints above) before any default-on decision - only OPN
+    # was covered before this test existed.
+    output_dir = tmp_path / "hlf"
+    result = run_pichia_secretion_simulation(
+        PichiaSimulationRequest(
+            target_id="hLF",
+            candidate_id="hLF",
+            enable_ribosome_translation_constraint=True,
+            enable_misfolding_constraint=True,
+        ),
+        output_dir=output_dir,
+    )
+
+    summary = _assert_common_pipeline_outputs(result, output_dir)
+    assert result.target_id == "hLF"
+    assert result.constraint_counts["ribosome_translation"] == 1
+    assert result.constraint_counts["misfolding"] == 1418
+    assert result.alignment_summary["matlab_alignment_status"] == "aligned_except_known_matlab_compatibility_differences"
+    assert result.alignment_summary["is_fully_aligned"] is False
+    # hLF's alignment artifact (hLF_PROJECT_710) has 3 known exceptions, not
+    # OPN's 4 - see KNOWN_HLF_PROJECT_710_MATLAB_COMPATIBILITY_EXCEPTIONS in
+    # pcsec_pichia/alignment/__init__.py.
+    assert len(result.alignment_summary["compatibility_exceptions"]) == 3
+    assert summary["secretion_plan"]["route_kind"] == "soluble_secretory"
+    report = result.report_path.read_text(encoding="utf-8")
+    assert "Known MATLAB compatibility exceptions" in report or "已知 MATLAB 兼容差异" in report
+    assert "corrected_condition" in report
+
+
+@slow_pipeline
 def test_pipeline_populates_protein_cost_analysis_only_when_cost_slope_enabled(tmp_path: Path) -> None:
     output_dir = tmp_path / "opn_cost_slope"
     result = run_pichia_secretion_simulation(

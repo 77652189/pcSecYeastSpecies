@@ -14,6 +14,7 @@ from pcsec_pichia.experimental_feedback import (
     FermentationDataStatus,
     ExperimentValidationResult,
     MeasurementStatus,
+    ModificationConfirmationStatus,
     PredictionLinkStatus,
     SchemaValidationError,
     QualityStatus,
@@ -32,6 +33,16 @@ WIDE_CSV = FIXTURE_ROOT / "fermentation_template_sanitized.csv"
 IMPORT_METADATA = {"target_id": "hLF", "batch_id": "B01"}
 
 
+def _extracellular_titer(bundle, experiment_id: str):
+    return next(
+        item
+        for item in bundle.measurements
+        if item.experiment_id == experiment_id
+        and item.assay_type == "titer"
+        and item.compartment == "extracellular"
+    )
+
+
 def test_wide_csv_import_preserves_direction1_fields_statuses_and_raw_trace() -> None:
     bundle = load_experiment_bundle(WIDE_CSV, metadata=IMPORT_METADATA)
     validation = validate_experiment_bundle(bundle)
@@ -40,7 +51,10 @@ def test_wide_csv_import_preserves_direction1_fields_statuses_and_raw_trace() ->
     assert bundle.import_manifest is not None
     assert bundle.import_manifest.adapter_id == FERMENTATION_TEMPLATE_ADAPTER_ID
     assert json.loads(bundle.import_manifest.metadata_json) == IMPORT_METADATA
-    assert len(bundle.experiments) == len(bundle.interventions) == len(bundle.measurements) == 7
+    assert len(bundle.experiments) == len(bundle.interventions) == 7
+    # each of the 14 real fields maps into exactly 4 measurement slots per row:
+    # OD600, UPR, extracellular titer, intracellular titer.
+    assert len(bundle.measurements) == 28
 
     clone_a = [item for item in bundle.experiments if item.clone_id == "CLONE-A"]
     assert {item.biological_replicate_id for item in clone_a} == {"R1", "R2"}
@@ -54,11 +68,7 @@ def test_wide_csv_import_preserves_direction1_fields_statuses_and_raw_trace() ->
     }
 
     by_status = {
-        experiment.fermentation_data_status: next(
-            measurement
-            for measurement in bundle.measurements
-            if measurement.experiment_id == experiment.experiment_id
-        )
+        experiment.fermentation_data_status: _extracellular_titer(bundle, experiment.experiment_id)
         for experiment in bundle.experiments
         if experiment.fermentation_data_status is not FermentationDataStatus.NORMAL
     }
@@ -71,6 +81,18 @@ def test_wide_csv_import_preserves_direction1_fields_statuses_and_raw_trace() ->
     raw_fields = json.loads(by_status[FermentationDataStatus.CONTAMINATION].raw_fields_json)
     assert raw_fields["研发备注"] == "同克隆独立培养"
     assert "unmapped_template_column:研发备注" in bundle.warnings
+
+    contaminated_experiment = next(
+        item
+        for item in bundle.experiments
+        if item.fermentation_data_status is FermentationDataStatus.CONTAMINATION
+    )
+    assert contaminated_experiment.notes == "疑似轻微异味"
+    confirmed_intervention = next(
+        item for item in bundle.interventions if item.experiment_id == contaminated_experiment.experiment_id
+    )
+    assert confirmed_intervention.confirmation_status is ModificationConfirmationStatus.CONFIRMED_SUCCESS
+    assert confirmed_intervention.confirmation_method == "测序"
 
 
 def test_wide_xlsx_uses_file_metadata_and_rejects_form_conflict(tmp_path) -> None:
@@ -167,18 +189,27 @@ def test_duplicate_generated_identity_becomes_conflict_instead_of_overwrite(tmp_
         repeat="R1",
         value="10",
     )
-    second = dict(first, 检测值="20")
+    second = dict(first, **{"72h-胞外产量mg/L": "20"})
     path = _write_wide_csv(tmp_path / "duplicate.csv", [first, second])
 
     bundle = load_experiment_bundle(path, metadata=IMPORT_METADATA)
     validation = validate_experiment_bundle(bundle)
 
     assert validation.is_valid is False
-    assert len(bundle.import_conflicts) == 1
-    assert bundle.import_conflicts[0].record_type == "measurement"
-    assert "10.0" in bundle.import_conflicts[0].first_payload_json
-    assert "20.0" in bundle.import_conflicts[0].conflicting_payload_json
-    assert len(bundle.measurements) == 1
+    # raw_fields_json captures the whole source row, so the changed extracellular-titer
+    # value makes all 4 of the row's measurement slots differ from their row-1 counterparts.
+    assert len(bundle.import_conflicts) == 4
+    assert all(item.record_type == "measurement" for item in bundle.import_conflicts)
+    extracellular_conflict = next(
+        item
+        for item in bundle.import_conflicts
+        if item.record_id.endswith("titer-extracellular")
+    )
+    assert "10.0" in extracellular_conflict.first_payload_json
+    assert "20.0" in extracellular_conflict.conflicting_payload_json
+    # the first row's full set of 4 measurements survives; the conflicting second-row
+    # measurements are recorded as conflicts, not appended.
+    assert len(bundle.measurements) == 4
 
 
 def test_identical_duplicate_source_row_is_warning_not_content_conflict(tmp_path) -> None:
@@ -188,7 +219,8 @@ def test_identical_duplicate_source_row_is_warning_not_content_conflict(tmp_path
     bundle = load_experiment_bundle(path, metadata=IMPORT_METADATA)
 
     assert bundle.import_conflicts == ()
-    assert len(bundle.experiments) == len(bundle.interventions) == len(bundle.measurements) == 1
+    assert len(bundle.experiments) == len(bundle.interventions) == 1
+    assert len(bundle.measurements) == 4
     assert any("duplicate_record_ignored:measurement" in item for item in bundle.warnings)
 
 
@@ -223,11 +255,6 @@ def test_non_normal_canonical_record_cannot_bypass_calibration_gate(tmp_path) ->
     contaminated = next(
         item for item in bundle.experiments if item.clone_id == "CONTAMINATED"
     )
-    contaminated_measurement = next(
-        item
-        for item in bundle.measurements
-        if item.experiment_id == contaminated.experiment_id
-    )
     forged_bundle = replace(
         bundle,
         experiments=tuple(
@@ -245,7 +272,7 @@ def test_non_normal_canonical_record_cannot_bypass_calibration_gate(tmp_path) ->
                 status_reason="",
                 canonical_value=item.raw_value,
             )
-            if item.experiment_id == contaminated_measurement.experiment_id
+            if item.experiment_id == contaminated.experiment_id
             else item
             for item in bundle.measurements
         ),
@@ -359,7 +386,10 @@ def test_failed_control_is_preserved_in_summary_and_markdown(tmp_path) -> None:
     preserved = summary["preserved_experiment_evidence"]
     failed_control = next(item for item in preserved if item["role"] == "control")
     assert failed_control["fermentation_data_status"] == "contamination"
-    assert failed_control["measurements"][0]["raw_value"] == 10.0
+    extracellular_titer = next(
+        item for item in failed_control["measurements"] if item["measurement_id"] == "titer-extracellular"
+    )
+    assert extracellular_titer["raw_value"] == 10.0
     assert result.calibration.records[0].ineligibility_reasons == ("control_match_missing",)
     report = result.outputs.report_path.read_text(encoding="utf-8")
     assert "## 保留的失败与排除实验" in report
@@ -374,12 +404,30 @@ def test_excluded_zero_value_is_preserved_only_as_raw_evidence(tmp_path) -> None
 
     bundle = load_experiment_bundle(path, metadata=IMPORT_METADATA)
     validation = validate_experiment_bundle(bundle)
-    measurement = bundle.measurements[0]
+    measurement = _extracellular_titer(bundle, bundle.experiments[0].experiment_id)
 
     assert validation.is_valid is True
     assert measurement.raw_value == 0.0
     assert measurement.canonical_value is None
     assert measurement.status is MeasurementStatus.EXCLUDED
+
+
+def test_above_range_flag_excludes_canonical_value_and_preserves_audit_trail(tmp_path) -> None:
+    row = _minimal_row("ABOVE-RANGE", "KO:G1", "正常", "C1", "R1", "9999")
+    row["胞外是否超标曲"] = "是"
+    row["胞外ELISA稀释倍数"] = "200"
+    path = _write_wide_csv(tmp_path / "above-range.csv", [row])
+
+    bundle = load_experiment_bundle(path, metadata=IMPORT_METADATA)
+    validation = validate_experiment_bundle(bundle)
+    measurement = _extracellular_titer(bundle, bundle.experiments[0].experiment_id)
+
+    assert validation.is_valid is True
+    assert measurement.status is MeasurementStatus.ABOVE_RANGE
+    assert measurement.raw_value == 9999.0
+    assert measurement.canonical_value is None
+    assert measurement.dilution_factor == 200.0
+    assert measurement.status_reason
 
 
 def _fixture_rows() -> list[dict[str, str]]:
@@ -434,19 +482,22 @@ def _minimal_row(
     return {
         "克隆编号": clone_id,
         "宿主物种": "Komagataella phaffii",
-        "宿主菌株": "X33",
-        "亲本菌株": "X33",
-        "培养基": "BMMY",
-        "碳源": "methanol",
-        "培养方式": "shake_flask",
-        "温度_C": "30",
-        "pH": "6",
-        "转速或供氧": "250 rpm",
+        "发酵菌株": "X33",
+        "本底菌株": "X33",
+        "发酵条件": "BMMY+methanol+shake_flask+250rpm",
         "取样时间_h": "72",
-        "检测方法": "ELISA",
-        "检测值": value,
-        "单位": "mg/L",
+        "72h-OD600": "50",
+        "72h-UPR": "1.0",
+        "72h-胞外产量mg/L": value,
+        "胞外ELISA稀释倍数": "5",
+        "胞外是否超标曲": "否",
+        "72h-胞内产量mg/L": "5",
+        "胞内ELISA稀释倍数": "5",
+        "胞内是否超标曲": "否",
+        "备注": "",
         "改造方案": plan,
+        "改造确认": "",
+        "确认方式": "",
         "数据状态": status,
         "亲本对照组编号": group,
         "重复编号": repeat,

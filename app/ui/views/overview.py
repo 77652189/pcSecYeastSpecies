@@ -5,7 +5,7 @@ import streamlit as st
 
 from app.core.i18n import status_label
 from app.services.logs import RunLogService
-from app.ui.common import HEALTH_COLUMN_LABELS, PATHS, cached_health, dataset_frame, rename_columns
+from app.ui.common import HEALTH_COLUMN_LABELS, PATHS, cached_health, dataset_frame, rename_columns, request_navigation
 
 
 def render_overview() -> None:
@@ -21,6 +21,15 @@ def render_overview() -> None:
         </div>
         """,
         unsafe_allow_html=True,
+    )
+
+    start_col, note_col = st.columns([1, 3])
+    if start_col.button("从这里开始 →", type="primary", key="overview_start_here_btn"):
+        request_navigation("全基因组KO/OE筛查")
+        st.rerun()
+    note_col.caption(
+        "第一次用建议从「全基因组KO/OE筛查」开始：先看看哪些基因值得关注，"
+        "再逐步走到候选核实、证据复核这些页面——不用自己先记那一串页面顺序。"
     )
 
     col1, col2, col3, col4 = st.columns(4)

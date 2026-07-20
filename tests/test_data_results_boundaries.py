@@ -43,11 +43,11 @@ def test_data_results_policy_documents_current_ownership() -> None:
 
 def test_current_docs_keep_runtime_outputs_out_of_science_assets() -> None:
     architecture = _read_repo_text("docs/pichia_current_architecture_and_requirements.md")
-    next_plan = _read_repo_text("docs/pichia_next_plan.md")
+    data_policy = _read_repo_text("docs/data_and_results_policy.md")
 
     assert "`Results/` 保留为 legacy MATLAB results" in architecture
-    assert "当前运行产物统一进入 ignored `local_runs/`" in next_plan
-    assert "历史 `Results/` 迁移、Git LFS 改造或仓库历史瘦身" in next_plan
+    assert "统一落地目录，默认 ignored" in data_policy
+    assert "历史 `Results/` 迁移、Git LFS 改造或仓库历史瘦身" in data_policy
 
 
 def test_runtime_write_lines_do_not_target_protected_science_asset_dirs() -> None:

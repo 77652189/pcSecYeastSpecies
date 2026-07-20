@@ -3,7 +3,7 @@ from __future__ import annotations
 from pcsec_pichia.services.gene_id_standardization import PichiaGeneIdStandardName, build_standard_name_lookup
 
 from python_pichia.tools.run_genome_wide_ko_oe_screen_parallel import _row_to_csv_record
-from app.ui.views.genome_wide_screen import _verify_prefill_field_values
+from app.ui.views.simulation import _prefill_field_values
 
 
 def test_genome_wide_csv_record_includes_standard_name_fields() -> None:
@@ -78,7 +78,7 @@ def test_genome_wide_non_gene_candidate_is_not_standard_named() -> None:
 
 
 def test_genome_wide_verify_prefill_keeps_gene_id_not_standard_symbol() -> None:
-    values = _verify_prefill_field_values("PAS_chr2-1_0140", "KO", "gene")
+    values = _prefill_field_values("PAS_chr2-1_0140", "KO", "gene")
 
     assert values["pichia_draft_ko_genes"] == "PAS_chr2-1_0140"
     assert "KAR2" not in values.values()

@@ -85,7 +85,7 @@ flowchart TD
 | Screen tooling | [`python_pichia/tools/`](python_pichia/tools/) | Genome-wide and focused KO/OE screen runners |
 | Service layer | [`app/services/`](app/services/) | Request mapping, background tasks, gene catalog, screen preview, and simulation facade |
 | UI layer | [`app/ui/`](app/ui/) | Streamlit pages and biology-facing presentation |
-| Working docs | [`docs/README.md`](docs/README.md), [`docs/pichia_next_plan.md`](docs/pichia_next_plan.md) | Active scope, current architecture, and next-plan documents |
+| Working docs | [`docs/README.md`](docs/README.md) | Active scope, current architecture, and execution plan documents |
 
 ## Quick Start
 
@@ -171,7 +171,7 @@ python -m pytest -q python_pichia\tests\test_pipeline_entrypoints.py python_pich
 python -m pytest -q tests\test_pichia_secretion_service_contract.py
 ```
 
-Slow solver/model checks are intentionally gated by environment variables. See [Next Plan](docs/pichia_next_plan.md).
+Slow solver/model checks are intentionally gated by environment variables. See [Current Requirements And Architecture](docs/pichia_current_architecture_and_requirements.md#慢速测试网关).
 
 ## Documentation
 
@@ -179,7 +179,6 @@ Slow solver/model checks are intentionally gated by environment variables. See [
 |---|---|
 | [Docs Index](docs/README.md) | Current document entry points and archived notes |
 | [Current Requirements And Architecture](docs/pichia_current_architecture_and_requirements.md) | Active target-protein workflow, boundaries, and system layering |
-| [Next Plan](docs/pichia_next_plan.md) | BLAST/RBH cache, Shadow LP toggle, and evidence integration priorities |
 | [BLAST/RBH Homology Crosswalk](docs/pichia_homology_crosswalk_architecture.md) | Offline SCE-to-Pichia homology evidence design |
 | [Data And Results Policy](docs/data_and_results_policy.md) | Protected directories, runtime artifacts, and archive rules |
 

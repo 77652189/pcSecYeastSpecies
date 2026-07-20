@@ -30,7 +30,7 @@ def _bundle() -> ExperimentBundle:
         target_id="hLF",
         host=HostContext("Komagataella phaffii", "X33", "X33"),
         batch_id="B01",
-        condition=ConditionContext("BMMY", "methanol", "shake_flask", 30.0, 6.0, "250 rpm", 72.0),
+        condition=ConditionContext("BMMY, methanol, shake_flask, 250 rpm", 72.0),
     )
     return ExperimentBundle(
         experiments=(experiment,),
@@ -89,7 +89,7 @@ def test_csv_import_reports_duplicates_conflicts_bad_units_and_missing_condition
         target_id="OPN",
         host=experiment.host,
         batch_id="B02",
-        condition=ConditionContext("missing", "missing", "missing", None, None, "missing", None),
+        condition=ConditionContext("missing", None),
     )
     bad_unit = MeasurementRecord(
         experiment_id=experiment.experiment_id,

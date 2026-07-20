@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import csv
+import dataclasses
 import hashlib
 import json
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable, Mapping, get_type_hints
 from zipfile import BadZipFile
 
 from openpyxl import load_workbook
@@ -27,15 +28,10 @@ from pcsec_pichia.experimental_feedback.schema import (
     ExperimentImportManifest,
     ExperimentRecord,
     ExperimentalFeedbackError,
-    FermentationDataStatus,
     HostContext,
     InterventionRecord,
-    InterventionType,
     MeasurementRecord,
-    MeasurementStatus,
     PredictionLinkRecord,
-    PredictionLinkStatus,
-    QualityStatus,
     SchemaValidationError,
 )
 
@@ -480,28 +476,36 @@ def _record_from_envelope(payload: object, *, line_number: int) -> tuple[str, ob
         ) from exc
 
 
+def _coerce_enum_fields(cls: type, values: dict[str, Any]) -> dict[str, Any]:
+    """Convert any enum-typed field present in `values` from its serialized value back
+    to the enum member, by introspecting `cls`'s own annotations rather than naming each
+    field. New enum-typed fields on these dataclasses are covered automatically."""
+    hints = get_type_hints(cls)
+    for field in dataclasses.fields(cls):
+        hint = hints.get(field.name)
+        if not isinstance(hint, type) or not issubclass(hint, Enum):
+            continue
+        if field.name in values and not isinstance(values[field.name], hint):
+            values[field.name] = hint(values[field.name])
+    return values
+
+
 def _record_from_dict(record_type: str, payload: Mapping[str, Any]) -> object:
     values = dict(payload)
     if record_type == "experiment":
         values["host"] = HostContext(**values["host"])
         values["condition"] = ConditionContext(**values["condition"])
-        values["quality_status"] = QualityStatus(
-            values.get("quality_status", QualityStatus.VALID.value)
-        )
-        values["fermentation_data_status"] = FermentationDataStatus(
-            values.get("fermentation_data_status", FermentationDataStatus.NORMAL.value)
-        )
+        values = _coerce_enum_fields(ExperimentRecord, values)
         return ExperimentRecord(**values)
     if record_type == "intervention":
-        values["intervention_type"] = InterventionType(values["intervention_type"])
         values["warnings"] = tuple(values.get("warnings") or ())
+        values = _coerce_enum_fields(InterventionRecord, values)
         return InterventionRecord(**values)
     if record_type == "measurement":
-        values["status"] = MeasurementStatus(values["status"])
+        values = _coerce_enum_fields(MeasurementRecord, values)
         return MeasurementRecord(**values)
     if record_type == "prediction_link":
-        values["intervention_type"] = InterventionType(values["intervention_type"])
-        values["status"] = PredictionLinkStatus(values["status"])
+        values = _coerce_enum_fields(PredictionLinkRecord, values)
         return PredictionLinkRecord(**values)
     raise SchemaValidationError(f"unsupported record_type: {record_type}")
 

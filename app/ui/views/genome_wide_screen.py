@@ -24,7 +24,8 @@ from app.services.genome_wide_screen_registry import (
     run_scope_family,
 )
 from app.services.pichia_secretion_service import discover_project_paths
-from app.ui.common import request_navigation
+from app.ui.views.homology_audit import apply_homology_audit_prefill
+from app.ui.views.simulation import apply_simulation_prefill
 
 DEFAULT_TARGETS = ["hLF", "OPN_ALPHA_FULL_PROJECT"]
 QUEUE_STATE_KEY = "genome_wide_screen_queued_request"
@@ -48,11 +49,15 @@ def render_genome_wide_screen() -> None:
     runs = list_runs(paths)
     active_runs = [run for run in runs if run.status in {"starting", "running"}]
 
+    # Results first: this is an expensive, infrequent, hours-long computation -
+    # once it's done, checking its output is the common case on every visit to
+    # this page, while starting a new run and eyeballing old run history are
+    # both rarer, so they sit lower and out of the way.
+    _render_results_section(paths, runs)
+    st.divider()
     _render_launch_controls(paths, active_runs)
     st.divider()
     _render_run_list(runs)
-    st.divider()
-    _render_results_section(paths, runs)
 
 
 SCOPE_LABELS = {
@@ -193,6 +198,10 @@ def _split_result_runs(runs: list[RunInfo]) -> tuple[list[RunInfo], list[RunInfo
     return latest_done, older_done
 
 
+def _run_option_label(run: RunInfo) -> str:
+    return f"{run.run_name} · {SCOPE_LABELS.get(run_scope_family(run), run.scope)}"
+
+
 def _render_results_section(paths, runs: list[RunInfo]) -> None:
     st.subheader("结果查看")
     done_runs = [run for run in runs if run.status == "done"]
@@ -202,27 +211,61 @@ def _render_results_section(paths, runs: list[RunInfo]) -> None:
 
     latest_done, older_done = _split_result_runs(runs)
 
-    viewing_older: RunInfo | None = None
-    if older_done:
-        with st.expander(f"查看历史版本（{len(older_done)}个已被更新的运行取代，仍保留在磁盘上）"):
-            viewing_older = st.selectbox(
-                "选择一个历史版本查看（选中后会替换下面的结果）",
-                options=[None, *older_done],
-                format_func=lambda run: "（不查看，显示下方最新结果）" if run is None else f"{run.run_name}（{SCOPE_LABELS.get(run_scope_family(run), run.scope)}）",
-                key="genome_wide_screen_older_run_select",
+    # No dropdown, and no single flat list either: "latest" naturally has one
+    # entry per scope family (gene/catalog/complex_hypothesis/...) x target,
+    # e.g. overnight_hLF_full and overnight_OPN_full are both "the current
+    # gene-scope result" at once. Picking "which analysis" and "which target
+    # within it" as two small decisions stays readable; one flat radio with
+    # every combination's full label does not.
+    selected_run: RunInfo | None = None
+    if latest_done:
+        by_scope: dict[str, list[RunInfo]] = {}
+        for run in latest_done:
+            by_scope.setdefault(run_scope_family(run), []).append(run)
+        scope_options = [scope for scope in SCOPE_LABELS if scope in by_scope]
+        scope_options += [scope for scope in by_scope if scope not in SCOPE_LABELS]
+
+        if len(scope_options) == 1:
+            selected_scope = scope_options[0]
+        else:
+            selected_scope = st.radio(
+                "查看哪类分析的结果",
+                options=scope_options,
+                format_func=lambda scope: SCOPE_LABELS.get(scope, scope),
+                horizontal=True,
+                key="genome_wide_screen_result_scope_select",
             )
 
-    if viewing_older is not None:
-        selected_run = viewing_older
-        st.info(f"当前显示历史版本结果：{selected_run.run_name}（不是最新结果，上面的下拉框可以切回不查看）")
+        scope_runs = sorted(by_scope[selected_scope], key=lambda run: run.targets)
+        if len(scope_runs) == 1:
+            selected_run = scope_runs[0]
+            st.caption(f"当前显示：{selected_run.run_name}（靶点：{', '.join(selected_run.targets)}）")
+        else:
+            selected_run = st.radio(
+                "选择靶点",
+                options=scope_runs,
+                format_func=lambda run: f"{run.run_name}（靶点：{', '.join(run.targets)}）",
+                horizontal=True,
+                key="genome_wide_screen_result_run_select",
+            )
     else:
-        if not latest_done:
-            st.caption("当前没有最新的已完成运行；可在上方历史版本中查看已被新运行取代的完成结果。")
-            return
-        selected_run = st.selectbox(
-            "选择要查看的运行", options=latest_done,
-            format_func=lambda run: f"{run.run_name}（{SCOPE_LABELS.get(run_scope_family(run), run.scope)}）",
-        )
+        st.caption("当前没有最新的已完成运行；可在下方“历史版本”中查看已被新运行取代的完成结果。")
+
+    if older_done:
+        with st.expander(f"改看一个已被取代的历史版本（{len(older_done)} 个，仍保留在磁盘上）"):
+            viewing_older = st.radio(
+                "历史版本",
+                options=[None, *older_done],
+                format_func=lambda run: "（不查看，用上面选中的最新结果）" if run is None else _run_option_label(run),
+                key="genome_wide_screen_older_run_select",
+            )
+            if viewing_older is not None:
+                selected_run = viewing_older
+                st.info(f"当前显示历史版本结果：{selected_run.run_name}（不是最新结果，可在此处切回“不查看”）")
+
+    if selected_run is None:
+        return
+
     run_name = selected_run.run_name
     # Older runs recorded before catalog scope existed always used gene_tradeoff_rows.csv;
     # csv_path in status.json is authoritative when present (it's scope-specific).
@@ -234,6 +277,12 @@ def _render_results_section(paths, runs: list[RunInfo]) -> None:
     frame = analysis.load_gene_tradeoff_csv(str(csv_path))
     target_ids = sorted(frame.target_id.dropna().unique().tolist())
     per_target_results = {target_id: analysis.analyze_single_target(frame, target_id) for target_id in target_ids}
+
+    meta_cols = st.columns(4)
+    meta_cols[0].metric("精度模式", selected_run.mode)
+    meta_cols[1].metric("更新时间", selected_run.updated_at or "—")
+    meta_cols[2].metric("靶点数", len(target_ids))
+    meta_cols[3].metric("候选行数", len(frame))
 
     tabs = st.tabs([f"靶点：{target_id}" for target_id in target_ids] + (["靶点间差异"] if len(target_ids) >= 2 else []))
     for tab, target_id in zip(tabs, target_ids):
@@ -348,47 +397,17 @@ def _render_verifiable_table(df: pd.DataFrame, *, target_id: str, intervention_t
         gene_display_name = str(row.get("gene_display_name") or "").strip()
         friendly_name = standard_symbol or gene_display_name or common_name
         display_label = f"{friendly_name} ({candidate_id})" if friendly_name else candidate_id
-        if st.button(
-            f"在仿真验证中核实 {display_label}（{intervention_type}，靶点 {target_id}）",
+        is_gene = candidate_kind == "gene"
+        columns = st.columns(2 if is_gene else 1)
+        if columns[0].button(
+            f"在仿真验证中核实 {display_label}",
             key=f"{table_key}_verify_btn",
             type="primary",
         ):
-            _apply_verify_prefill(target_id, candidate_id, intervention_type, candidate_kind)
-
-
-def _verify_prefill_field_values(candidate_id: str, intervention_type: str, candidate_kind: str) -> dict[str, str]:
-    """Pure routing decision behind _apply_verify_prefill - which draft field gets candidate_id.
-
-    "gene" (full-genome screen rows) goes to the gene-ID inputs, which resolve through
-    GPR; everything else ("catalog_reaction" from the curated catalog screen,
-    "complex_oe_hypothesis" from the hypothetical whole-complex OE test, and any future
-    non-gene candidate_kind) goes to the reaction-ID inputs, since those rows' gene_id
-    field actually holds a direct reaction id with no gene to resolve. Allowlisting
-    "gene" rather than denylisting "catalog_reaction" so a new non-gene candidate_kind
-    fails safe (reaction routing) instead of silently landing in the wrong box.
-    """
-    is_gene = candidate_kind == "gene"
-    return {
-        "pichia_draft_ko_genes": candidate_id if (is_gene and intervention_type == "KO") else "",
-        "pichia_draft_ko_reactions": candidate_id if (not is_gene and intervention_type == "KO") else "",
-        "pichia_draft_oe_genes": candidate_id if (is_gene and intervention_type == "OE") else "",
-        "pichia_draft_oe_reactions": candidate_id if (not is_gene and intervention_type == "OE") else "",
-    }
-
-
-def _apply_verify_prefill(target_id: str, candidate_id: str, intervention_type: str, candidate_kind: str = "gene") -> None:
-    """Pre-fill 仿真验证 page's session_state and jump there.
-
-    Replaces (not appends to) the KO/OE draft fields so the simulation isolates
-    exactly this one candidate instead of mixing in whatever was left over from a
-    previous exploration.
-    """
-    st.session_state["pichia_tab_selector"] = "仿真构建"
-    st.session_state["pichia_draft_build_mode"] = "快速选择（内置模板）"
-    st.session_state["pichia_template"] = target_id
-    st.session_state.update(_verify_prefill_field_values(candidate_id, intervention_type, candidate_kind))
-    request_navigation("仿真验证")
-    st.rerun()
+            apply_simulation_prefill(target_id, candidate_id, intervention_type, candidate_kind)
+        if is_gene:
+            if columns[1].button(f"查看 {display_label} 的同源证据", key=f"{table_key}_homology_btn"):
+                apply_homology_audit_prefill(candidate_id)
 
 
 def _render_llm_report_section(paths, selected_run: RunInfo, csv_path: Path) -> None:

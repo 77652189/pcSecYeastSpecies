@@ -17,12 +17,7 @@ from pcsec_pichia.experimental_feedback import (
 
 def build_round0_smoke_bundle() -> ExperimentBundle:
     condition = ConditionContext(
-        medium="sanitized_defined_medium",
-        carbon_source="methanol",
-        culture_mode="shake_flask",
-        temperature_c=30.0,
-        ph=6.0,
-        oxygen_or_agitation="sanitized agitation setting",
+        condition_description="sanitized_defined_medium, methanol, shake_flask, sanitized agitation setting",
         sampling_time_h=72.0,
     )
     host = HostContext(
@@ -65,7 +60,7 @@ def main() -> int:
     output_path.write_text(
         json.dumps(
             {
-                "schema_version": 1,
+                "schema_version": 2,
                 "is_valid": result.is_valid,
                 "targets": [record.target_id for record in result.bundle.experiments],
                 "error_count": len(result.errors),

@@ -1,7 +1,7 @@
 # pcSecPichia 当前架构与能力边界
 
 状态：active  
-最后更新：2026-07-15
+最后更新：2026-07-20
 
 ## 原始研发目标
 
@@ -22,6 +22,7 @@ OE 产品能力分为两个独立层级：相对、未校准的决策层用于�
 - hLF 和 OPN 是否出现不同的候选优先级。
 - 哪些候选值得进入人工复核和小规模实验。
 - 哪些相对 OE 场景可用于候选比较，哪些只能保持 unavailable。
+- 当前哪个约束（反应容量、蛋白资源等）对某个 target 的分泌影响最大（draft 级证据，见 LP 敏感度归因）。
 
 当前系统不能可靠回答：
 
@@ -31,6 +32,8 @@ OE 产品能力分为两个独立层级：相对、未校准的决策层用于�
 - 缺少审核 baseline capacity 时的绝对 gene-level OE 容量。
 - 模型外基因、调控网络和全部分泌通路基因的定量作用。
 - 多基因组合的上位性和长期培养稳定性。
+- 多亚基复合体内部哪个亚基是真正限速步骤——模型把复合体形成建模成一个反应，无法拆分归因到具体某个基因。
+- 同一参数（如 kcat）按基因区分的真实测量不确定性——现有实现对所有基因使用统一假设的不确定性宽度，不是逐基因的真实置信区间。
 
 ## 研发工作流
 
@@ -47,7 +50,7 @@ OE 产品能力分为两个独立层级：相对、未校准的决策层用于�
   -> 实验反馈与下一轮排序校准
 ```
 
-实验反馈与排序校准的结构化闭环已经完成；gene-level OE capacity 的契约、约束、求解、报告、Streamlit 和正式门禁也已实现。A0c 已证明现有外部证据不能形成可审核的 baseline capacity，因此绝对 hLF/OPN gene-capacity 保持不可执行；相对场景作为独立、未校准的决策能力继续保留。
+实验反馈闭环和 OE 产品分层已经完成。reaction proxy、relative uncalibrated、absolute unavailable 和 not executable 由核心层统一判定；绝对 hLF/OPN gene-capacity 因缺审核 baseline capacity 保持不可执行。当前架构工作转向独立 secretory resource layer。
 
 ## 已有能力
 
@@ -68,6 +71,7 @@ OE 产品能力分为两个独立层级：相对、未校准的决策层用于�
 - 外部数据库 fetcher 可受控生成 UniProt、NCBI、SGD 和外部 GEM/GPR 证据缓存。
 - 外部 GPR 只作为候选证据；映射到当前 reaction/gene 后才可成为模型可执行规则。
 - phenotype evidence、数据库注释、模型 GPR、OE proxy 和同源证据保持分层。
+- **模型的 GPR（基因-反应关联）只覆盖代谢反应（约 2732 个：中心代谢、氨基酸合成等，基因为 `PAS_chr*` 位点）。分泌机器层（chaperone、translocon、糖基化、COPII、核糖体、蛋白酶体等复合体形成反应）在参考模型里完全没有 GPR，其酶本身也不作为基因节点存在（已直接加载 `Model/pcSecPichia.mat` 核实：2793 个复合体形成反应，0 个有基因关联）。** 因此存在两条不同的筛查路径：走 GPR 的全基因组基因筛查只能触达代谢基因；分泌机器的 KO/OE 干预是在**复合体/反应层面**进行（直接把复合体形成反应流量压到 0，或把其 kcat 乘以倍数），通过分泌耦合约束传导到目标蛋白分泌，不经过"基因→GPR→反应"链路。这套复合体层面干预是真实有效、且针对具体目标蛋白的——例：过表达 PDI/ERO1/ERV2 复合体使 hLF 分泌 +8.15%，而无二硫键的 OPN 几乎不变。使用时需要人工把"过表达某复合体"翻译成"过表达对应的那几个基因"，且这类分泌机器候选只能通过 curated catalog 进入筛查，全基因组基因筛查发现不了它们。
 
 ### 求解与质量验证
 
@@ -78,6 +82,7 @@ OE 产品能力分为两个独立层级：相对、未校准的决策层用于�
 
 ### 结果解释
 
+- 单候选 pipeline 无条件计算 LP 级敏感度归因（`analyze_target_protein_lp_attribution`，基于 SciPy HiGHS marginals），可给出当前解在哪个约束块、哪个具体反应的 bound 上最吃紧；这是 draft 级证据，不是 MATLAB/SoPlex 对齐的 shadow price，符号需谨慎解读，且仅覆盖单候选路径——批量筛查（genome-wide/catalog screen）目前不透出这项信息。**下界（`bound_type=lower`）上的大 marginal 不能当作 OE 候选线索**：下界是最低要求类约束，OE 放宽的是上限产能，不会缓解下界卡点；这条规则已写进函数自身的 `warnings`，因为 hLF 的 PDI1 单独反应和 hLF/OPN 的核糖体装配反应都出现过"下界 marginal 很大、但实测 OE 效果为零"的假信号。
 - KO/OE preview、screen rows、recommendation、历史结果和 Streamlit 均可透传标准命名与证据字段。
 - LLM 只读取程序生成的 fact pack。
 - 程序 validator 检查 schema、evidence_id、target、gene/reaction、数值、KO/OE 分组和最低信息覆盖。
@@ -130,12 +135,13 @@ OE 产品能力分为两个独立层级：相对、未校准的决策层用于�
 ## 当前主要缺口
 
   1. 绝对 gene-level OE capacity 缺少可审核 baseline capacity，当前必须保持 unavailable。
-  2. 分泌、折叠、UPR、ERAD、糖基化和囊泡运输的独立资源约束仍不完整。
-  3. 大量模型外蛋白有序列和注释，但没有可执行 GPR，不能直接进入 KO/OE 求解。
-  4. 筛查以单基因为主，缺少组合改造和上位性分析。
-  5. 缺少跨碳源、生长率、氧供和参数扰动的完整稳定性排名。
+  2. 分泌资源架构（`pcsec_pichia.secretory_resources`）已冻结全部七类的可执行契约，但完整机制求解、组合约束仍不完整；已核实转运/二硫键/糖基化/囊泡运输/folding-chaperone 五类有真实 kcat（前四类已在现有模型每次求解中生效），ER quality control/ERAD 有真实 kcat 但约束默认关闭（打开后对部分候选有 5%-14% 的真实排名影响），仅 target-specific 的目标蛋白降解速率（kdeg）真正缺数据。
+  3. 目标蛋白自身的降解（区别于上一条的分泌通路 ERAD 机制）目前没有任何可执行路径：降解反应没有 GPR，任何基因敲除都无法影响它；已知有湿实验团队在做的液泡蛋白酶敲除（PEP4/PRB1/YPS1-3）里，PEP4/PRB1 在现有基因目录里的模型基因 ID 还被标注为低置信度待复核，YPS1-3 尚未进入基因目录。
+  4. 大量模型外蛋白有序列和注释，但没有可执行 GPR，不能直接进入 KO/OE 求解。
+  5. 筛查以单基因为主，缺少组合改造和上位性分析。
+  6. 缺少跨碳源、生长率、氧供和参数扰动的完整稳定性排名；已用两次小范围检查（OE 候选跨条件排名稳定性、ERAD 约束开关敏感性）验证这类局部检查本身可行，尚未做成横向门禁。
 
-研发发酵宽表适配和脱敏回放已经验收；尚未完成获批真实数据回填，但这不再是软件阶段阻塞。
+研发发酵宽表适配和脱敏回放已经验收；尚未完成获批真实数据回填，但这不再是软件阶段阻塞。目前有一份周报级别的进度汇报，但数据量不构成这里说的"真实数据"。
 
 ## 架构边界
 
@@ -153,7 +159,7 @@ app/ui
 - `python_pichia/`：核心科学逻辑、数据契约、约束、求解、筛查、证据和报告事实层。
 - `app/services/`：facade、任务触发、缓存路径和错误汇总，不实现科学判断。
 - `app/ui/`：Streamlit 展示和用户操作，不直接修改模型语义。
-- `Code/`、`Model/`、`Enzymedata/`、`Results/`：legacy/reference 科学资产，默认只读。
+- `Code/`、`Model/`、`Enzymedata/`、`Results/`：legacy/reference 科学资产，默认只读；`Results/` 保留为 legacy MATLAB results 的只读参考，不是当前 Python/Streamlit 的输出目录。
 - `local_runs/`：运行产物、缓存、报告和验证证据，默认 ignored。
 
 ### Phase 2 所有权边界
@@ -185,6 +191,14 @@ app/ui
 
 正式容量 promotion 见 [ADR-001](adr/001-external-capacity-candidate-promotion.md)；相对决策层与绝对容量层的关系见 [ADR-002](adr/002-relative-oe-and-absolute-capacity-layers.md)。
 
+## 慢速测试网关
+
+三类真实求解回归默认跳过，需要显式设置对应环境变量才会运行：
+
+- `PCSEC_RUN_SLOW_PIPELINE_TESTS="1"`：单候选全流程求解（`run_pichia_secretion_simulation`），覆盖 `python_pichia/tests/test_pipeline_entrypoints.py`。
+- `PCSEC_RUN_SLOW_SCREEN_TESTS="1"`：全模型 KO/OE 批量筛选，覆盖 `python_pichia/tests/test_screens_entrypoints.py`。
+- `PCSEC_RUN_SLOW_PROBE_TESTS="1"`：probe 迁移回归，对照 MATLAB harness / baseline 生成的既有产物，覆盖 `python_pichia/tests/test_probe_migration.py`。
+
 ## 项目成功标准
 
 项目是否更接近原始目标，不以新增多少字段或页面衡量，而以这些结果衡量：
@@ -195,4 +209,4 @@ app/ui
 - 生长风险、不可执行候选和 proxy 结论是否被正确拦截。
 - 每条实验建议是否能追溯到模型结果和证据来源。
 
-当前授权范围以[项目级执行与预算计划](EXECUTION_PLAN.md)为准，实际下一切片只从[当前 handoff](handoff.md)继续。
+当前范围以[项目级执行计划](EXECUTION_PLAN.md)为准，实际下一切片只从[当前 handoff](handoff.md)继续。

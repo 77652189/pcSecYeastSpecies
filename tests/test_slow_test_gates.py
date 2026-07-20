@@ -75,7 +75,7 @@ def test_screen_solve_tests_are_env_gated() -> None:
 
 
 def test_next_plan_keeps_slow_gates_explicit() -> None:
-    source = _source("docs/pichia_next_plan.md")
+    source = _source("docs/pichia_current_architecture_and_requirements.md")
 
     assert 'PCSEC_RUN_SLOW_PIPELINE_TESTS="1"' in source
     assert 'PCSEC_RUN_SLOW_SCREEN_TESTS="1"' in source

@@ -169,17 +169,32 @@ def page_header() -> None:
 
 NAV_RADIO_KEY = "app_page_nav"
 EXPERIMENT_FEEDBACK_PAGE = "实验反馈闭环"
-OE_CAPACITY_PAGE = "基因级OE容量对照"
 HOMOLOGY_AUDIT_PAGE = "基因命名与同源规则审计"
 SHADOW_CROSS_CHECK_PAGE = "Shadow LP一致性验证"
 # Streamlit forbids writing to st.session_state[key] once that key's widget has
 # rendered in the current script run (raises StreamlitAPIException) - and the nav
-# radio below always renders first, before any page-specific code runs. So a page
+# radios below always render first, before any page-specific code runs. So a page
 # that wants to navigate elsewhere (e.g. the genome-wide screen's "verify in
 # simulation" button) can't set NAV_RADIO_KEY directly. It sets this key instead;
-# request_navigation() below applies it to NAV_RADIO_KEY before the radio is
-# instantiated on the *next* run, which is legal.
+# request_navigation() below applies it before the radios are instantiated on the
+# *next* run, which is legal.
 PENDING_NAV_KEY = "app_page_nav_pending"
+
+# Grouped so the sidebar reads as "总览 -> 生成候选 -> 复核证据 -> 内部工具" instead of
+# nine equally-weighted flat entries. Each group is its own radio (Streamlit has no
+# built-in grouped-radio widget); _sync_nav_group keeps exactly one selected across
+# all of them so it still behaves like a single page switch.
+NAV_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("总览与结果", ("项目总览", "结果浏览")),
+    ("候选生成与筛查", ("全基因组KO/OE筛查", "仿真验证")),
+    ("证据与历史数据", (EXPERIMENT_FEEDBACK_PAGE, HOMOLOGY_AUDIT_PAGE)),
+    ("内部工具", (SHADOW_CROSS_CHECK_PAGE, "运行日志")),
+)
+DEFAULT_PAGE = NAV_GROUPS[0][1][0]
+
+
+def _group_widget_key(group_index: int) -> str:
+    return f"app_page_nav_group_{group_index}"
 
 
 def request_navigation(target_page: str) -> None:
@@ -187,26 +202,44 @@ def request_navigation(target_page: str) -> None:
     st.session_state[PENDING_NAV_KEY] = target_page
 
 
+def _sync_nav_group(chosen_index: int) -> None:
+    """on_change callback: apply the just-clicked group's choice, clear the rest.
+
+    Without this, clicking a page in one group would leave a stale selection
+    visibly highlighted in whichever group was active before it.
+    """
+    choice = st.session_state.get(_group_widget_key(chosen_index))
+    if not choice:
+        return
+    _set_current_page(choice)
+
+
+def _set_current_page(target_page: str) -> None:
+    st.session_state[NAV_RADIO_KEY] = target_page
+    for group_index, (_, options) in enumerate(NAV_GROUPS):
+        st.session_state[_group_widget_key(group_index)] = target_page if target_page in options else None
+
+
 def sidebar_navigation() -> str:
     if PENDING_NAV_KEY in st.session_state:
-        st.session_state[NAV_RADIO_KEY] = st.session_state.pop(PENDING_NAV_KEY)
+        _set_current_page(st.session_state.pop(PENDING_NAV_KEY))
+    elif NAV_RADIO_KEY not in st.session_state:
+        _set_current_page(DEFAULT_PAGE)
+
     st.sidebar.title("演示导航")
-    page = st.sidebar.radio(
-        "选择功能",
-        [
-            "项目总览",
-            "结果浏览",
-            "仿真验证",
-            "全基因组KO/OE筛查",
-            OE_CAPACITY_PAGE,
-            EXPERIMENT_FEEDBACK_PAGE,
-            HOMOLOGY_AUDIT_PAGE,
-            SHADOW_CROSS_CHECK_PAGE,
-            "运行日志",
-        ],
-        index=0,
-        key=NAV_RADIO_KEY,
-    )
+    for group_index, (label, options) in enumerate(NAV_GROUPS):
+        st.sidebar.caption(f"**{label}**")
+        st.sidebar.radio(
+            label,
+            options,
+            index=None,
+            key=_group_widget_key(group_index),
+            label_visibility="collapsed",
+            on_change=_sync_nav_group,
+            args=(group_index,),
+        )
+    page = str(st.session_state.get(NAV_RADIO_KEY, DEFAULT_PAGE))
+
     st.sidebar.divider()
     st.sidebar.markdown(
         """
@@ -214,12 +247,11 @@ def sidebar_navigation() -> str:
 
         1. 项目总览
         2. 结果浏览
-        3. 全基因组KO/OE筛查（探索：找出哪些基因值得关注）
-        4. 基因级OE容量对照（比较 baseline、reaction proxy 与 gene-capacity）
-        5. 基因命名与同源规则审计（复核：查看离线 BLAST/RBH 证据和规则迁移状态）
-        6. Shadow LP一致性验证
-        7. 仿真验证（核实：可从筛查结果候选行直接跳转过来并自动填好靶点/基因）
-        8. 运行日志
+        3. 全基因组KO/OE筛查（探索：找出哪些基因值得关注，可直接跳去核实/同源证据）
+        4. 基因命名与同源规则审计（复核：查看离线 BLAST/RBH 证据和规则迁移状态）
+        5. Shadow LP一致性验证
+        6. 仿真验证（核实：可从筛查候选行直接跳转过来并自动填好靶点/基因）
+        7. 运行日志
         """
     )
     if page == "结果浏览":

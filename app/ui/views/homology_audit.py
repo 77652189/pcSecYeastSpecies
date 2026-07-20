@@ -111,6 +111,18 @@ EXTERNAL_REFERENCE_COLUMNS = {
 }
 
 
+def apply_homology_audit_prefill(gene_id: str) -> None:
+    """Pre-fill the text-search filter with gene_id and jump here.
+
+    Called from other pages (e.g. the genome-wide screen result table) so a
+    reviewer can go straight from "this candidate looked interesting" to its
+    homology/naming evidence without retyping the gene id.
+    """
+    st.session_state["homology_query"] = gene_id
+    request_navigation(HOMOLOGY_AUDIT_PAGE)
+    st.rerun()
+
+
 def render_homology_audit() -> None:
     st.header(HOMOLOGY_AUDIT_PAGE)
     st.caption("只读展示离线 BLAST/RBH cache 产物，用于研发复核基因命名和同源规则迁移边界。")
@@ -149,7 +161,7 @@ def render_homology_audit() -> None:
 
 def _render_filters() -> dict[str, Any]:
     st.subheader("筛选")
-    query = st.text_input("文本搜索", placeholder="KAR2、YJL034W、PAS_chr2-1_0140")
+    query = st.text_input("文本搜索", placeholder="KAR2、YJL034W、PAS_chr2-1_0140", key="homology_query")
     col_review, col_name, col_rule = st.columns(3)
     review_status = _status_select(col_review, "同源审计状态", REVIEW_STATUS_OPTIONS, "homology_review_status")
     name_status = _status_select(col_name, "命名状态", NAME_STATUS_OPTIONS, "homology_name_status")

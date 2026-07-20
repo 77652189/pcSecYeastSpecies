@@ -1,6 +1,12 @@
 """Auditable gene-level overexpression capacity contracts and workflows."""
 
 from pcsec_pichia.oe_capacity.acceptance import EXPECTED_TARGET_IDS
+from pcsec_pichia.oe_capacity.condition_robustness import (
+    ConditionRankingCase,
+    ConditionRobustnessResult,
+    evaluate_condition_robustness,
+    ranking_case_from_screen_result,
+)
 from pcsec_pichia.oe_capacity._api import (
     OECapacityPhaseError,
     build_gene_capacity_specs,
@@ -110,6 +116,8 @@ __all__ = [
     "CapacityModelBinding",
     "CapacityParameterKind",
     "CapacityPromotionManifest",
+    "ConditionRankingCase",
+    "ConditionRobustnessResult",
     "ConfidenceLevel",
     "ConstraintChangeKind",
     "CapacityConstraintChange",
@@ -166,6 +174,7 @@ __all__ = [
     "build_oe_capacity_constraints",
     "build_oe_dose_spec",
     "derive_mapping_execution_status",
+    "evaluate_condition_robustness",
     "fingerprint_oe_capacity_model",
     "cache_uniprot_identity_source",
     "import_capacity_measurements",
@@ -174,6 +183,7 @@ __all__ = [
     "load_capacity_anchor_catalog",
     "load_external_capacity_candidate_bundle",
     "promote_capacity_candidates",
+    "ranking_case_from_screen_result",
     "run_gene_level_oe_comparison",
     "run_gene_level_oe_screen",
     "run_phase2_oe_capacity_acceptance",

@@ -29,6 +29,15 @@ REVIEW_PACKAGES = {
         "app/services/pichia_gene_catalog_service.py",
         "app/services/pichia_screen_preview_service.py",
         "app/services/pichia_target_catalog_service.py",
+        # Audited 2026-07-17: all five delegate solving/kcat/constraint/GPR
+        # judgment to python_pichia and only do facade-level work (cache
+        # bookkeeping, request/response shaping, filtering already-classified
+        # rows) - no scientific decision-making of their own.
+        "app/services/pichia_external_reference_service.py",
+        "app/services/pichia_oe_capacity_service.py",
+        "app/services/pichia_shadow_cross_check_service.py",
+        "app/services/pichia_experiment_feedback_service.py",
+        "app/services/pichia_homology_audit_service.py",
     ],
     "streamlit_draft_ui": [
         "app/ui/streamlit_app.py",
@@ -53,7 +62,6 @@ REVIEW_PACKAGES = {
     ],
     "active_docs": [
         "docs/pichia_current_architecture_and_requirements.md",
-        "docs/pichia_next_plan.md",
     ],
     "boundary_tests": [
         "tests/test_pichia_secretion_service_contract.py",
@@ -136,8 +144,37 @@ def test_direct_probe_imports_in_formal_engine_are_explicit_migration_debt() -> 
         "python_pichia/src/pcsec_pichia/reports/_prototype_adapter.py",
         "python_pichia/src/pcsec_pichia/screens/_prototype_adapter.py",
         "python_pichia/src/pcsec_pichia/secretion_plan/_prototype_adapter.py",
+        # Round 0 (direction 3) reads hLF/OPN structural profiles (disulfide/glycosylation
+        # site counts, sequences) via the sanctioned pcsec_pichia.probe.TargetSpec loaders
+        # (load_hlf_default/load_opn_candidate_targets), the same source target_protein_plan
+        # itself relies on - not a new/independent probe dependency. It also reads
+        # load_secretory_enzymedata/repo_root to cross-check which resource handles are
+        # backed by a real kcat entry (see catalog.py's _kcat_evidence_note) - read-only,
+        # same dataset the base model's constraint layer already loads elsewhere.
+        "python_pichia/src/pcsec_pichia/secretory_resources/catalog.py",
         "python_pichia/src/pcsec_pichia/simulation/__init__.py",
         "python_pichia/src/pcsec_pichia/targets/__init__.py",
+        # Audited 2026-07-17, all pre-existing (not introduced by recent work):
+        # comparison.py imports probe names for type hints only, zero calls.
+        "python_pichia/src/pcsec_pichia/analysis/shadow_lp/comparison.py",
+        # oe_capacity/simulation.py calls solve_pcsec_maximize/run_pcsec_oe_screen
+        # directly from probe - the same low-level LP kernel the sanctioned
+        # pcsec_pichia.simulation package above already calls directly (see its
+        # own `from pcsec_pichia.probe import (..., solve_pcsec_maximize, ...)`).
+        # This is oe_capacity's equivalent of a _prototype_adapter.py dependency,
+        # not new/independent probe reliance.
+        "python_pichia/src/pcsec_pichia/oe_capacity/simulation.py",
+        # model_adapter.py and secretion_capacity.py each import
+        # build_supported_target_model/build_target_enzymedata directly from
+        # probe and re-derive their own target-prep helper
+        # (prepare_shadow_target / _prepare_shadow_target_from_components)
+        # instead of reusing pcsec_pichia.simulation's private
+        # _prepare_target_pcsec_inputs - three parallel implementations of the
+        # same prep steps. Registered as known, tracked debt (no new science
+        # judgment, just duplicated plumbing); a future shadow_lp/
+        # _prototype_adapter.py could consolidate this to one file.
+        "python_pichia/src/pcsec_pichia/analysis/shadow_lp/model_adapter.py",
+        "python_pichia/src/pcsec_pichia/analysis/shadow_lp/secretion_capacity.py",
     }
     discovered_probe_backed_modules: set[str] = set()
     for source_path in (REPO_ROOT / "python_pichia" / "src" / "pcsec_pichia").rglob("*.py"):

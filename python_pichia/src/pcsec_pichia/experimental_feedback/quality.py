@@ -44,12 +44,7 @@ def validate_experiment_bundle(bundle: ExperimentBundle) -> ExperimentValidation
         missing_fields = [
             name
             for name, value in (
-                ("medium", condition.medium),
-                ("carbon_source", condition.carbon_source),
-                ("culture_mode", condition.culture_mode),
-                ("temperature_c", condition.temperature_c),
-                ("ph", condition.ph),
-                ("oxygen_or_agitation", condition.oxygen_or_agitation),
+                ("condition_description", condition.condition_description),
                 ("sampling_time_h", condition.sampling_time_h),
             )
             if value is None or str(value).strip().lower() in {"", "missing", "unknown"}
