@@ -118,6 +118,7 @@ OE 产品能力分为两个独立层级：相对、未校准的决策层用于�
 - 使用现有 KO、OE reaction proxy、相对 gene-capacity、证据分层和风险拦截生成候选优先级。
 - 每条输出必须声明执行模式、校准状态、证据来源、不确定性和不可用原因。
 - 该层可以支持研发候选选择，但不能声称绝对 capacity、mg/L、真实表达倍数或实验成功概率。
+- 2026-07-20 在本层内深化四项免绝对数据的相对信号（见 [ADR-004](adr/004-relative-signal-deepening-under-permanent-data-gap.md)）：影子价格层瓶颈归因、OE 剂量响应形状、容量区间稳健性标注、价值-of-information 实验优先级。四项均不产生绝对容量；容量区间稳健性的扫描带宽只用于稳健性分类，绝不断言为容量数值，绝对层保持 unavailable。
 
 ### 绝对容量研究层
 
@@ -190,6 +191,38 @@ app/ui
 匹配优先级固定为 `target_specific > host_condition > external_model_calibrated > homolog_transferred`。候选必须完成单位换算、当前模型 gene/enzyme/formation 映射、条件匹配、来源版本/hash/license、冲突检查和人工审核后，才可提升到 `Enzymedata/oe_capacity_baseline_capacity.json`。`1000` 通用上界、baseline optimal flux、fixture 和未审核同源参数永远不能作为正式锚点。
 
 正式容量 promotion 见 [ADR-001](adr/001-external-capacity-candidate-promotion.md)；相对决策层与绝对容量层的关系见 [ADR-002](adr/002-relative-oe-and-absolute-capacity-layers.md)。
+
+## 数据与产物治理
+
+本节吸收原独立数据治理策略的关键边界，作为需求与架构文档的一部分；完整历史细则归档于 `docs/archive/data_and_results_policy.md`。
+
+### 目录职责
+
+- `Data/`、`Model/`、`Enzymedata/`：人工确认、可追溯、可长期维护的稳定科学资产（curated 输入、GEM/pcSec 模型、酶容量与资源约束）。
+- `Results/` 是 legacy MATLAB results，只读参考，不是当前 Python 或 Streamlit 的默认输出目录。
+- `local_runs/` 是当前 Python、Streamlit、MATLAB harness 运行产物、临时缓存、外部下载、smoke、报告和待复核实验导入的统一落地目录，默认 ignored。
+- `docs/archive/`：已完成计划、阶段验证和被 active 文档吸收的历史设计，默认不进入公开版本控制。
+
+历史 `Results/` 迁移、Git LFS 改造或仓库历史瘦身不属于当前数据治理范围。
+
+### 外部数据与容量参数
+
+- BLAST/RBH、在线数据库响应、外部 GEM、MEMOTE 报告和 GPR mapping 默认进入 `local_runs/`，必须保留 source URL、version、retrieved_at、hash、license/provenance 和 warning。
+- 外部名称、同源关系或 GPR 不得自动覆盖内部 `gene_id` 和当前模型规则。
+- 正式 gene-level capacity 只能使用 `Enzymedata/oe_capacity_baseline_capacity.json` 中经审核的绝对 formation/dilution capacity；空资产或缺匹配记录时返回 `reviewed_baseline_capacity` 缺口并降级，不得从最优 flux、通用上界、fixture 或固定 `1.0` 推断。
+- 缺失参数使用显式 low/nominal/high 区间；联网抓取与正式 screen 求解分离，求解只读取冻结的本地资产快照。相对 OE 与绝对容量分层按 ADR-002 执行，分层不降低正式容量门禁。
+
+### 实验反馈数据
+
+原始导入进入 `local_runs/experiment_feedback/inbox/`；标准化缓存进入 `.../validated/`；只有人工确认来源、权限、脱敏、单位和上下文后，才单独 checkpoint 提升到 `Data/` 正式目录。失败、无效、不可测和阴性结果必须保留，不能只收集成功实验。
+
+### LLM 数据边界
+
+LLM 只读取程序生成的 fact pack，不遍历运行目录；只有用户明确触发才调用外部 LLM API；LLM 不能修改模型、recommendation tier、curated evidence 或实验记录；最终报告必须同时通过程序 validator 和 Judge。
+
+### 密钥与提交
+
+`.env`、API key、认证文件和个人路径不得提交；日志与 manifest 不得打印密钥。新生成的 LP、solver output、BLAST cache、外部下载、Streamlit run、LLM report 和 smoke 默认进入 `local_runs/`。大文件进入 Git 前必须说明来源、可再生成性、license 和人工复核状态；仓库当前未启用 Git LFS，在没有独立评审前不得用它绕开这条规则直接提交大型二进制资产。`Data/Model/Enzymedata/Results` 的任何修改都必须明确声明为科学资产变更；每个涉及模型、筛查、证据、实验反馈或报告的任务结束前检查 `Code/Model/Enzymedata/Results` 与依赖声明无非预期 diff。
 
 ## 慢速测试网关
 

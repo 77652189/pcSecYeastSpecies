@@ -32,7 +32,7 @@ def test_runtime_outputs_and_solver_artifacts_are_ignored() -> None:
 
 
 def test_data_results_policy_documents_current_ownership() -> None:
-    policy = _read_repo_text("docs/data_and_results_policy.md")
+    policy = _read_repo_text("docs/pichia_current_architecture_and_requirements.md")
 
     assert "`Results/` 是 legacy MATLAB results" in policy
     assert "不是当前 Python 或 Streamlit 的默认输出目录" in policy
@@ -43,11 +43,10 @@ def test_data_results_policy_documents_current_ownership() -> None:
 
 def test_current_docs_keep_runtime_outputs_out_of_science_assets() -> None:
     architecture = _read_repo_text("docs/pichia_current_architecture_and_requirements.md")
-    data_policy = _read_repo_text("docs/data_and_results_policy.md")
 
     assert "`Results/` 保留为 legacy MATLAB results" in architecture
-    assert "统一落地目录，默认 ignored" in data_policy
-    assert "历史 `Results/` 迁移、Git LFS 改造或仓库历史瘦身" in data_policy
+    assert "统一落地目录，默认 ignored" in architecture
+    assert "历史 `Results/` 迁移、Git LFS 改造或仓库历史瘦身" in architecture
 
 
 def test_runtime_write_lines_do_not_target_protected_science_asset_dirs() -> None:

@@ -7,7 +7,6 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 ACTIVE_DOCS = {
     "EXECUTION_PLAN.md",
-    "data_and_results_policy.md",
     "handoff.md",
     "pichia_current_architecture_and_requirements.md",
     "README.md",
@@ -23,6 +22,7 @@ def test_execution_plan_is_the_project_priority_control() -> None:
     assert "项目级执行计划" in handoff
 
 NON_ACTIVE_REFERENCE_DOCS = {
+    "data_and_results_policy.md",
     "cobrapy_phase0_baseline_assessment_2026-07-06.md",
     "cobrapy_phase3_installed_shadow_validation_2026-07-06.md",
     "opn_pichia_signal_peptide_candidates.md",

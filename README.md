@@ -180,7 +180,7 @@ Slow solver/model checks are intentionally gated by environment variables. See [
 | [Docs Index](docs/README.md) | Current document entry points and archived notes |
 | [Current Requirements And Architecture](docs/pichia_current_architecture_and_requirements.md) | Active target-protein workflow, boundaries, and system layering |
 | [BLAST/RBH Homology Crosswalk](docs/pichia_homology_crosswalk_architecture.md) | Offline SCE-to-Pichia homology evidence design |
-| [Data And Results Policy](docs/data_and_results_policy.md) | Protected directories, runtime artifacts, and archive rules |
+| [Data And Artifact Governance](docs/pichia_current_architecture_and_requirements.md#数据与产物治理) | Protected directories, runtime artifacts, and archive rules |
 
 ## Citation And Contact
 

@@ -180,7 +180,7 @@ python -m pytest -q tests\test_pichia_secretion_service_contract.py
 | [文档索引](docs/README.md) | 当前文档入口和归档记录 |
 | [当前需求与架构](docs/pichia_current_architecture_and_requirements.md) | 目标蛋白工作流、科学边界和系统分层 |
 | [BLAST/RBH 同源映射架构](docs/pichia_homology_crosswalk_architecture.md) | 酿酒酵母到 Pichia 的离线同源证据层设计 |
-| [数据与结果治理策略](docs/data_and_results_policy.md) | 保护目录、运行产物和归档规则 |
+| [数据与产物治理](docs/pichia_current_architecture_and_requirements.md#数据与产物治理) | 保护目录、运行产物和归档规则 |
 
 ## 引用与联系人
 
