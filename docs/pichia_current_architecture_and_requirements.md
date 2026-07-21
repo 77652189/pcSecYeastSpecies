@@ -118,7 +118,7 @@ OE 产品能力分为两个独立层级：相对、未校准的决策层用于�
 - 使用现有 KO、OE reaction proxy、相对 gene-capacity、证据分层和风险拦截生成候选优先级。
 - 每条输出必须声明执行模式、校准状态、证据来源、不确定性和不可用原因。
 - 该层可以支持研发候选选择，但不能声称绝对 capacity、mg/L、真实表达倍数或实验成功概率。
-- 2026-07-20 在本层内深化四项免绝对数据的相对信号（见 [ADR-004](adr/004-relative-signal-deepening-under-permanent-data-gap.md)）：影子价格层瓶颈归因、OE 剂量响应形状、容量区间稳健性标注、价值-of-information 实验优先级。四项均不产生绝对容量；容量区间稳健性的扫描带宽只用于稳健性分类，绝不断言为容量数值，绝对层保持 unavailable。
+- 2026-07-20 在本层内深化四项免绝对数据的相对信号（见 [ADR-004](adr/004-relative-signal-deepening-under-permanent-data-gap.md)）：影子价格瓶颈归因（深化主路径已有的 `analyze_target_protein_lp_attribution`，保留行级/复合体级与 `bound_type`，下界约束不报成 OE 瓶颈）、OE 剂量响应形状、排序对容量假设的稳健性标注（`ranking-insensitive-to-capacity`/`ranking-sensitive-to-capacity`，稳健性覆盖参数带宽+求解算法）、价值-of-information 实验优先级。四项均不产生绝对容量；稳健性的扫描带宽只用于稳健性分类，绝不断言为容量数值，绝对层保持 unavailable。
 
 ### 绝对容量研究层
 

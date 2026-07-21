@@ -23,9 +23,9 @@ EVO2、GPU 推理和云端模型集成不属于当前范围，不创建占位接
 
 绝对 OE 表达量与酶容量数据经三次独立调研确认在公开来源中永久缺失（见 [ADR-004](adr/004-relative-signal-deepening-under-permanent-data-gap.md)）。据此把方向 2-3 的后续投入从“找绝对数据”转向“深化不需要绝对数值也能算的相对信号”，在 [ADR-002](adr/002-relative-oe-and-absolute-capacity-layers.md) 相对决策层内新增四个方向，全部不产生绝对容量、绝对层保持 unavailable：
 
-1. **影子价格层瓶颈归因**（方向 3）：建在已完成的 `secretory_resources` 层上，读 shadow LP 对偶按资源层归因 hLF/OPN 瓶颈。
+1. **影子价格瓶颈归因**（方向 3）：深化并透出主路径上已有的 `analyze_target_protein_lp_attribution`（非新建、不接 shadow_lp 休眠路径），保留行级/复合体级归因与 `bound_type`，下界约束不报成 OE 瓶颈。
 2. **OE 剂量响应形状**（方向 2）：倍数扫描替代固定 `2.0×`，输出形状类别（平坦/单调上升/快速饱和）。
-3. **容量区间稳健性标注**（方向 2-3）：`capacity-robust` / `capacity-sensitive`，扫描带宽绝不断言为容量值。
+3. **排序对容量假设的稳健性标注**（方向 2-3）：`ranking-insensitive-to-capacity` / `ranking-sensitive-to-capacity`（不用 `capacity-robust` 一类会被误读的名字），稳健性同时覆盖参数带宽与求解算法，扫描带宽绝不断言为容量值。
 4. **价值-of-information 实验优先级**：对 top 候选按“哪次最小测量最能消解排序歧义”排序。
 
 ## 1. 距离原始 MVP 的主要缺口
@@ -132,9 +132,9 @@ mapping、剂量、参数区间、复合体语义、约束、求解、报告和 
 
 ### 相对信号深化 R1-R4 成功条件（ADR-004）
 
-- R1：从既有 `analysis/shadow_lp` 读取对偶，对 hLF/OPN 分别产出每个资源层的相对 binding 贡献；proxy 边界下附稳健性说明，不作绝对瓶颈断言。
+- R1：扩展主路径已有的 `analyze_target_protein_lp_attribution`（不接 `analysis/shadow_lp` 休眠的第二份对偶提取），对 hLF/OPN 产出行级/复合体级相对 binding 贡献（可选再附层级汇总）；每条归因保留 `bound_type`，下界约束不报成 OE 瓶颈；proxy 边界下附带宽+求解器双重稳健性说明，不作绝对瓶颈断言。
 - R2：OE 倍数扫描输出形状类别，保留固定 `2.0×` 兼容对照，feature-off 回归通过；不输出真实表达倍数或 mg/L。
-- R3：测试覆盖“跨带宽稳健”与“跨带宽翻转”两类；两类下绝对状态均 unavailable，扫描带宽不写正式资产、不作 promotion 依据。
+- R3：测试覆盖“跨带宽稳健”“跨带宽翻转”与“跨求解器翻转”三类；各类下绝对状态均 unavailable，扫描带宽不写正式资产、不作 promotion 依据；标签名不含 `capacity-robust` 一类措辞。
 - R4：价值-of-information 清单可回溯到候选、排序歧义和建议测量；不含绝对产量预测，不自动提升候选为 `experiment_calibrated` 或绝对可执行。
 - service/UI 只透传与展示上述判断，不重新实现科学降级或容量推断逻辑。
 
@@ -152,7 +152,7 @@ mapping、剂量、参数区间、复合体语义、约束、求解、报告和 
 
 第 3 节列出的交付（发酵模板回填、OE 产品层级、secretory resource Round 0、ERAD 约束验证与激活决定、实验反馈闭环 UI 本地化）均已完成，不需要重新实现。
 
-2026-07-20 新增的相对信号深化四个方向（见决策摘要与 [ADR-004](adr/004-relative-signal-deepening-under-permanent-data-gap.md)）是当前的前瞻工作范围，全部限定在 ADR-002 相对决策层内；R1 建在已完成的 `secretory_resources` 层上，R2 相对独立，R4 消费 R1-R3 输出。何时推进由用户决定，不自动展开。
+2026-07-20 新增的相对信号深化四个方向（见决策摘要与 [ADR-004](adr/004-relative-signal-deepening-under-permanent-data-gap.md)）是当前的前瞻工作范围，全部限定在 ADR-002 相对决策层内；R1 扩展主路径已有的 `analyze_target_protein_lp_attribution`（不接 `secretory_resources` 休眠层，也不接 shadow_lp 休眠对偶路径），R2 相对独立，R4 消费 R1-R3 输出。何时推进由用户决定，不自动展开。
 
 ### 会在以下情况发生时处理
 
