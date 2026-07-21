@@ -292,8 +292,11 @@ def _render_value_of_information(payload: dict[str, object]) -> None:
                 x="推荐分数",
                 y="候选",
                 orientation="h",
+                text="推荐分数",
+                color_discrete_sequence=["#4C78A8"],
                 title="候选排序：分数越接近越难区分（越该做湿实验测）",
             )
+            figure.update_traces(texttemplate="%{text:.3g}", textposition="outside", cliponaxis=False)
             figure.update_layout(
                 xaxis_title="推荐分数（相对，非绝对产量）",
                 yaxis_title="",
@@ -480,6 +483,7 @@ def _render_oe_dose_response(oe_dose_response: dict[str, object]) -> None:
             y="分泌相对提升(%)",
             color="反应｜形状",
             markers=True,
+            color_discrete_sequence=px.colors.qualitative.Set2,
             title="OE 剂量响应曲线：过表达倍数越高，分泌相对提升怎么走",
         )
         figure.update_layout(
@@ -595,8 +599,11 @@ def _render_lp_attribution(lp_attribution: dict[str, object]) -> None:
                 y="反应",
                 color="分泌资源层",
                 orientation="h",
+                text="影子价格(绝对值)",
+                color_discrete_sequence=px.colors.qualitative.Set2,
                 title="OE 可缓解瓶颈：哪一层最限制分泌（影子价格绝对值越大越紧）",
             )
+            figure.update_traces(texttemplate="%{text:.2g}", textposition="outside", cliponaxis=False)
             figure.update_layout(
                 xaxis_title="影子价格绝对值（越大越限制分泌）",
                 yaxis_title="",
@@ -621,8 +628,11 @@ def _render_lp_attribution(lp_attribution: dict[str, object]) -> None:
                 y="反应",
                 color="分泌资源层",
                 orientation="h",
+                text="影子价格(绝对值)",
+                color_discrete_sequence=px.colors.qualitative.Set2,
                 title="为什么受限：最强约束层（影子价格越大越限制；OE 动不了）",
             )
+            figure.update_traces(texttemplate="%{text:.0f}", textposition="outside", cliponaxis=False)
             figure.update_layout(
                 xaxis_title="影子价格绝对值（越大越限制分泌）",
                 yaxis_title="",
