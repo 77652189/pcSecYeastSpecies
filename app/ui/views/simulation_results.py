@@ -280,7 +280,7 @@ def _render_value_of_information(payload: dict[str, object]) -> None:
 
         frame = pd.DataFrame(
             [
-                {"候选": str(row.get("candidate_id", "?")), "推荐分数": float(row.get("score") or 0.0), "名次": int(row.get("rank") or 0)}
+                {"候选": _short_reaction_label(str(row.get("candidate_id", "?"))), "推荐分数": float(row.get("score") or 0.0), "名次": int(row.get("rank") or 0)}
                 for row in ranked
                 if row.get("score") is not None
             ]
@@ -390,6 +390,42 @@ _SECRETORY_PROCESS_LABELS = {
 }
 
 
+def _short_reaction_label(reaction_id: str, max_len: int = 34) -> str:
+    """Human-scannable label for a reaction id: drop boilerplate suffixes, middle-truncate huge names.
+
+    Model reaction ids like `sec_Pdi1p_complex_formation` or a 90-char COPII complex are unreadable on a
+    chart axis/legend; this keeps the informative head and tail so a biologist can still recognize it.
+    """
+    label = str(reaction_id)
+    for suffix in ("_complex_formation", "_formation", "_complex"):
+        if label.endswith(suffix):
+            label = label[: -len(suffix)]
+            break
+    if len(label) > max_len:
+        label = f"{label[: max_len - 12]}…{label[-11:]}"
+    return label or str(reaction_id)
+
+
+def _resource_layer_label(reaction_id: str, process: object) -> str:
+    """Chinese resource-layer label, with a conservative name-based fallback when the engine said 'unknown'.
+
+    The engine classifier does not tag the `sec_*` secretory complexes, so the dominant folding bottleneck
+    (PDI/ERO1/ERV2) would otherwise chart as '未解析'. Only high-confidence tokens are inferred, and inferred
+    labels are marked 「按名称推断」 so they are not mistaken for the engine's own classification.
+    """
+    code = str(process or "unknown")
+    if code != "unknown" and code in _SECRETORY_PROCESS_LABELS:
+        return _SECRETORY_PROCESS_LABELS[code]
+    lowered = str(reaction_id).lower()
+    if any(token in lowered for token in ("pdi", "ero1", "_ero", "erv")):
+        return "二硫键折叠（按名称推断）"
+    if "ribosome" in lowered:
+        return "翻译（核糖体）"
+    if "misfold" in lowered or "erad" in lowered:
+        return "错误折叠 / ERAD"
+    return _SECRETORY_PROCESS_LABELS.get(code, "未解析")
+
+
 def _oe_dose_response_curve_frame(oe_dose_response: dict[str, object]) -> pd.DataFrame:
     """Flatten the per-reaction dose-response points into a long frame for a line chart.
 
@@ -400,7 +436,7 @@ def _oe_dose_response_curve_frame(oe_dose_response: dict[str, object]) -> pd.Dat
     for shape in oe_dose_response.get("reaction_shapes") or []:
         if not isinstance(shape, dict):
             continue
-        reaction = str(shape.get("reaction_id", "?"))
+        reaction = _short_reaction_label(str(shape.get("reaction_id", "?")))
         shape_label = _OE_DOSE_RESPONSE_SHAPE_LABELS.get(str(shape.get("shape")), str(shape.get("shape")))
         legend = f"{reaction}｜{shape_label}"
         for point in shape.get("point_deltas") or []:
@@ -495,13 +531,12 @@ def _lp_oe_bottleneck_frame(lp_attribution: dict[str, object]) -> pd.DataFrame:
         marginal = entry.get("abs_marginal")
         if marginal is None:
             marginal = abs(float(entry.get("marginal") or 0.0))
+        reaction_id = str(entry.get("reaction_id", "?"))
         rows.append(
             {
-                "反应": str(entry.get("reaction_id", "?")),
+                "反应": _short_reaction_label(reaction_id),
                 "影子价格(绝对值)": abs(float(marginal or 0.0)),
-                "分泌资源层": _SECRETORY_PROCESS_LABELS.get(
-                    str(entry.get("secretory_process", "unknown")), str(entry.get("secretory_process", "unknown"))
-                ),
+                "分泌资源层": _resource_layer_label(reaction_id, entry.get("secretory_process")),
             }
         )
     return pd.DataFrame(rows)
@@ -521,13 +556,12 @@ def _lp_floor_bottleneck_frame(lp_attribution: dict[str, object]) -> pd.DataFram
         marginal = entry.get("abs_marginal")
         if marginal is None:
             marginal = abs(float(entry.get("marginal") or 0.0))
+        reaction_id = str(entry.get("reaction_id", "?"))
         rows.append(
             {
-                "反应": str(entry.get("reaction_id", "?")),
+                "反应": _short_reaction_label(reaction_id),
                 "影子价格(绝对值)": abs(float(marginal or 0.0)),
-                "分泌资源层": _SECRETORY_PROCESS_LABELS.get(
-                    str(entry.get("secretory_process", "unknown")), str(entry.get("secretory_process", "unknown"))
-                ),
+                "分泌资源层": _resource_layer_label(reaction_id, entry.get("secretory_process")),
             }
         )
     return pd.DataFrame(rows)
@@ -556,7 +590,7 @@ def _render_lp_attribution(lp_attribution: dict[str, object]) -> None:
         bottleneck_frame = _lp_oe_bottleneck_frame(lp_attribution)
         if not bottleneck_frame.empty:
             figure = px.bar(
-                bottleneck_frame.sort_values("影子价格(绝对值)"),
+                bottleneck_frame.nlargest(8, "影子价格(绝对值)").sort_values("影子价格(绝对值)"),
                 x="影子价格(绝对值)",
                 y="反应",
                 color="分泌资源层",
@@ -567,6 +601,7 @@ def _render_lp_attribution(lp_attribution: dict[str, object]) -> None:
                 xaxis_title="影子价格绝对值（越大越限制分泌）",
                 yaxis_title="",
                 legend_title_text="分泌资源层",
+                yaxis={"categoryorder": "total ascending"},
             )
             st.plotly_chart(figure, use_container_width=True)
         st.dataframe(pd.DataFrame(oe_actionable), use_container_width=True, hide_index=True)
@@ -581,7 +616,7 @@ def _render_lp_attribution(lp_attribution: dict[str, object]) -> None:
         floor_frame = _lp_floor_bottleneck_frame(lp_attribution)
         if not floor_frame.empty:
             figure = px.bar(
-                floor_frame.sort_values("影子价格(绝对值)"),
+                floor_frame.nlargest(8, "影子价格(绝对值)").sort_values("影子价格(绝对值)"),
                 x="影子价格(绝对值)",
                 y="反应",
                 color="分泌资源层",
@@ -592,6 +627,7 @@ def _render_lp_attribution(lp_attribution: dict[str, object]) -> None:
                 xaxis_title="影子价格绝对值（越大越限制分泌）",
                 yaxis_title="",
                 legend_title_text="分泌资源层",
+                yaxis={"categoryorder": "total ascending"},
             )
             st.plotly_chart(figure, use_container_width=True)
         st.dataframe(pd.DataFrame(floor_only), use_container_width=True, hide_index=True)

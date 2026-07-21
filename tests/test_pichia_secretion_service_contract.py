@@ -532,7 +532,18 @@ def test_streamlit_relative_signal_charts_render_biologist_facing_figures() -> N
         _lp_floor_bottleneck_frame,
         _lp_oe_bottleneck_frame,
         _oe_dose_response_curve_frame,
+        _resource_layer_label,
+        _short_reaction_label,
     )
+
+    # biologist-facing labels: strip boilerplate suffix, middle-truncate huge ids, and fill the
+    # dominant folding layer that the engine leaves as 'unknown' (marked as an inference).
+    assert _short_reaction_label("sec_Pdi1p_complex_formation") == "sec_Pdi1p"
+    long_id = "PAS_chr2-2_0475_COPII_ERGL_sec_Ypt1p_Uso1p_Bet3p_Bet5p_Trs20p_Trs23p_Trs31p_Trs33p_complex"
+    assert len(_short_reaction_label(long_id)) <= 34 and "…" in _short_reaction_label(long_id)
+    assert "折叠" in _resource_layer_label("sec_Pdi1p_complex_formation", "unknown")  # PDI -> folding (inferred)
+    assert _resource_layer_label("Mach_Ribosome_complex_formation", "ribosome") == "翻译（核糖体）"
+    assert _resource_layer_label("some_opaque_reaction", "unknown") == "未解析"  # no wild guessing
 
     # R2 dose-response -> factor on x, relative gain (%) on y, baseline factor 1.0 anchors at 0%
     oe_payload = {
