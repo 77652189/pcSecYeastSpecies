@@ -537,6 +537,51 @@ def test_pipeline_populates_solver_robustness_only_when_flag_enabled(tmp_path: P
 
 
 @slow_pipeline
+def test_pipeline_populates_oe_dose_response_only_when_flag_enabled(tmp_path: Path) -> None:
+    # R2 (ADR-004): opt-in OE dose-response sweeps the OE capacity multiplier over a factor grid
+    # and classifies the shape (flat/saturating/linear/threshold), replacing the fixed 2.0x point.
+    # Off by default; on demand it nests an oe_dose_response payload inside protein_cost_analysis.
+    output_dir = tmp_path / "opn_oe_dose_response"
+    result = run_pichia_secretion_simulation(
+        PichiaSimulationRequest(
+            target_id="OPN_ALPHA_FULL_PROJECT",
+            candidate_id="OPN_ALPHA_FULL_PROJECT",
+            enable_oe_dose_response=True,
+            oe_dose_response_reaction_limit=1,
+            oe_dose_response_factors=(1.5, 2.0, 3.0),
+        ),
+        output_dir=output_dir,
+    )
+
+    summary = json.loads(result.summary_path.read_text(encoding="utf-8"))
+    protein_cost = summary["protein_cost_analysis"]
+    assert protein_cost is not None
+    oe = protein_cost["oe_dose_response"]
+    assert oe is not None
+    assert oe["result_status"] == "draft_oe_dose_response"
+    assert oe["success"] is True
+    # the anchor factor 1.0 is the baseline and is not part of the swept factors
+    assert 1.0 not in oe["tested_factors"]
+    assert set(oe["tested_factors"]) == {1.5, 2.0, 3.0}
+    assert len(oe["reactions"]) == 1
+    assert len(oe["reaction_shapes"]) >= 1
+    shape = oe["reaction_shapes"][0]
+    assert shape["shape"] in {
+        "flat_no_response",
+        "saturating",
+        "linear",
+        "threshold",
+        "non_monotonic_numerical_artifact",
+        "insufficient_points",
+    }
+    # relative signal only: the summary must carry the caveat and never an absolute capacity
+    assert any("RELATIVE signal" in w for w in shape["warnings"])
+    # other opt-in relative-signal payloads were not requested, so they stay absent
+    assert protein_cost["solver_robustness"] is None
+    assert protein_cost["cost_slope_compatibility"]["enabled"] is False
+
+
+@slow_pipeline
 def test_pipeline_runs_builtin_hlf_with_project_710_alignment_artifact(tmp_path: Path) -> None:
     output_dir = tmp_path / "hlf"
     result = run_pichia_secretion_simulation(

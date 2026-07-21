@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
@@ -59,6 +60,35 @@ class ScreenResult:
     baseline_objective_value: float | None
     result_status: str
     matlab_alignment_status: str
+
+
+# R2 (ADR-004): default OE capacity multipliers to sweep for a dose-response shape. Spans
+# modest to aggressive over-expression and includes the legacy single 2.0x so it stays
+# visible as one point on the curve. 1.0 is the no-OE baseline and is added separately.
+DEFAULT_OE_DOSE_RESPONSE_FACTORS: tuple[float, ...] = (1.25, 1.5, 2.0, 3.0, 5.0, 8.0)
+
+
+@dataclass(frozen=True)
+class OeDoseResponseSweepResult:
+    """R2 (ADR-004) raw OE factor sweep for a set of reactions (screens layer, no shape logic).
+
+    Re-solves the same target LP while scaling each reaction's OE capacity multiplier across a
+    factor grid, so the caller (analysis.classify_oe_dose_response_sweep) can classify the
+    dose-response *shape*. It carries only relative objective values/deltas; it never produces
+    an absolute capacity. Shape classification is deliberately kept out of this layer.
+    """
+
+    target_id: str
+    enabled: bool
+    success: bool
+    tested_factors: tuple[float, ...]
+    baseline_objective: float | None
+    reactions: tuple[str, ...]
+    reaction_points: dict[str, tuple[tuple[float, float | None], ...]]
+    sweep_rows: tuple[dict[str, Any], ...]
+    result_status: str
+    warnings: tuple[str, ...]
+    matlab_alignment_status: str = "pending"
 
 
 def run_knockout_screen(
@@ -225,6 +255,125 @@ def run_overexpression_screen(
         for row in raw_rows
     )
     return _screen_result(target.target_id, "overexpression", rows, prepared)
+
+
+def run_oe_dose_response_sweep(
+    model: CobraModel,
+    target: TargetSpec,
+    amino_acids: AminoAcidStoichiometry,
+    metabolic: MetabolicEnzymeData,
+    secretory: SecretoryEnzymeData,
+    combined: CombinedEnzymeData,
+    reactions: list[str],
+    factors: Iterable[float] = DEFAULT_OE_DOSE_RESPONSE_FACTORS,
+    growth_rate: float = 0.10,
+    write_ribosome_translation_constraint: bool = False,
+    write_misfolding_constraints: bool = False,
+) -> OeDoseResponseSweepResult:
+    """R2 (ADR-004): sweep the OE capacity multiplier over a factor grid for each reaction.
+
+    Prepares the target LP once (shared baseline) and re-solves each reaction at every factor
+    via run_pcsec_oe_screen. Returns the raw (factor, objective) points per reaction anchored at
+    the no-OE baseline (factor 1.0); it does not classify the shape (see analysis layer).
+    """
+
+    warnings = (
+        "OE dose-response sweep re-solves the target LP at several capacity multipliers; it is an "
+        "opt-in relative probe and does not change the default single-run objective.",
+        "Objective values are relative model secretion, not absolute titers; a factor is a capacity "
+        "multiplier, not a measured expression level.",
+    )
+    sweep_factors = tuple(sorted({float(f) for f in factors if float(f) > 0.0 and abs(float(f) - 1.0) > 1e-9}))
+    unique_reactions = tuple(dict.fromkeys(str(r) for r in reactions))
+    if not unique_reactions or not sweep_factors:
+        return OeDoseResponseSweepResult(
+            target_id=target.target_id,
+            enabled=True,
+            success=False,
+            tested_factors=sweep_factors,
+            baseline_objective=None,
+            reactions=unique_reactions,
+            reaction_points={},
+            sweep_rows=(),
+            result_status="draft_oe_dose_response_no_reactions",
+            warnings=(*warnings, "No reactions or no OE factors > 1.0 to sweep."),
+        )
+
+    prepared = _prepare_screen_inputs(
+        model,
+        target,
+        amino_acids,
+        metabolic,
+        secretory,
+        combined,
+        growth_rate,
+        write_ribosome_translation_constraint=write_ribosome_translation_constraint,
+        write_misfolding_constraints=write_misfolding_constraints,
+    )
+    if not prepared["baseline_success"]:
+        return OeDoseResponseSweepResult(
+            target_id=target.target_id,
+            enabled=True,
+            success=False,
+            tested_factors=sweep_factors,
+            baseline_objective=None,
+            reactions=unique_reactions,
+            reaction_points={},
+            sweep_rows=(),
+            result_status="draft_oe_dose_response_unavailable",
+            warnings=(*warnings, "Baseline secretion solve did not succeed; cannot build a dose-response."),
+        )
+
+    baseline_objective = prepared["baseline"].objective_value
+    points_by_reaction: dict[str, list[tuple[float, float | None]]] = {
+        reaction_id: [(1.0, baseline_objective)] for reaction_id in unique_reactions
+    }
+    sweep_rows: list[dict[str, Any]] = []
+    for factor in sweep_factors:
+        raw_rows = run_pcsec_oe_screen(
+            prepared["fixed_model"],
+            prepared["baseline"],
+            list(unique_reactions),
+            prepared["exchange_reaction_id"],
+            metabolic=metabolic,
+            secretory=prepared["secretory"],
+            combined=prepared["combined"],
+            mu=growth_rate,
+            factor=factor,
+            write_ribosome_translation_constraint=write_ribosome_translation_constraint,
+            write_misfolding_constraints=write_misfolding_constraints,
+        )
+        for row in raw_rows:
+            reaction_id = str(row.get("reaction"))
+            objective_value = row.get("objective_value") if row.get("success") else None
+            points_by_reaction.setdefault(reaction_id, []).append((factor, objective_value))
+            sweep_rows.append(
+                {
+                    "reaction": reaction_id,
+                    "factor": factor,
+                    "objective_value": objective_value,
+                    "delta_vs_baseline": row.get("delta_vs_baseline"),
+                    "success": bool(row.get("success")),
+                    "status": row.get("status"),
+                    "capacity_basis": row.get("capacity_basis"),
+                }
+            )
+
+    reaction_points = {
+        reaction_id: tuple(points) for reaction_id, points in points_by_reaction.items()
+    }
+    return OeDoseResponseSweepResult(
+        target_id=target.target_id,
+        enabled=True,
+        success=baseline_objective is not None,
+        tested_factors=sweep_factors,
+        baseline_objective=baseline_objective,
+        reactions=unique_reactions,
+        reaction_points=reaction_points,
+        sweep_rows=tuple(sweep_rows),
+        result_status="draft_oe_dose_response",
+        warnings=warnings,
+    )
 
 
 def explain_only_gene_overexpression_rows(
@@ -718,6 +867,8 @@ def _empty_unsolved_screen_result(target_id: str, screen_type: str) -> ScreenRes
 
 
 __all__ = [
+    "DEFAULT_OE_DOSE_RESPONSE_FACTORS",
+    "OeDoseResponseSweepResult",
     "ScreenResult",
     "ScreenPlanResult",
     "GeneCapabilityProfile",
@@ -740,6 +891,7 @@ __all__ = [
     "split_existing_genes",
     "run_knockout_screen",
     "run_ko_screen",
+    "run_oe_dose_response_sweep",
     "run_overexpression_screen",
     "run_oe_screen",
     "run_reaction_knockout_screen",

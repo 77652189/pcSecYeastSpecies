@@ -63,6 +63,14 @@ class PichiaSimulationRequest:
     enable_solver_robustness_check: bool = False
     # Methods to re-solve with and compare against the deterministic default (highs-ds).
     solver_robustness_methods: tuple[str, ...] = ("highs", "highs-ipm")
+    # R2 (ADR-004): opt-in OE dose-response shape. Off by default because each factor re-solves
+    # the LP for every swept reaction. Empty reactions -> curated default_oe_reactions(limit);
+    # empty factors -> DEFAULT_OE_DOSE_RESPONSE_FACTORS. Produces a relative shape, never a
+    # capacity value; does not change the default single-run objective.
+    enable_oe_dose_response: bool = False
+    oe_dose_response_reactions: tuple[str, ...] = ()
+    oe_dose_response_factors: tuple[float, ...] = ()
+    oe_dose_response_reaction_limit: int = 3
     sequence_role: str = "unknown"
     normalization_mode: str = "as_provided"
     contains_signal_peptide: bool | None = None

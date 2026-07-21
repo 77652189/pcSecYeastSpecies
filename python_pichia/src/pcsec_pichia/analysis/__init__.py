@@ -648,6 +648,30 @@ def classify_oe_dose_response_shape(
     )
 
 
+def classify_oe_dose_response_sweep(
+    reaction_points: dict,
+    baseline_objective: float | None = None,
+) -> tuple[OeDoseResponseShapeResult, ...]:
+    """Classify every reaction's dose-response shape from a grouped factor sweep (pure).
+
+    ``reaction_points`` maps reaction_id -> iterable of ``(factor, objective_value)`` (as produced
+    by ``screens.run_oe_dose_response_sweep``). Kept plain-data so the analysis layer never has to
+    import the screens layer. Results are ordered by descending max relative gain (Nones last), so
+    the reactions whose secretion responds most to OE surface first.
+    """
+
+    results = tuple(
+        classify_oe_dose_response_shape(str(reaction_id), points, baseline_objective=baseline_objective)
+        for reaction_id, points in reaction_points.items()
+    )
+    return tuple(
+        sorted(
+            results,
+            key=lambda r: (r.max_relative_gain is None, -(r.max_relative_gain or 0.0), r.reaction_id),
+        )
+    )
+
+
 def summarize_oe_dose_response_shape(result: OeDoseResponseShapeResult) -> dict[str, object]:
     return {
         "reaction_id": result.reaction_id,
@@ -1503,6 +1527,7 @@ __all__ = [
     "build_growth_tradeoff_item_table",
     "build_yield_recommendation_table",
     "classify_oe_dose_response_shape",
+    "classify_oe_dose_response_sweep",
     "compare_solver_robustness",
     "summarize_oe_dose_response_shape",
     "summarize_protein_lp_attribution",

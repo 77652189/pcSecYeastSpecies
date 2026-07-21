@@ -9,7 +9,9 @@ from pcsec_pichia.analysis import (
     analyze_target_growth_impact,
     analyze_target_protein_lp_attribution,
     analyze_yield_improvement_candidates,
+    classify_oe_dose_response_sweep,
     compare_solver_robustness,
+    summarize_oe_dose_response_shape,
     summarize_protein_cost_slope_compatibility,
     summarize_protein_lp_attribution,
     summarize_solver_robustness,
@@ -28,9 +30,12 @@ from pcsec_pichia.loading import load_pcsec_pichia_inputs
 from pcsec_pichia.loading import medium_condition_summary_for_inputs
 from pcsec_pichia.reports import write_simulation_outputs
 from pcsec_pichia.screens import (
+    DEFAULT_OE_DOSE_RESPONSE_FACTORS,
     ScreenResult,
+    default_oe_reactions,
     explain_only_gene_overexpression_rows,
     run_knockout_screen,
+    run_oe_dose_response_sweep,
     run_overexpression_screen,
     run_reaction_knockout_screen,
 )
@@ -202,6 +207,41 @@ def run_pichia_secretion_simulation(
             cost_slope_compatibility,
             cost_slope_policy,
         )
+    # R2 (ADR-004): opt-in OE dose-response shape. Sweeps the OE capacity multiplier over a
+    # factor grid for a set of candidate reactions (default = curated OE complexes) and
+    # classifies the shape of the secretion response, replacing the single fixed 2.0x point.
+    # Off by default (each factor re-solves the LP for every reaction); relative signal only.
+    oe_dose_response = None
+    if request.enable_oe_dose_response:
+        oe_reactions = list(request.oe_dose_response_reactions) or default_oe_reactions(
+            inputs.prepared_model, request.oe_dose_response_reaction_limit
+        )
+        oe_factors = request.oe_dose_response_factors or DEFAULT_OE_DOSE_RESPONSE_FACTORS
+        oe_sweep = run_oe_dose_response_sweep(
+            inputs.prepared_model,
+            target,
+            inputs.amino_acids,
+            inputs.metabolic,
+            inputs.secretory,
+            inputs.combined,
+            reactions=oe_reactions,
+            factors=oe_factors,
+            growth_rate=request.mu,
+            write_ribosome_translation_constraint=request.enable_ribosome_translation_constraint,
+            write_misfolding_constraints=request.enable_misfolding_constraint,
+        )
+        oe_shapes = classify_oe_dose_response_sweep(oe_sweep.reaction_points, oe_sweep.baseline_objective)
+        oe_dose_response = {
+            "target_id": oe_sweep.target_id,
+            "result_status": oe_sweep.result_status,
+            "success": oe_sweep.success,
+            "tested_factors": list(oe_sweep.tested_factors),
+            "baseline_objective": oe_sweep.baseline_objective,
+            "reactions": list(oe_sweep.reactions),
+            "reaction_shapes": [summarize_oe_dose_response_shape(shape) for shape in oe_shapes],
+            "sweep_rows": list(oe_sweep.sweep_rows),
+            "warnings": list(oe_sweep.warnings),
+        }
     tradeoff = run_growth_tradeoff(
         inputs.prepared_model,
         target,
@@ -384,8 +424,11 @@ def run_pichia_secretion_simulation(
             "solver_robustness": (
                 summarize_solver_robustness(solver_robustness) if solver_robustness is not None else None
             ),
+            "oe_dose_response": oe_dose_response,
         }
-        if cost_slope_compatibility is not None or solver_robustness is not None
+        if cost_slope_compatibility is not None
+        or solver_robustness is not None
+        or oe_dose_response is not None
         else None
     )
     medium_condition = medium_condition_summary_for_inputs(inputs)
