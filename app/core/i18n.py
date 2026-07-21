@@ -238,7 +238,8 @@ SIMULATION_RESULT_VALUE_LABELS = {
 SIMULATION_RESULT_WARNING_RULES = (
     ("bound_type='lower') reflects a floor",
      "下界（最低要求类）约束的大影子价格反映的是“最低需求”，而过表达放宽的是上限、解决不了下界——"
-     "把很大的 top_bound_marginals 当成 OE 线索前，先看 bound_type（实测：PDI1 单敲、核糖体装配都是很大的下界影子价格、但 OE 效果≈0）。"),
+     "把“边界级影子价格”表里很大的值当成 OE 线索前，先看它的“边界类型”是不是下界"
+     "（实测：PDI1 单敲、核糖体装配都是很大的下界影子价格、但 OE 效果≈0）。"),
     ("oe_actionable_bottlenecks lists only binding UPPER-bound",
      "OE 可缓解瓶颈只列当前解处 binding 的上限天花板（OE 真能放宽的）；下界 floor 由“为什么受限”单列、OE 动不了。"
      "OE 可缓解天花板只是线索不是保证：放宽后耦合结构会让瓶颈转移，用前请与真实 reaction_oe_tradeoff 交叉验证。"),
