@@ -65,8 +65,8 @@ from pcsec_pichia.services.gene_rule_overlay import (
     build_gpr_overlay,
     load_gene_rule_evidence_cache,
 )
-from pcsec_pichia.probe import DEFAULT_SOLVER_METHOD
 from pcsec_pichia.simulation import (
+    DEFAULT_SOLVER_METHOD,
     run_growth_tradeoff,
     run_protein_cost_slope_compatibility,
     solve_secretion_capacity,
