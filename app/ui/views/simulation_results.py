@@ -427,6 +427,32 @@ def _lp_oe_bottleneck_frame(lp_attribution: dict[str, object]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _lp_floor_bottleneck_frame(lp_attribution: dict[str, object]) -> pd.DataFrame:
+    """Frame of the largest binding LOWER-bound floors — the 'why is it limited' signal.
+
+    These are minimum-requirement constraints (folding, translation, ERAD) that OE cannot relax,
+    but they carry the largest shadow prices and are the honest answer to which resource layer
+    dominates a target's limitation, so they are charted separately from the OE-actionable ceilings.
+    """
+    rows: list[dict[str, object]] = []
+    for entry in lp_attribution.get("floor_constraints_not_oe_addressable") or []:
+        if not isinstance(entry, dict):
+            continue
+        marginal = entry.get("abs_marginal")
+        if marginal is None:
+            marginal = abs(float(entry.get("marginal") or 0.0))
+        rows.append(
+            {
+                "反应": str(entry.get("reaction_id", "?")),
+                "影子价格(绝对值)": abs(float(marginal or 0.0)),
+                "分泌资源层": _SECRETORY_PROCESS_LABELS.get(
+                    str(entry.get("secretory_process", "unknown")), str(entry.get("secretory_process", "unknown"))
+                ),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
 def _render_lp_attribution(lp_attribution: dict[str, object]) -> None:
     st.markdown("**LP 级归因证据**")
     st.caption("Python draft LP sensitivity，基于 SciPy HiGHS marginals；不是 MATLAB/SoPlex fully aligned shadow price。")
@@ -467,11 +493,27 @@ def _render_lp_attribution(lp_attribution: dict[str, object]) -> None:
     else:
         st.caption("（当前解没有 binding 的上限产能约束）")
     if floor_only:
-        st.write("**下界/floor 约束（OE 动不了，仅供参考）**")
+        st.write("**为什么受限：最强约束层（下界/最低要求，OE 动不了）**")
         st.caption(
-            "这些是下界（最低要求类）约束，OE 放宽的是上限、对它们无效，绝不能当作 OE 靶点。"
-            "此前 PDI1 单体、核糖体装配就是落在这里的假阳性。"
+            "这些下界（折叠 / 翻译 / ERAD 等最低要求）承载最大的影子价格，是本靶点「为什么受限、卡在哪一层」的答案；"
+            "但 OE 放宽的是上限、对它们无效，绝不能当 OE 靶点（PDI1 单体、核糖体装配就是这里的经典假阳性）。"
         )
+        floor_frame = _lp_floor_bottleneck_frame(lp_attribution)
+        if not floor_frame.empty:
+            figure = px.bar(
+                floor_frame.sort_values("影子价格(绝对值)"),
+                x="影子价格(绝对值)",
+                y="反应",
+                color="分泌资源层",
+                orientation="h",
+                title="为什么受限：最强约束层（影子价格越大越限制；OE 动不了）",
+            )
+            figure.update_layout(
+                xaxis_title="影子价格绝对值（越大越限制分泌）",
+                yaxis_title="",
+                legend_title_text="分泌资源层",
+            )
+            st.plotly_chart(figure, use_container_width=True)
         st.dataframe(pd.DataFrame(floor_only), use_container_width=True, hide_index=True)
 
     sections = (

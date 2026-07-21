@@ -528,6 +528,7 @@ def test_streamlit_relative_signal_charts_render_biologist_facing_figures() -> N
     # End users are biologists, not engineers: R1 bottlenecks and R2 dose-response are charted
     # (Plotly), not just tabulated. These pure frame helpers back those charts.
     from app.ui.views.simulation_results import (
+        _lp_floor_bottleneck_frame,
         _lp_oe_bottleneck_frame,
         _oe_dose_response_curve_frame,
     )
@@ -563,6 +564,17 @@ def test_streamlit_relative_signal_charts_render_biologist_facing_figures() -> N
     bars = _lp_oe_bottleneck_frame(lp_payload)
     assert set(bars["分泌资源层"]) == {"分子伴侣折叠", "翻译（核糖体）"}
     assert bars["影子价格(绝对值)"].max() == 0.92
+
+    # the large lower-bound floors are the 'why is it limited' answer and are charted separately
+    floor_payload = {
+        "floor_constraints_not_oe_addressable": [
+            {"reaction_id": "sec_Pdi1p_complex_formation", "abs_marginal": 5073.9, "secretory_process": "unknown"},
+            {"reaction_id": "Mach_Ribosome_complex_formation", "abs_marginal": 180.8, "secretory_process": "ribosome"},
+        ]
+    }
+    floors = _lp_floor_bottleneck_frame(floor_payload)
+    assert floors["影子价格(绝对值)"].max() == 5073.9
+    assert "翻译（核糖体）" in set(floors["分泌资源层"])
 
 
 def test_python_draft_service_does_not_depend_on_legacy_app_engines() -> None:
