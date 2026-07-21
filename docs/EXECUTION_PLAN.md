@@ -62,8 +62,10 @@ mapping、剂量、参数区间、复合体语义、约束、求解、报告和 
 - **gene-level OE capacity**：产品层级与门禁收口，reaction proxy、相对未校准、绝对 unavailable 和 not-executable 状态清晰分层。
 - **secretory resource Round 0**：冻结资源池、单位、来源、开关、边界和验收，全部七类；核实过每类是否有真实 kcat 数据。
 - **ERAD 约束验证与激活决定**：hLF 可行性验证已补齐（新增 `test_pipeline_runs_builtin_hlf_with_optional_constraints`，与 OPN 版本一起通过）、已知 MATLAB 兼容性差异确认是复核过的修正、决定保持可选并把理由写进 `engines/base.py` 字段注释。
-- **相对信号深化 R1（影子价格瓶颈归因 + 求解器稳健性）**（[ADR-004](adr/004-relative-signal-deepening-under-permanent-data-gap.md)）：深化既有 `analyze_target_protein_lp_attribution`，新增 bound_type 分离的 OE 可缓解瓶颈派生（下界 floor 永不进 OE 清单）与 opt-in 的求解器稳健性重解比对；核心加 `solver_method` 参数 + 常量 `DEFAULT_SOLVER_METHOD`（**默认求解算法从 highs 改为确定性的 highs-ds**，见下条）、开关全链路镜像 cost-slope、Streamlit 展示。R3-R4 仍前瞻。
+- **相对信号深化 R1（影子价格瓶颈归因 + 求解器稳健性）**（[ADR-004](adr/004-relative-signal-deepening-under-permanent-data-gap.md)）：深化既有 `analyze_target_protein_lp_attribution`，新增 bound_type 分离的 OE 可缓解瓶颈派生（下界 floor 永不进 OE 清单）与 opt-in 的求解器稳健性重解比对；核心加 `solver_method` 参数 + 常量 `DEFAULT_SOLVER_METHOD`（**默认求解算法从 highs 改为确定性的 highs-ds**，见下条）、开关全链路镜像 cost-slope、Streamlit 展示。
 - **相对信号深化 R2（OE 剂量响应形状）**（[ADR-004](adr/004-relative-signal-deepening-under-permanent-data-gap.md)）：固定 `2.0×` 单点升级为对扫描 factor 网格的分泌响应做形状分类（`saturating`/`linear`/`threshold`/`flat_no_response`/`non_monotonic_numerical_artifact`）；纯分类器 `classify_oe_dose_response_shape`（AUC 判凹凸）+ 编排 `run_oe_dose_response_sweep`；opt-in `enable_oe_dose_response` 全链路镜像 cost-slope + Streamlit 面板 + 工具 flag。相对形状信号，绝不输出真实表达倍数或 mg/L；OE 单调不减是硬约束，越噪声下降判数值假象。
+- **相对信号深化 R3+R4（排序可信度 + 价值-of-information，合并交付）**（[ADR-004](adr/004-relative-signal-deepening-under-permanent-data-gap.md)）：R3 `compare_ranking_robustness`（排序对容量带宽/求解器扰动稳不稳，绝对态恒 unavailable、标签不含 capacity-robust）与 R4 `prioritize_value_of_information`（近似并列/翻转 → 排"该测什么最能消解歧义"，不预测产量、不自动提升候选）本质是同一歧义信号的两面，合并成一个"排序可信度 & 该测什么"面板；R4 纯后处理零额外求解 → 始终计算并入 summary。**四方向 R1–R4 全部落地（相对层内，绝对层保持 unavailable）**。
+- **Streamlit 面向生物学家图表化**：R1 瓶颈（为什么受限 floor + OE 可缓解上限）、R2 剂量响应曲线、R4 排序可信度均改 Plotly 图（终端用户是生物学家）。**方向4（组合设计）经战略确认暂不做**：单基因分数够可信前做组合＝把不可信的相乘＋放大误差；留到有稳定性标注的可信排序后在 top 短名单做有界两两上位性（O(k²)、小 k、仍相对）。
 - **求解器确定性（Fix A，已修复）**：`test_simulation_entrypoints.py` 目标值断言此前脆弱，根因是 `method="highs"` 在退化最优面上落到不唯一顶点（run-to-run 抖 ~2e-6，偶超 `pytest.approx` 1e-6）。**修复**：把默认求解算法钉为 `highs-ds`（对偶单纯形，天然确定，稳定落到被标定顶点）。**验证**：`python_pichia/tests/` 全量隔离 551 passed / 0 failed，计数与基线逐字一致（不挪动任何期望值）。此前"跨文件污染 + threads=1 放大"的推断已证伪，详见 `docs/handoff.md`。
 
 当前验证基线（2026-07-20）：
@@ -137,8 +139,9 @@ mapping、剂量、参数区间、复合体语义、约束、求解、报告和 
 
 - R1：扩展主路径已有的 `analyze_target_protein_lp_attribution`（不接 `analysis/shadow_lp` 休眠的第二份对偶提取），对 hLF/OPN 产出行级/复合体级相对 binding 贡献（可选再附层级汇总）；每条归因保留 `bound_type`，下界约束不报成 OE 瓶颈；proxy 边界下附带宽+求解器双重稳健性说明，不作绝对瓶颈断言。
 - R2（已实现 2026-07-21）：OE 倍数扫描输出形状类别（saturating/linear/threshold/flat/非单调假象），固定 `2.0×` 保留为曲线上一个点，opt-in feature-off 时不改默认求解；只输出相对增益与形状，不输出真实表达倍数或 mg/L；OE 单调不减为硬约束、越噪声下降判数值假象。
-- R3：测试覆盖“跨带宽稳健”“跨带宽翻转”与“跨求解器翻转”三类；各类下绝对状态均 unavailable，扫描带宽不写正式资产、不作 promotion 依据；标签名不含 `capacity-robust` 一类措辞。
-- R4：价值-of-information 清单可回溯到候选、排序歧义和建议测量；不含绝对产量预测，不自动提升候选为 `experiment_calibrated` 或绝对可执行。
+- R3（已实现 2026-07-21，与 R4 合并为"排序可信度 & 该测什么"）：`compare_ranking_robustness` 测试覆盖"跨带宽稳健""跨带宽翻转""跨求解器翻转"三类；各类下绝对状态均 unavailable、标签名不含 `capacity-robust`；作为库函数保留（吃显式扰动排序），未做全局 kcat 扰动编排以免拿 OE 倍数轴冒充容量轴。其管道价值＝R4 面板里的"近似并列/排序不可信"标注（productize 方向5退化解噪声教训）。
+- R4（已实现 2026-07-21）：`prioritize_value_of_information` 吃候选排序、检测近似并列 + R3 翻转、按"哪次最小测量最能消解歧义"排序，可回溯到候选/歧义/建议测量；不含绝对产量预测，不自动提升候选为 `experiment_calibrated` 或绝对可执行；纯后处理零额外求解 → pipeline 始终计算并入 summary + 结果页面板。
+- Streamlit 图表化（面向生物学家）：R1 瓶颈（为什么受限 floor + OE 可缓解上限）、R2 剂量响应曲线、R4 候选排序可信度均已改为 Plotly 图；纯取数助手已单测。方向4（组合设计）经战略确认暂不做，留到有可信单基因排序后在 top 短名单做有界两两上位性。
 - service/UI 只透传与展示上述判断，不重新实现科学降级或容量推断逻辑。
 
 ### 停止条件
