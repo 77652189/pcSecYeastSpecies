@@ -44,6 +44,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="R1: also re-solve with highs-ds/highs-ipm and surface the solver-robustness verdict.",
     )
+    parser.add_argument(
+        "--enable-oe-dose-response",
+        action="store_true",
+        help="R2: also sweep the OE capacity multiplier over a factor grid and surface the dose-response shape.",
+    )
     return parser.parse_args()
 
 
@@ -59,6 +64,7 @@ def main() -> int:
             candidate_id=candidate_id,
             enable_cost_slope_compatibility=True,
             enable_solver_robustness_check=bool(args.enable_solver_robustness),
+            enable_oe_dose_response=bool(args.enable_oe_dose_response),
         ),
         output_dir=output_dir,
     )
@@ -78,6 +84,7 @@ def main() -> int:
         "oe_actionable_bottlenecks": lp_attribution.get("oe_actionable_bottlenecks"),
         "floor_constraints_not_oe_addressable": lp_attribution.get("floor_constraints_not_oe_addressable"),
         "solver_robustness": protein_cost.get("solver_robustness"),
+        "oe_dose_response": protein_cost.get("oe_dose_response"),
         "lp_attribution_warnings": lp_attribution.get("warnings"),
         "cost_slope_secretion_ratio_policy": cost_slope.get("secretion_ratio_policy"),
         "cost_slope_capacity_reference": cost_slope.get("capacity_reference"),
