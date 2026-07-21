@@ -4,6 +4,7 @@ from pathlib import Path
 
 from pcsec_pichia.analysis import (
     ProteinLpAttributionResult,
+    _lp_reaction_process,
     analyze_target_protein_lp_attribution,
     classify_oe_dose_response_shape,
     compare_ranking_robustness,
@@ -415,3 +416,98 @@ def test_cost_slope_compatibility_summary_keeps_matlab_style_definition() -> Non
     assert summary["comparison_scope"]["ratio_policy"] == "explicit_absolute_ratios"
     assert summary["secretion_ratio_policy"] == "explicit_absolute_ratios"
     assert "fixed target exchange" in summary["comparison_scope"]["definition"]
+
+
+def test_lp_reaction_process_classifies_host_sec_complexes_by_gene_token() -> None:
+    # Root fix: the host sec_* secretory-machine complexes used to fall through to "unknown"; the
+    # engine now delegates their classification to the shared gene-token classifier so the payload
+    # carries a real process label. These are host-shared reactions (not this target's own handles
+    # and not embedding its protein id), so they exercise the classifier, not the target-aware prefix.
+    target = _builtin("hLF")
+    plan = build_secretion_plan(target)
+    assert "sec_Pdi1p_complex_formation" not in plan.reaction_ids  # host-shared, not a target handle
+
+    def process(reaction_id: str) -> str:
+        return _lp_reaction_process(reaction_id, target, plan)
+
+    # High-confidence, one representative per process layer (verified against the yeast secretory
+    # pathway): the dominant hLF bottleneck sec_Pdi1p -> disulfide_folding is the headline case.
+    assert process("sec_Pdi1p_complex_formation") == "disulfide_folding"
+    assert process("sec_Kar2p_complex_formation") == "chaperone_folding"
+    assert process("sec_OSTC_complex_formation") == "n_glycan_processing"
+    assert process("sec_Pmt_complex_formation") == "o_glycan_processing"
+    assert process("sec_SEC61SEC63C_complex_formation") == "er_translocation"
+    assert process("Mach_Ribosome_complex_formation") == "ribosome"
+    # Conservative bucket: sec_* machinery whose gene token is genuinely ambiguous (GPI-anchor
+    # remodeling here) stays in the generic secretory_capacity layer rather than a wrong guess.
+    assert process("sec_Bst1p_complex_formation") == "secretory_capacity"
+
+
+def test_lp_reaction_process_preserves_target_aware_cases() -> None:
+    # The target-aware cases are resolved before delegation and must not regress: they are specific
+    # to this attribution and have no general-classifier equivalent.
+    target = _builtin("hLF")
+    plan = build_secretion_plan(target)
+    own_reaction = next(iter(plan.reaction_ids))
+
+    assert _lp_reaction_process("", target, plan) == "unknown"
+    assert _lp_reaction_process(own_reaction, target, plan) == "target_secretory_reaction"
+    assert _lp_reaction_process(f"r_{target.protein_id}_exchange", target, plan) == "target_exchange"
+    assert _lp_reaction_process(f"{target.protein_id}_exchange", target, plan) == "target_exchange"
+    # a reaction whose id embeds the target's protein id (but is neither a plan handle nor the
+    # exchange) is target_related, never leaked into a shared secretory-process bucket
+    assert _lp_reaction_process(f"probe_{target.protein_id}_custom_reaction", target, plan) == "target_related"
+
+
+def test_lp_attribution_payload_tags_sec_complexes_not_unknown() -> None:
+    # End-to-end (the "payload is correct for all consumers" goal): with sec_* complexes as binding
+    # bounds, the LP-attribution payload's secretory_process must carry real process labels, and the
+    # relative-signal invariant (lower-bound floors segregated from OE-actionable upper bounds) holds.
+    target = _builtin("hLF")
+    plan = build_secretion_plan(target)
+    reaction_ids = (
+        "Mach_Ribosome_complex_formation",
+        "sec_Pdi1p_complex_formation",
+        "sec_OSTC_complex_formation",
+        "sec_Bst1p_complex_formation",
+    )
+    simulation = SecretionSimulationResult(
+        success=True,
+        target_id=target.target_id,
+        objective_value=0.01,
+        growth_rate=0.10,
+        secretion_flux=0.01,
+        status="0",
+        message="ok",
+        constraint_counts={"stoichiometric": 7, "eq_total": 7, "ub_total": 1},
+        result_status="draft",
+        target_parameter_status="draft",
+        matlab_alignment_status="pending",
+        exchange_reaction_id="r_hLF_exchange",
+        build_status="supported",
+        lp_sensitivity={
+            "eq_marginals": (0.0,) * 7,
+            "ub_marginals": (0.0,),
+            # index 0 (ribosome) and index 1 (PDI) are binding lower-bound floors; index 2 (OSTC) and
+            # index 3 (Bst1) are binding upper-bound ceilings (OE-actionable). PDI carries the ~5074
+            # shadow price that motivated this fix.
+            "lower_marginals": (180.8, 5073.9, 0.0, 0.0),
+            "upper_marginals": (0.0, 0.0, 12.0, 3.0),
+        },
+        key_fluxes={"BIOMASS": 0.10},
+    )
+
+    result = analyze_target_protein_lp_attribution(
+        target, plan, simulation.constraint_counts, simulation, reaction_ids=reaction_ids, top_n=5
+    )
+
+    floors = {row["reaction_id"]: row["secretory_process"] for row in result.floor_constraints_not_oe_addressable}
+    oe = {row["reaction_id"]: row["secretory_process"] for row in result.oe_actionable_bottlenecks}
+    assert floors["sec_Pdi1p_complex_formation"] == "disulfide_folding"
+    assert floors["Mach_Ribosome_complex_formation"] == "ribosome"
+    assert oe["sec_OSTC_complex_formation"] == "n_glycan_processing"
+    assert oe["sec_Bst1p_complex_formation"] == "secretory_capacity"
+    # relative-signal invariants: floors are lower bounds only, OE-actionable are upper bounds only
+    assert all(row["bound_type"] == "lower" for row in result.floor_constraints_not_oe_addressable)
+    assert all(row["bound_type"] == "upper" for row in result.oe_actionable_bottlenecks)
+    assert "sec_Pdi1p_complex_formation" not in oe

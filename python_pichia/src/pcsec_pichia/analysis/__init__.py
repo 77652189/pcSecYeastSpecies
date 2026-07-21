@@ -4,6 +4,7 @@ import json
 from dataclasses import asdict, dataclass
 from typing import Any
 
+from pcsec_pichia.probe import classify_secretory_process
 from pcsec_pichia.secretion_plan import SecretionPlanResult
 from pcsec_pichia.simulation import (
     GrowthTradeoffResult,
@@ -1632,6 +1633,25 @@ def _block_values(
 
 
 def _lp_reaction_process(reaction_id: str, target: TargetSpec, plan: SecretionPlanResult) -> str:
+    """Secretory-process label for an LP-attribution reaction, for the payload's consumers.
+
+    The target-aware cases are resolved first, because they are specific to *this*
+    attribution and have no general-classifier equivalent: the target's own secretory
+    reactions, its product exchange, and any reaction whose id embeds its protein id
+    (e.g. this target's ``*_ERAD2A_sec_Pdi1p_complex`` misfolding handles).
+
+    Everything else is delegated to :func:`classify_secretory_process`, the canonical
+    gene-token classifier already shared by screens/reports/gene_catalog. This is what
+    finally classifies the host ``sec_*`` secretory-machine complexes that used to fall
+    through to ``"unknown"`` -- e.g. ``sec_Pdi1p_complex_formation`` -> ``disulfide_folding``
+    (the dominant hLF bottleneck), ``sec_Kar2p_complex_formation`` -> ``chaperone_folding``,
+    ``sec_OSTC_complex_formation`` -> ``n_glycan_processing``, ``sec_SEC61SEC63C_...`` ->
+    ``er_translocation``. Delegating (rather than maintaining a second token table here)
+    keeps one reviewed vocabulary across every consumer, and conservatively falls back to
+    the generic ``secretory_capacity`` bucket for ``sec_*`` complexes whose gene token is
+    genuinely ambiguous (GPI-anchor/p24/alternative-translocon machinery) instead of
+    guessing a specific process.
+    """
     if reaction_id == "":
         return "unknown"
     if reaction_id in plan.reaction_ids:
@@ -1640,18 +1660,7 @@ def _lp_reaction_process(reaction_id: str, target: TargetSpec, plan: SecretionPl
         return "target_exchange"
     if target.protein_id and target.protein_id in reaction_id:
         return "target_related"
-    lowered = reaction_id.lower()
-    if "ribosome" in lowered:
-        return "ribosome"
-    if "misfold" in lowered or "erad" in lowered:
-        return "misfolding_erad"
-    if "glyco" in lowered or "_ng" in lowered or "_og" in lowered:
-        return "glycosylation"
-    if "biomass" in lowered:
-        return "growth"
-    if reaction_id in {"Ex_glc_D", "Ex_o2"}:
-        return "medium_exchange"
-    return "unknown"
+    return classify_secretory_process(reaction_id)
 
 
 def _nonzero_count(values: tuple[float, ...] | list[float]) -> int:

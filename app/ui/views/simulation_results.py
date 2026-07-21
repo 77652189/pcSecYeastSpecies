@@ -405,24 +405,18 @@ def _short_reaction_label(reaction_id: str, max_len: int = 34) -> str:
     return label or str(reaction_id)
 
 
-def _resource_layer_label(reaction_id: str, process: object) -> str:
-    """Chinese resource-layer label, with a conservative name-based fallback when the engine said 'unknown'.
+def _resource_layer_label(process: object) -> str:
+    """Chinese resource-layer label for an LP-attribution ``secretory_process`` code.
 
-    The engine classifier does not tag the `sec_*` secretory complexes, so the dominant folding bottleneck
-    (PDI/ERO1/ERV2) would otherwise chart as '未解析'. Only high-confidence tokens are inferred, and inferred
-    labels are marked 「按名称推断」 so they are not mistaken for the engine's own classification.
+    The engine now classifies every reaction -- including the ``sec_*`` secretory-machine
+    complexes (e.g. ``sec_Pdi1p_complex_formation`` -> ``disulfide_folding``) -- into the
+    shared process vocabulary, and every one of those codes lives in the central i18n value
+    dictionary, so this is a straight localized lookup. The earlier name-based inference
+    fallback (which guessed the folding layer from the reaction id when the engine said
+    ``unknown``) is no longer needed and was removed; unmapped codes still degrade to '未解析'.
     """
     code = str(process or "unknown")
-    if code != "unknown":
-        return sim_result_value_label(code)
-    lowered = str(reaction_id).lower()
-    if any(token in lowered for token in ("pdi", "ero1", "_ero", "erv")):
-        return "二硫键折叠（按名称推断）"
-    if "ribosome" in lowered:
-        return sim_result_value_label("ribosome")
-    if "misfold" in lowered or "erad" in lowered:
-        return sim_result_value_label("misfolding_erad")
-    return sim_result_value_label("unknown")
+    return sim_result_value_label(code)
 
 
 def _oe_dose_response_curve_frame(oe_dose_response: dict[str, object]) -> pd.DataFrame:
@@ -536,7 +530,7 @@ def _lp_oe_bottleneck_frame(lp_attribution: dict[str, object]) -> pd.DataFrame:
             {
                 "反应": _short_reaction_label(reaction_id),
                 "影子价格(绝对值)": abs(float(marginal or 0.0)),
-                "分泌资源层": _resource_layer_label(reaction_id, entry.get("secretory_process")),
+                "分泌资源层": _resource_layer_label(entry.get("secretory_process")),
             }
         )
     return pd.DataFrame(rows)
@@ -561,7 +555,7 @@ def _lp_floor_bottleneck_frame(lp_attribution: dict[str, object]) -> pd.DataFram
             {
                 "反应": _short_reaction_label(reaction_id),
                 "影子价格(绝对值)": abs(float(marginal or 0.0)),
-                "分泌资源层": _resource_layer_label(reaction_id, entry.get("secretory_process")),
+                "分泌资源层": _resource_layer_label(entry.get("secretory_process")),
             }
         )
     return pd.DataFrame(rows)
