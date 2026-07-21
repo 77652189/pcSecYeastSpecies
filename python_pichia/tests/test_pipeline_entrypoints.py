@@ -504,6 +504,39 @@ def test_pipeline_populates_protein_cost_analysis_only_when_cost_slope_enabled(t
 
 
 @slow_pipeline
+def test_pipeline_populates_solver_robustness_only_when_flag_enabled(tmp_path: Path) -> None:
+    # R1 (ADR-004): solver-robustness re-solves with highs-ds/highs-ipm and compares the
+    # bottleneck attribution across solver methods. Off by default; on demand it nests a
+    # solver_robustness payload inside protein_cost_analysis with a stable/sensitive verdict.
+    output_dir = tmp_path / "opn_solver_robustness"
+    result = run_pichia_secretion_simulation(
+        PichiaSimulationRequest(
+            target_id="OPN_ALPHA_FULL_PROJECT",
+            candidate_id="OPN_ALPHA_FULL_PROJECT",
+            enable_solver_robustness_check=True,
+        ),
+        output_dir=output_dir,
+    )
+
+    summary = json.loads(result.summary_path.read_text(encoding="utf-8"))
+    protein_cost = summary["protein_cost_analysis"]
+    # turning on ONLY the robustness flag (cost-slope off) still surfaces the payload
+    assert protein_cost is not None
+    solver_robustness = protein_cost["solver_robustness"]
+    assert solver_robustness is not None
+    assert solver_robustness["result_status"] == "draft_solver_robustness"
+    assert set(solver_robustness["methods"]) == {"highs", "highs-ds", "highs-ipm"}
+    assert solver_robustness["classification"] in {
+        "ranking-insensitive-to-solver",
+        "ranking-sensitive-to-solver",
+        "inconclusive",
+    }
+    assert len(solver_robustness["per_method"]) == 3
+    # cost-slope was NOT requested, so it stays a disabled stub, not a real run
+    assert protein_cost["cost_slope_compatibility"]["enabled"] is False
+
+
+@slow_pipeline
 def test_pipeline_runs_builtin_hlf_with_project_710_alignment_artifact(tmp_path: Path) -> None:
     output_dir = tmp_path / "hlf"
     result = run_pichia_secretion_simulation(

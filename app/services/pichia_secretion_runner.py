@@ -46,6 +46,8 @@ def run_pichia_pipeline_draft(
             cost_slope_secretion_ratios=tuple(request.cost_slope_secretion_ratios),
             cost_slope_capacity_fractions=tuple(request.cost_slope_capacity_fractions),
             cost_slope_medium_compatibility_mode=str(request.cost_slope_medium_compatibility_mode),
+            enable_solver_robustness_check=bool(request.enable_solver_robustness_check),
+            solver_robustness_methods=tuple(request.solver_robustness_methods),
             **sequence_contract,
         )
         result = run_pichia_secretion_simulation(engine_request, output_dir=output_dir)
@@ -127,7 +129,9 @@ def _ensure_pcsec_pichia_analysis_api() -> None:
     required = {
         "analyze_target_growth_impact",
         "analyze_yield_improvement_candidates",
+        "compare_solver_robustness",
         "summarize_protein_cost_slope_compatibility",
+        "summarize_solver_robustness",
         "summarize_yield_improvement_recommendations",
     }
     if module is not None and not required.issubset(set(dir(module))):

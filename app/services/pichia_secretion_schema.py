@@ -44,6 +44,8 @@ class SecretionRunRequest:
     cost_slope_secretion_ratios: tuple[float, ...] = ()
     cost_slope_capacity_fractions: tuple[float, ...] = (0.10, 0.25, 0.50, 0.75, 0.90)
     cost_slope_medium_compatibility_mode: str = "corrected"
+    enable_solver_robustness_check: bool = False
+    solver_robustness_methods: tuple[str, ...] = ("highs-ds", "highs-ipm")
     mu: float = 0.10
     media_type: int = 4
     carbon_source_id: str = "glucose"

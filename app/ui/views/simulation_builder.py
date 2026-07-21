@@ -43,6 +43,7 @@ class TargetBuildFormState:
     enable_misfolding: bool
     enable_cost_slope_compatibility: bool
     cost_slope_medium_compatibility_mode: str
+    enable_solver_robustness_check: bool
     mu: float
     media_type: int
     carbon_source_id: str
@@ -157,6 +158,16 @@ def render_target_build_form() -> TargetBuildFormState:
             "勾选后会多跑一组LP求解（默认2个生长率×5个分泌比例=10次），不影响默认分泌仿真本身的数值结果。"
         ),
     )
+    enable_solver_robustness_check = st.checkbox(
+        "启用求解器稳健性检查（换 highs-ds/highs-ipm 重解，判断瓶颈归因是否为数值假象，较慢）",
+        value=False,
+        help=(
+            "影子价格/对偶解在退化最优解处并不唯一，同一个 LP 换个求解算法可能把瓶颈归到不同资源。"
+            "勾选后会用 highs-ds 和 highs-ipm 各重解一次，比对最上面的 OE 可缓解瓶颈是否跨求解器一致："
+            "一致标为 ranking-insensitive-to-solver，翻转标为 ranking-sensitive-to-solver（说明这个瓶颈是数值假象，不是生物学结论）。"
+            "勾选后每多一个求解算法就多跑一次完整 pcSec LP，不影响默认分泌仿真本身的数值结果，也不改默认求解器。"
+        ),
+    )
     cost_slope_medium_compatibility_mode = "corrected"
     if enable_cost_slope_compatibility:
         cost_slope_medium_compatibility_mode = st.selectbox(
@@ -219,6 +230,7 @@ def render_target_build_form() -> TargetBuildFormState:
         enable_misfolding=enable_misfolding,
         enable_cost_slope_compatibility=enable_cost_slope_compatibility,
         cost_slope_medium_compatibility_mode=cost_slope_medium_compatibility_mode,
+        enable_solver_robustness_check=enable_solver_robustness_check,
         mu=float(mu),
         media_type=media_type,
         carbon_source_id=str(carbon_source_id),

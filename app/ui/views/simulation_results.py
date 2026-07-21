@@ -243,11 +243,39 @@ def _render_protein_cost_analysis(protein_cost: dict[str, object]) -> None:
         lp_attribution = protein_cost.get("lp_attribution")
         if isinstance(lp_attribution, dict) and lp_attribution:
             _render_lp_attribution(lp_attribution)
+        solver_robustness = protein_cost.get("solver_robustness")
+        if isinstance(solver_robustness, dict) and solver_robustness:
+            _render_solver_robustness(solver_robustness)
         cost_slope = protein_cost.get("cost_slope_compatibility")
         if isinstance(cost_slope, dict) and cost_slope:
             _render_cost_slope_compatibility(cost_slope)
         for warning in protein_cost.get("warnings") or []:
             st.warning(str(warning))
+
+
+def _render_solver_robustness(solver_robustness: dict[str, object]) -> None:
+    st.markdown("**求解器稳健性（瓶颈归因是否跨求解器稳定）**")
+    st.caption(
+        "对偶解在退化最优解处不唯一，换求解算法可能把瓶颈归到不同资源。"
+        "ranking-insensitive-to-solver 表示归因稳定；ranking-sensitive-to-solver 表示归因是数值假象，不是生物学结论。"
+    )
+    classification = str(solver_robustness.get("classification", "—"))
+    c1, c2, c3 = st.columns([2, 1, 1])
+    with c1:
+        st.metric("稳健性分类", classification)
+    with c2:
+        st.metric("瓶颈跨求解器一致", str(solver_robustness.get("top_bottleneck_stable", "—")))
+    with c3:
+        st.metric("主导块跨求解器一致", str(solver_robustness.get("top_block_stable", "—")))
+    if classification == "ranking-sensitive-to-solver":
+        st.warning(str(solver_robustness.get("detail", "")))
+    else:
+        st.caption(str(solver_robustness.get("detail", "")))
+    per_method = solver_robustness.get("per_method") or []
+    if per_method:
+        st.dataframe(pd.DataFrame(per_method), use_container_width=True, hide_index=True)
+    for warning in solver_robustness.get("warnings") or []:
+        st.warning(str(warning))
 
 
 def _render_lp_attribution(lp_attribution: dict[str, object]) -> None:
@@ -262,10 +290,29 @@ def _render_lp_attribution(lp_attribution: dict[str, object]) -> None:
     with c3:
         st.metric("分泌通量", objective.get("secretion_flux", "—") if isinstance(objective, dict) else "—")
 
+    oe_actionable = lp_attribution.get("oe_actionable_bottlenecks") or []
+    floor_only = lp_attribution.get("floor_constraints_not_oe_addressable") or []
+    st.write("**OE 可缓解瓶颈（binding 上限，按复合体）**")
+    st.caption(
+        "只列当前解处 binding 的上限产能约束——这是 OE（放宽产能上限）真能缓解的瓶颈线索，按复合体给出。"
+        "注意这只是线索不是保证：耦合结构下放宽一个上限会让瓶颈转移，需与真实 reaction_oe_tradeoff 交叉验证。"
+    )
+    if oe_actionable:
+        st.dataframe(pd.DataFrame(oe_actionable), use_container_width=True, hide_index=True)
+    else:
+        st.caption("（当前解没有 binding 的上限产能约束）")
+    if floor_only:
+        st.write("**下界/floor 约束（OE 动不了，仅供参考）**")
+        st.caption(
+            "这些是下界（最低要求类）约束，OE 放宽的是上限、对它们无效，绝不能当作 OE 靶点。"
+            "此前 PDI1 单体、核糖体装配就是落在这里的假阳性。"
+        )
+        st.dataframe(pd.DataFrame(floor_only), use_container_width=True, hide_index=True)
+
     sections = (
         ("主导约束块", "dominant_constraint_blocks"),
         ("Top constraint marginals", "top_constraint_marginals"),
-        ("Top bound marginals", "top_bound_marginals"),
+        ("Top bound marginals（未按 bound_type 分离的原始表）", "top_bound_marginals"),
         ("目标相关 flux", "target_related_fluxes"),
     )
     for title, key in sections:

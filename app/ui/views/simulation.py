@@ -102,6 +102,7 @@ def _render_pichia_builder() -> None:
         common = dict(enable_ribosome_translation_constraint=build_state.enable_ribosome, enable_misfolding_constraint=build_state.enable_misfolding,
                       enable_cost_slope_compatibility=build_state.enable_cost_slope_compatibility,
                       cost_slope_medium_compatibility_mode=build_state.cost_slope_medium_compatibility_mode,
+                      enable_solver_robustness_check=build_state.enable_solver_robustness_check,
                       mu=build_state.mu, media_type=build_state.media_type, carbon_source_id=build_state.carbon_source_id,
                       ko_gene_ids=gene_state.ko_gene_ids,
                       ko_reaction_ids=gene_state.ko_reaction_ids,

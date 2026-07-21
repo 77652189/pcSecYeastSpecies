@@ -67,7 +67,9 @@ def test_runner_refreshes_stale_pcsec_analysis_module(monkeypatch) -> None:
     def fake_reload(module):
         module.analyze_target_growth_impact = lambda *args, **kwargs: None
         module.analyze_yield_improvement_candidates = lambda *args, **kwargs: None
+        module.compare_solver_robustness = lambda *args, **kwargs: None
         module.summarize_protein_cost_slope_compatibility = lambda *args, **kwargs: {}
+        module.summarize_solver_robustness = lambda *args, **kwargs: {}
         module.summarize_yield_improvement_recommendations = lambda *args, **kwargs: {}
         return module
 
@@ -483,6 +485,23 @@ def test_streamlit_cost_slope_option_explains_it_is_the_protein_cost_analysis_fe
     assert "不勾选时不会展示任何蛋白成本分析" in source
     assert "capacity_fraction_ratios" in results_source
     assert "按当前 corrected 分泌 capacity" in results_source
+
+
+def test_streamlit_solver_robustness_option_and_result_panel_are_localized() -> None:
+    builder_source = (REPO_ROOT / "app" / "ui" / "views" / "simulation_builder.py").read_text(encoding="utf-8")
+    results_source = (REPO_ROOT / "app" / "ui" / "views" / "simulation_results.py").read_text(encoding="utf-8")
+    runner_source = (REPO_ROOT / "app" / "services" / "pichia_secretion_runner.py").read_text(encoding="utf-8")
+
+    # builder checkbox is present and explains what solver-robustness means
+    assert "启用求解器稳健性检查（换 highs-ds/highs-ipm 重解，判断瓶颈归因是否为数值假象，较慢）" in builder_source
+    assert "对偶解在退化最优解处并不唯一" in builder_source
+    # result panel surfaces the OE-actionable vs floor split and the solver-robustness verdict
+    assert "OE 可缓解瓶颈（binding 上限，按复合体）" in results_source
+    assert "下界/floor 约束（OE 动不了，仅供参考）" in results_source
+    assert "求解器稳健性（瓶颈归因是否跨求解器稳定）" in results_source
+    assert "ranking-sensitive-to-solver" in results_source
+    # service facade threads the flag through to the engine request
+    assert "enable_solver_robustness_check=bool(request.enable_solver_robustness_check)" in runner_source
 
 
 def test_python_draft_service_does_not_depend_on_legacy_app_engines() -> None:

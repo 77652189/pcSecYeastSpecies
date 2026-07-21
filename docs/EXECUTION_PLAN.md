@@ -62,8 +62,10 @@ mapping、剂量、参数区间、复合体语义、约束、求解、报告和 
 - **gene-level OE capacity**：产品层级与门禁收口，reaction proxy、相对未校准、绝对 unavailable 和 not-executable 状态清晰分层。
 - **secretory resource Round 0**：冻结资源池、单位、来源、开关、边界和验收，全部七类；核实过每类是否有真实 kcat 数据。
 - **ERAD 约束验证与激活决定**：hLF 可行性验证已补齐（新增 `test_pipeline_runs_builtin_hlf_with_optional_constraints`，与 OPN 版本一起通过）、已知 MATLAB 兼容性差异确认是复核过的修正、决定保持可选并把理由写进 `engines/base.py` 字段注释。
+- **相对信号深化 R1（影子价格瓶颈归因 + 求解器稳健性）**（[ADR-004](adr/004-relative-signal-deepening-under-permanent-data-gap.md)）：深化既有 `analyze_target_protein_lp_attribution`，新增 bound_type 分离的 OE 可缓解瓶颈派生（下界 floor 永不进 OE 清单）与 opt-in 的求解器稳健性重解比对；核心加 `solver_method` 参数 + 常量 `DEFAULT_SOLVER_METHOD`（**默认求解算法从 highs 改为确定性的 highs-ds**，见下条）、开关全链路镜像 cost-slope、Streamlit 展示。R2-R4 仍前瞻。
+- **求解器确定性（Fix A，已修复）**：`test_simulation_entrypoints.py` 目标值断言此前脆弱，根因是 `method="highs"` 在退化最优面上落到不唯一顶点（run-to-run 抖 ~2e-6，偶超 `pytest.approx` 1e-6）。**修复**：把默认求解算法钉为 `highs-ds`（对偶单纯形，天然确定，稳定落到被标定顶点）。**验证**：`python_pichia/tests/` 全量隔离 551 passed / 0 failed，计数与基线逐字一致（不挪动任何期望值）。此前"跨文件污染 + threads=1 放大"的推断已证伪，详见 `docs/handoff.md`。
 
-当前验证基线（2026-07-20 全量回归，含 ADR-003 发酵反馈模板重构和 UI 本地化后的回归）：
+当前验证基线（2026-07-20）：
 
 - 仓库根 `tests/`：319 passed，0 failed。
 - `python_pichia/tests/`：549 passed，20 skipped，0 failed。
@@ -152,7 +154,7 @@ mapping、剂量、参数区间、复合体语义、约束、求解、报告和 
 
 第 3 节列出的交付（发酵模板回填、OE 产品层级、secretory resource Round 0、ERAD 约束验证与激活决定、实验反馈闭环 UI 本地化）均已完成，不需要重新实现。
 
-2026-07-20 新增的相对信号深化四个方向（见决策摘要与 [ADR-004](adr/004-relative-signal-deepening-under-permanent-data-gap.md)）是当前的前瞻工作范围，全部限定在 ADR-002 相对决策层内；R1 扩展主路径已有的 `analyze_target_protein_lp_attribution`（不接 `secretory_resources` 休眠层，也不接 shadow_lp 休眠对偶路径），R2 相对独立，R4 消费 R1-R3 输出。何时推进由用户决定，不自动展开。
+2026-07-20 新增的相对信号深化四个方向（见决策摘要与 [ADR-004](adr/004-relative-signal-deepening-under-permanent-data-gap.md)），全部限定在 ADR-002 相对决策层内。**R1（影子价格瓶颈归因）已实现**（见第 3 节），扩展主路径已有的 `analyze_target_protein_lp_attribution`（不接 `secretory_resources` 休眠层，也不接 shadow_lp 休眠对偶路径）。R2（OE 剂量响应形状，相对独立）进行中；R3（容量带宽稳健性）、R4（价值-of-information，消费 R1-R3 输出）前瞻。2026-07-20 用户授权在其离开期间自主推进 R2-R4（R2 保底），每方向本地提交待其回来 review，不 push。
 
 ### 会在以下情况发生时处理
 

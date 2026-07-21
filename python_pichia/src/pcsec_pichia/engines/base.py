@@ -56,6 +56,13 @@ class PichiaSimulationRequest:
     cost_slope_secretion_ratios: tuple[float, ...] = ()
     cost_slope_capacity_fractions: tuple[float, ...] = (0.10, 0.25, 0.50, 0.75, 0.90)
     cost_slope_medium_compatibility_mode: str = "corrected"
+    # R1 (ADR-004): opt-in solver-robustness re-solve of the LP-attribution bottleneck.
+    # Off by default because each extra method re-solves the full pcSec LP (slow); turn on
+    # per-run to check whether the top bottleneck is stable across HiGHS algorithms or is a
+    # degenerate/numerical artifact. Does not change the default solver or the objective.
+    enable_solver_robustness_check: bool = False
+    # Methods to re-solve with and compare against the deterministic default (highs-ds).
+    solver_robustness_methods: tuple[str, ...] = ("highs", "highs-ipm")
     sequence_role: str = "unknown"
     normalization_mode: str = "as_provided"
     contains_signal_peptide: bool | None = None

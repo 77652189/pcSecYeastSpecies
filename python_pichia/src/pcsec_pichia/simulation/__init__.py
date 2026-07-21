@@ -15,6 +15,7 @@ from pcsec_pichia.probe import (
     SecretoryEnzymeData,
     SolveResult,
     TargetSpec,
+    DEFAULT_SOLVER_METHOD,
     build_pcsec_constraint_matrices,
     build_supported_target_model,
     build_target_enzymedata,
@@ -117,8 +118,15 @@ def solve_secretion_capacity(
     growth_rate: float = 0.10,
     write_ribosome_translation_constraint: bool = False,
     write_misfolding_constraints: bool = False,
+    solver_method: str = DEFAULT_SOLVER_METHOD,
 ) -> SecretionSimulationResult:
-    """Solve fixed-growth pcSec secretion capacity for one target."""
+    """Solve fixed-growth pcSec secretion capacity for one target.
+
+    `solver_method` defaults to `DEFAULT_SOLVER_METHOD` ("highs-ds", deterministic); the
+    solver-robustness check re-solves with the other methods ("highs"/"highs-ipm") to test
+    whether the LP-attribution bottleneck is stable across solver algorithms (dual solutions
+    are non-unique at a degenerate optimum).
+    """
 
     prepared = _prepare_target_pcsec_inputs(model, target, amino_acids, secretory, combined)
     if prepared["model"] is None or prepared["exchange_reaction_id"] is None:
@@ -160,6 +168,7 @@ def solve_secretion_capacity(
         ),
         write_ribosome_translation_constraint=write_ribosome_translation_constraint,
         write_misfolding_constraints=write_misfolding_constraints,
+        solver_method=solver_method,
     )
     return SecretionSimulationResult(
         success=solved.success,

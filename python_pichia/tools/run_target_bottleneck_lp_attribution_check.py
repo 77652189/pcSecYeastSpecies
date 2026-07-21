@@ -39,6 +39,11 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--target-id", default="hLF")
     parser.add_argument("--output-root", type=Path, required=True)
+    parser.add_argument(
+        "--enable-solver-robustness",
+        action="store_true",
+        help="R1: also re-solve with highs-ds/highs-ipm and surface the solver-robustness verdict.",
+    )
     return parser.parse_args()
 
 
@@ -53,6 +58,7 @@ def main() -> int:
             target_id=args.target_id,
             candidate_id=candidate_id,
             enable_cost_slope_compatibility=True,
+            enable_solver_robustness_check=bool(args.enable_solver_robustness),
         ),
         output_dir=output_dir,
     )
@@ -69,6 +75,9 @@ def main() -> int:
         "dominant_constraint_blocks": lp_attribution.get("dominant_constraint_blocks"),
         "top_constraint_marginals": lp_attribution.get("top_constraint_marginals"),
         "top_bound_marginals": lp_attribution.get("top_bound_marginals"),
+        "oe_actionable_bottlenecks": lp_attribution.get("oe_actionable_bottlenecks"),
+        "floor_constraints_not_oe_addressable": lp_attribution.get("floor_constraints_not_oe_addressable"),
+        "solver_robustness": protein_cost.get("solver_robustness"),
         "lp_attribution_warnings": lp_attribution.get("warnings"),
         "cost_slope_secretion_ratio_policy": cost_slope.get("secretion_ratio_policy"),
         "cost_slope_capacity_reference": cost_slope.get("capacity_reference"),

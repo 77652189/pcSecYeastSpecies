@@ -20,6 +20,12 @@ AA_PATTERN = re.compile(r"^[ACDEFGHIKLMNPQRSTVWY]+$")
 RULE_TOKEN_PATTERN = re.compile(r"x\((\d+)\)")
 DEFAULT_TRADEOFF_MUS = (0.05, 0.10, 0.20)
 IMPROVEMENT_REL_TOLERANCE = 1e-6
+# Default LP solver method. "highs-ds" (dual simplex) is single-threaded and deterministic
+# on these degenerate pcSec LPs; the auto "highs" strategy races parallel algorithms and
+# returns run-to-run-varying optima (~2e-6), which is not acceptable for a reproducible
+# scientific model. The R1 solver-robustness check re-solves with the other methods to detect
+# a degenerate/solver-dependent bottleneck attribution.
+DEFAULT_SOLVER_METHOD = "highs-ds"
 # A small minority of KO/OE bound configurations produce a numerically pathological LP that
 # HiGHS cannot solve or prove infeasible in any reasonable time (observed: 30+ minutes, still
 # climbing, for a handful of complex-formation reactions sharing enzyme-budget coupling with
@@ -784,7 +790,12 @@ def accumulate(stoich: dict[str, float], metabolite_id: str, coefficient: float)
         del stoich[metabolite_id]
 
 
-def solve_maximize(model: CobraModel, objective_reaction: str, key_reactions: Iterable[str] = ()) -> SolveResult:
+def solve_maximize(
+    model: CobraModel,
+    objective_reaction: str,
+    key_reactions: Iterable[str] = (),
+    solver_method: str = DEFAULT_SOLVER_METHOD,
+) -> SolveResult:
     reaction_index = model.reaction_index
     if objective_reaction not in reaction_index:
         return SolveResult(objective_reaction, "missing_objective", False, None, "Objective reaction not found.", {})
@@ -796,7 +807,7 @@ def solve_maximize(model: CobraModel, objective_reaction: str, key_reactions: It
         A_eq=model.s_matrix,
         b_eq=model.b,
         bounds=bounds,
-        method="highs",
+        method=solver_method,
         options={"presolve": True, "disp": False},
     )
     fluxes: dict[str, float] = {}
@@ -830,6 +841,7 @@ def solve_pcsec_maximize(
     write_ribosome_translation_constraint: bool = False,
     write_misfolding_constraints: bool = False,
     time_limit_seconds: float = DEFAULT_SOLVER_TIME_LIMIT_SECONDS,
+    solver_method: str = DEFAULT_SOLVER_METHOD,
 ) -> tuple[SolveResult, dict[str, int]]:
     reaction_index = model.reaction_index
     if objective_reaction not in reaction_index:
@@ -858,7 +870,7 @@ def solve_pcsec_maximize(
         A_ub=A_ub,
         b_ub=b_ub,
         bounds=list(zip(model.lb.tolist(), model.ub.tolist())),
-        method="highs",
+        method=solver_method,
         options={"presolve": True, "disp": False, "time_limit": time_limit_seconds},
     )
     fluxes: dict[str, float] = {}

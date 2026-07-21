@@ -54,6 +54,7 @@ class PichiaSecretionRunRequest(BaseModel):
     growth_points: list[float] = Field(default_factory=list)  # empty = auto grid around mu
     enable_cost_slope_compatibility: bool = False
     cost_slope_medium_compatibility_mode: str = "corrected"
+    enable_solver_robustness_check: bool = False
     mu: float = 0.10
     media_type: int = 4
     carbon_source_id: str = "glucose"
@@ -87,6 +88,7 @@ class PichiaSecretionRunRequest(BaseModel):
             growth_points=tuple(self.growth_points),
             enable_cost_slope_compatibility=self.enable_cost_slope_compatibility,
             cost_slope_medium_compatibility_mode=self.cost_slope_medium_compatibility_mode,
+            enable_solver_robustness_check=self.enable_solver_robustness_check,
             mu=self.mu,
             media_type=self.media_type,
             carbon_source_id=self.carbon_source_id,

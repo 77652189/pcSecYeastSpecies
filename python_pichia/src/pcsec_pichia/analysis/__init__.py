@@ -49,6 +49,34 @@ class ProteinLpAttributionResult:
     target_related_fluxes: tuple[dict[str, object], ...]
     active_bound_counts: dict[str, int]
     warnings: tuple[str, ...]
+    # R1 (ADR-004): bound_type-segregated bottleneck view. OE relaxes UPPER-bound
+    # capacity ceilings, so only binding upper bounds are OE-actionable leads; binding
+    # lower bounds (floors) are kept in a separate list so they are never read as OE
+    # bottlenecks (the confirmed PDI1-alone / ribosome false positives live here).
+    oe_actionable_bottlenecks: tuple[dict[str, object], ...] = ()
+    floor_constraints_not_oe_addressable: tuple[dict[str, object], ...] = ()
+
+
+@dataclass(frozen=True)
+class SolverRobustnessResult:
+    """R1 (ADR-004) solver-robustness of the LP-attribution bottleneck.
+
+    Shadow-price / dual solutions are non-unique at a degenerate optimum, so the same LP
+    can attribute the bottleneck to a different resource depending on the solver algorithm.
+    This compares the top OE-actionable bottleneck and top dominant block across solver
+    methods; a bottleneck that flips across solvers is a numerical artifact, not a
+    biological conclusion.
+    """
+
+    target_id: str
+    result_status: str
+    methods: tuple[str, ...]
+    per_method: tuple[dict[str, object], ...]
+    top_bottleneck_stable: bool
+    top_block_stable: bool
+    classification: str
+    detail: str
+    warnings: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -139,6 +167,14 @@ def analyze_target_protein_lp_attribution(
     lower_marginals = tuple(float(value) for value in sensitivity.get("lower_marginals", ()))
     upper_marginals = tuple(float(value) for value in sensitivity.get("upper_marginals", ()))
     blocks = _constraint_blocks(constraint_counts, len(eq_marginals), len(ub_marginals))
+    oe_actionable, floor_only = _oe_actionable_bottlenecks(
+        lower_marginals,
+        upper_marginals,
+        reaction_ids=reaction_ids,
+        target=target,
+        plan=plan,
+        top_n=top_n,
+    )
     return ProteinLpAttributionResult(
         target_id=target.target_id,
         result_status="draft_lp_sensitivity",
@@ -159,6 +195,8 @@ def analyze_target_protein_lp_attribution(
             "upper_marginal_nonzero": _nonzero_count(upper_marginals),
             "total_bound_marginal_nonzero": _nonzero_count(lower_marginals) + _nonzero_count(upper_marginals),
         },
+        oe_actionable_bottlenecks=oe_actionable,
+        floor_constraints_not_oe_addressable=floor_only,
         warnings=(
             "LP sensitivity is a Python draft based on SciPy HiGHS marginals; it is not MATLAB/SoPlex fully aligned shadow pricing.",
             "The maximization problem is solved through SciPy minimization, so signs should be interpreted as draft sensitivity evidence.",
@@ -168,6 +206,10 @@ def analyze_target_protein_lp_attribution(
             "bound_type before treating a large top_bound_marginals entry as an OE-testable lead (confirmed in "
             "practice: PDI1-alone and ribosome assembly both showed large lower-bound marginals but ~0 measured OE "
             "effect in reaction_oe_tradeoff).",
+            "oe_actionable_bottlenecks lists only binding UPPER-bound ceilings (what OE can relax); "
+            "floor_constraints_not_oe_addressable holds the lower bounds that OE cannot resolve. "
+            "An OE-actionable ceiling is a lead, not a guarantee: coupling can shift the bottleneck once relaxed, "
+            "so cross-check each lead against a real reaction_oe_tradeoff before treating it as an OE win.",
         ),
     )
 
@@ -265,8 +307,111 @@ def summarize_protein_lp_attribution(result: ProteinLpAttributionResult) -> dict
         "dominant_constraint_blocks": list(result.dominant_constraint_blocks),
         "top_constraint_marginals": list(result.top_constraint_marginals),
         "top_bound_marginals": list(result.top_bound_marginals),
+        "oe_actionable_bottlenecks": list(result.oe_actionable_bottlenecks),
+        "floor_constraints_not_oe_addressable": list(result.floor_constraints_not_oe_addressable),
         "target_related_fluxes": list(result.target_related_fluxes),
         "active_bound_counts": result.active_bound_counts,
+        "warnings": list(result.warnings),
+    }
+
+
+def compare_solver_robustness(
+    target_id: str,
+    attributions_by_method: dict[str, ProteinLpAttributionResult],
+) -> SolverRobustnessResult:
+    """Compare the LP-attribution bottleneck across solver methods (pure, no solving).
+
+    Takes already-computed attributions keyed by solver method and checks whether the top
+    OE-actionable bottleneck reaction and the top dominant constraint block agree across
+    methods. Disagreement means the attribution is solver-degenerate and must not be read as
+    a biological bottleneck.
+    """
+
+    methods = tuple(attributions_by_method.keys())
+    per_method: list[dict[str, object]] = []
+    top_bottlenecks: list[str | None] = []
+    top_blocks: list[str | None] = []
+    any_unavailable = False
+    for method, attribution in attributions_by_method.items():
+        top_oe = (
+            str(attribution.oe_actionable_bottlenecks[0]["reaction_id"])
+            if attribution.oe_actionable_bottlenecks
+            else None
+        )
+        top_block = (
+            str(attribution.dominant_constraint_blocks[0]["block"])
+            if attribution.dominant_constraint_blocks
+            else None
+        )
+        available = attribution.result_status == "draft_lp_sensitivity"
+        if not available:
+            any_unavailable = True
+        per_method.append(
+            {
+                "method": method,
+                "result_status": attribution.result_status,
+                "top_oe_actionable_reaction_id": top_oe,
+                "top_dominant_block": top_block,
+            }
+        )
+        top_bottlenecks.append(top_oe)
+        top_blocks.append(top_block)
+
+    top_bottleneck_stable = len(set(top_bottlenecks)) <= 1
+    top_block_stable = len(set(top_blocks)) <= 1
+    if len(methods) < 2 or any_unavailable:
+        classification = "inconclusive"
+        detail = (
+            "Fewer than two usable solver methods, or at least one method returned no LP "
+            "sensitivity; cannot judge solver robustness."
+        )
+    elif top_bottleneck_stable and top_block_stable:
+        classification = "ranking-insensitive-to-solver"
+        detail = (
+            "Top OE-actionable bottleneck and top dominant block are identical across all "
+            f"tested solver methods ({', '.join(methods)})."
+        )
+    else:
+        classification = "ranking-sensitive-to-solver"
+        flipped = []
+        if not top_bottleneck_stable:
+            flipped.append(f"top OE-actionable bottleneck ({top_bottlenecks})")
+        if not top_block_stable:
+            flipped.append(f"top dominant block ({top_blocks})")
+        detail = (
+            "Attribution flips across solver methods: "
+            + "; ".join(flipped)
+            + ". This is a degenerate/numerical artifact, not a biological bottleneck."
+        )
+    return SolverRobustnessResult(
+        target_id=target_id,
+        result_status="draft_solver_robustness",
+        methods=methods,
+        per_method=tuple(per_method),
+        top_bottleneck_stable=top_bottleneck_stable,
+        top_block_stable=top_block_stable,
+        classification=classification,
+        detail=detail,
+        warnings=(
+            "Solver robustness re-solves the same LP with different HiGHS algorithms; it does "
+            "not change the corrected pipeline objective, constraints, or default solver.",
+            "A 'ranking-sensitive-to-solver' result means the bottleneck attribution is a "
+            "numerical artifact of a degenerate optimum and must not be reported as a real "
+            "bottleneck.",
+        ),
+    )
+
+
+def summarize_solver_robustness(result: SolverRobustnessResult) -> dict[str, object]:
+    return {
+        "target_id": result.target_id,
+        "result_status": result.result_status,
+        "methods": list(result.methods),
+        "per_method": list(result.per_method),
+        "top_bottleneck_stable": result.top_bottleneck_stable,
+        "top_block_stable": result.top_block_stable,
+        "classification": result.classification,
+        "detail": result.detail,
         "warnings": list(result.warnings),
     }
 
@@ -850,6 +995,48 @@ def _top_bound_marginals(
     return tuple(sorted(rows, key=lambda row: float(row["abs_marginal"]), reverse=True)[:top_n])
 
 
+def _oe_actionable_bottlenecks(
+    lower_marginals: tuple[float, ...],
+    upper_marginals: tuple[float, ...],
+    reaction_ids: tuple[str, ...],
+    target: TargetSpec,
+    plan: SecretionPlanResult,
+    top_n: int,
+) -> tuple[tuple[dict[str, object], ...], tuple[dict[str, object], ...]]:
+    """Segregate binding variable-bound marginals by bound_type.
+
+    OE (run_pcsec_oe_screen) relaxes UPPER-bound capacity ceilings, so only binding upper
+    bounds are OE-actionable leads. Binding lower bounds are floors OE cannot resolve and are
+    returned separately so nothing aggregates them into an OE-bottleneck ranking (the
+    confirmed PDI1-alone / ribosome false positives).
+    """
+
+    oe_actionable: list[dict[str, object]] = []
+    floor_only: list[dict[str, object]] = []
+    for bound_type, values, sink in (
+        ("upper", upper_marginals, oe_actionable),
+        ("lower", lower_marginals, floor_only),
+    ):
+        for index, marginal in enumerate(values):
+            if abs(marginal) <= 1e-12:
+                continue
+            reaction_id = reaction_ids[index] if index < len(reaction_ids) else f"X{index + 1}"
+            sink.append(
+                {
+                    "bound_type": bound_type,
+                    "variable_index_0based": index,
+                    "reaction_id": reaction_id,
+                    "secretory_process": _lp_reaction_process(reaction_id, target, plan),
+                    "marginal": round(float(marginal), 12),
+                    "abs_marginal": round(abs(float(marginal)), 12),
+                    "oe_actionable": bound_type == "upper",
+                }
+            )
+    oe_actionable.sort(key=lambda row: float(row["abs_marginal"]), reverse=True)
+    floor_only.sort(key=lambda row: float(row["abs_marginal"]), reverse=True)
+    return tuple(oe_actionable[:top_n]), tuple(floor_only[:top_n])
+
+
 def _target_related_fluxes(
     target: TargetSpec,
     plan: SecretionPlanResult,
@@ -1054,6 +1241,7 @@ def _json_payload(value: object) -> object:
 __all__ = [
     "GrowthTradeoffPoint",
     "ProteinLpAttributionResult",
+    "SolverRobustnessResult",
     "TargetGrowthAnalysisResult",
     "YieldImprovementCandidateRecommendation",
     "YieldImprovementRecommendationResult",
@@ -1062,8 +1250,10 @@ __all__ = [
     "analyze_yield_improvement_candidates",
     "build_growth_tradeoff_item_table",
     "build_yield_recommendation_table",
+    "compare_solver_robustness",
     "summarize_protein_lp_attribution",
     "summarize_protein_cost_slope_compatibility",
+    "summarize_solver_robustness",
     "summarize_target_growth_analysis",
     "summarize_yield_improvement_recommendations",
 ]

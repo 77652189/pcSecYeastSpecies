@@ -3,9 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 
 from pcsec_pichia.analysis import (
+    ProteinLpAttributionResult,
     analyze_target_protein_lp_attribution,
+    compare_solver_robustness,
     summarize_protein_cost_slope_compatibility,
     summarize_protein_lp_attribution,
+    summarize_solver_robustness,
 )
 from pcsec_pichia.simulation import ProteinCostSlopeCompatibilityResult
 from pcsec_pichia.secretion_plan import build_secretion_plan
@@ -76,6 +79,120 @@ def test_lp_attribution_summarizes_top_n_without_full_marginal_arrays() -> None:
     assert summary["active_bound_counts"]["total_bound_marginal_nonzero"] == 2
     assert "eq_marginals" not in summary
     assert "lower_marginals" not in summary
+
+
+def test_oe_actionable_bottlenecks_exclude_lower_bound_floor() -> None:
+    # R1 (ADR-004): the biggest bound marginal here is a LOWER bound (floor, abs 0.8) that
+    # OE cannot relax; the OE-addressable one is a smaller UPPER bound (abs 0.6). The derived
+    # oe_actionable list must contain only the upper bound and never the larger lower one -
+    # this is the PDI1-alone / ribosome false-positive guard made programmatic.
+    target = _builtin("OPN_ALPHA_FULL_PROJECT")
+    plan = build_secretion_plan(target)
+    simulation = SecretionSimulationResult(
+        success=True,
+        target_id=target.target_id,
+        objective_value=0.006,
+        growth_rate=0.10,
+        secretion_flux=0.006,
+        status="0",
+        message="ok",
+        constraint_counts={"stoichiometric": 7, "eq_total": 7, "ub_total": 1},
+        result_status="draft",
+        target_parameter_status="draft",
+        matlab_alignment_status="pending",
+        exchange_reaction_id="r_OPN_ALPHA_FULL_PROJECT_exchange",
+        build_status="supported",
+        lp_sensitivity={
+            "eq_marginals": (0.0,) * 7,
+            "ub_marginals": (0.0,),
+            "lower_marginals": (0.0, -0.8, 0.0, 0.0),
+            "upper_marginals": (0.0, 0.0, 0.6, 0.0),
+        },
+        key_fluxes={"BIOMASS": 0.10},
+    )
+    reaction_ids = ("BIOMASS", "r_OPN_ALPHA_FULL_PROJECT_exchange", "Ex_glc_D", "OTHER")
+
+    result = analyze_target_protein_lp_attribution(
+        target, plan, simulation.constraint_counts, simulation, reaction_ids=reaction_ids, top_n=5
+    )
+
+    oe_ids = [row["reaction_id"] for row in result.oe_actionable_bottlenecks]
+    floor_ids = [row["reaction_id"] for row in result.floor_constraints_not_oe_addressable]
+    assert oe_ids == ["Ex_glc_D"]
+    assert all(row["bound_type"] == "upper" and row["oe_actionable"] is True for row in result.oe_actionable_bottlenecks)
+    # the larger lower-bound floor is segregated, never promoted into the OE-actionable list
+    assert "r_OPN_ALPHA_FULL_PROJECT_exchange" in floor_ids
+    assert "r_OPN_ALPHA_FULL_PROJECT_exchange" not in oe_ids
+    assert all(row["bound_type"] == "lower" for row in result.floor_constraints_not_oe_addressable)
+    summary = summarize_protein_lp_attribution(result)
+    assert summary["oe_actionable_bottlenecks"] == list(result.oe_actionable_bottlenecks)
+    assert summary["floor_constraints_not_oe_addressable"] == list(result.floor_constraints_not_oe_addressable)
+
+
+def _attr_with_top_bottleneck(reaction_id: str, block: str) -> ProteinLpAttributionResult:
+    return ProteinLpAttributionResult(
+        target_id="hLF",
+        result_status="draft_lp_sensitivity",
+        objective_evidence={},
+        dominant_constraint_blocks=({"block": block, "sum_abs_marginal": 1.0},),
+        top_constraint_marginals=(),
+        top_bound_marginals=(),
+        target_related_fluxes=(),
+        active_bound_counts={},
+        warnings=(),
+        oe_actionable_bottlenecks=({"reaction_id": reaction_id, "bound_type": "upper", "abs_marginal": 1.0},),
+    )
+
+
+def test_compare_solver_robustness_flags_solver_dependent_bottleneck() -> None:
+    stable = compare_solver_robustness(
+        "hLF",
+        {
+            "highs": _attr_with_top_bottleneck("sec_X_complex_formation", "secretory_coupling"),
+            "highs-ds": _attr_with_top_bottleneck("sec_X_complex_formation", "secretory_coupling"),
+        },
+    )
+    assert stable.classification == "ranking-insensitive-to-solver"
+    assert stable.top_bottleneck_stable is True
+
+    flipped = compare_solver_robustness(
+        "hLF",
+        {
+            "highs": _attr_with_top_bottleneck("sec_X_complex_formation", "secretory_coupling"),
+            "highs-ipm": _attr_with_top_bottleneck("sec_Y_complex_formation", "secretory_coupling"),
+        },
+    )
+    assert flipped.classification == "ranking-sensitive-to-solver"
+    assert flipped.top_bottleneck_stable is False
+    assert summarize_solver_robustness(flipped)["classification"] == "ranking-sensitive-to-solver"
+
+    inconclusive = compare_solver_robustness(
+        "hLF", {"highs": _attr_with_top_bottleneck("sec_X_complex_formation", "secretory_coupling")}
+    )
+    assert inconclusive.classification == "inconclusive"
+
+    # a re-solve that errored is fed in as an unavailable attribution: even with a good
+    # method present, the verdict degrades to inconclusive rather than pretending stability.
+    errored = ProteinLpAttributionResult(
+        target_id="hLF",
+        result_status="draft_lp_sensitivity_unavailable",
+        objective_evidence={},
+        dominant_constraint_blocks=(),
+        top_constraint_marginals=(),
+        top_bound_marginals=(),
+        target_related_fluxes=(),
+        active_bound_counts={},
+        warnings=(),
+    )
+    with_error = compare_solver_robustness(
+        "hLF",
+        {
+            "highs": _attr_with_top_bottleneck("sec_X_complex_formation", "secretory_coupling"),
+            "highs-ipm": errored,
+        },
+    )
+    assert with_error.classification == "inconclusive"
+    assert any(row["result_status"] == "draft_lp_sensitivity_unavailable" for row in with_error.per_method)
 
 
 def test_lp_attribution_handles_missing_sensitivity_without_crashing() -> None:

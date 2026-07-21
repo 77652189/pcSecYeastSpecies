@@ -5,11 +5,14 @@ from pathlib import Path
 from typing import Any
 
 from pcsec_pichia.analysis import (
+    ProteinLpAttributionResult,
     analyze_target_growth_impact,
     analyze_target_protein_lp_attribution,
     analyze_yield_improvement_candidates,
+    compare_solver_robustness,
     summarize_protein_cost_slope_compatibility,
     summarize_protein_lp_attribution,
+    summarize_solver_robustness,
     summarize_target_growth_analysis,
     summarize_yield_improvement_recommendations,
 )
@@ -57,6 +60,7 @@ from pcsec_pichia.services.gene_rule_overlay import (
     build_gpr_overlay,
     load_gene_rule_evidence_cache,
 )
+from pcsec_pichia.probe import DEFAULT_SOLVER_METHOD
 from pcsec_pichia.simulation import (
     run_growth_tradeoff,
     run_protein_cost_slope_compatibility,
@@ -78,6 +82,26 @@ HLF_PROJECT_710_ALIGNMENT_ARTIFACT = (
     / "hlf_project_sequence_matlab_harness_2026-06-26"
     / "hlf_project_sequence_matlab_harness_summary.json"
 )
+
+
+def _solver_method_error_attribution(target_id: str) -> ProteinLpAttributionResult:
+    """Placeholder attribution for a solver-robustness re-solve that raised.
+
+    Marked unavailable so compare_solver_robustness records the errored method and returns
+    an "inconclusive" verdict, instead of the exception aborting the primary run.
+    """
+
+    return ProteinLpAttributionResult(
+        target_id=target_id,
+        result_status="draft_lp_sensitivity_unavailable",
+        objective_evidence={},
+        dominant_constraint_blocks=(),
+        top_constraint_marginals=(),
+        top_bound_marginals=(),
+        target_related_fluxes=(),
+        active_bound_counts={},
+        warnings=("Solver-robustness re-solve failed for this method; recorded as unavailable.",),
+    )
 
 
 def run_pichia_secretion_simulation(
@@ -116,13 +140,48 @@ def run_pichia_secretion_simulation(
         write_ribosome_translation_constraint=request.enable_ribosome_translation_constraint,
         write_misfolding_constraints=request.enable_misfolding_constraint,
     )
+    reaction_ids = tuple(inputs.prepared_model.rxns)
     lp_attribution = analyze_target_protein_lp_attribution(
         target,
         plan,
         constraint_result.constraint_counts,
         simulation,
-        reaction_ids=tuple(inputs.prepared_model.rxns),
+        reaction_ids=reaction_ids,
     )
+    solver_robustness = None
+    if request.enable_solver_robustness_check:
+        # Baseline attribution came from the default solver (DEFAULT_SOLVER_METHOD); re-solve
+        # with the configured alternate methods and compare, skipping any that equal the default.
+        attributions_by_method = {DEFAULT_SOLVER_METHOD: lp_attribution}
+        for method in request.solver_robustness_methods:
+            if method == DEFAULT_SOLVER_METHOD:
+                continue
+            # This is an opt-in diagnostic re-solve; a bad/unsupported solver method (or any
+            # re-solve failure) must degrade the robustness verdict to "inconclusive", never
+            # take down the primary simulation result that was already computed above.
+            try:
+                alt_simulation = solve_secretion_capacity(
+                    inputs.prepared_model,
+                    target,
+                    inputs.amino_acids,
+                    inputs.metabolic,
+                    inputs.secretory,
+                    inputs.combined,
+                    growth_rate=request.mu,
+                    write_ribosome_translation_constraint=request.enable_ribosome_translation_constraint,
+                    write_misfolding_constraints=request.enable_misfolding_constraint,
+                    solver_method=method,
+                )
+                attributions_by_method[method] = analyze_target_protein_lp_attribution(
+                    target,
+                    plan,
+                    constraint_result.constraint_counts,
+                    alt_simulation,
+                    reaction_ids=reaction_ids,
+                )
+            except Exception:  # noqa: BLE001 - diagnostic must not break the primary run
+                attributions_by_method[method] = _solver_method_error_attribution(target.target_id)
+        solver_robustness = compare_solver_robustness(target.target_id, attributions_by_method)
     cost_slope_compatibility = None
     if request.enable_cost_slope_compatibility:
         cost_slope_ratios, cost_slope_policy = _cost_slope_secretion_ratio_policy(request, simulation)
@@ -322,8 +381,11 @@ def run_pichia_secretion_simulation(
             "result_status": "draft_cost_slope_analysis",
             "lp_attribution": summarize_protein_lp_attribution(lp_attribution),
             "cost_slope_compatibility": summarize_protein_cost_slope_compatibility(cost_slope_compatibility),
+            "solver_robustness": (
+                summarize_solver_robustness(solver_robustness) if solver_robustness is not None else None
+            ),
         }
-        if cost_slope_compatibility is not None
+        if cost_slope_compatibility is not None or solver_robustness is not None
         else None
     )
     medium_condition = medium_condition_summary_for_inputs(inputs)
