@@ -84,6 +84,11 @@ def run_pichia_pipeline_draft(
         if isinstance(summary_payload.get("yield_improvement_recommendations"), dict)
         else {}
     )
+    value_of_information = (
+        summary_payload.get("value_of_information")
+        if isinstance(summary_payload.get("value_of_information"), dict)
+        else {}
+    )
     medium_condition = (
         summary_payload.get("medium_condition")
         if isinstance(summary_payload.get("medium_condition"), dict)
@@ -110,6 +115,7 @@ def run_pichia_pipeline_draft(
         protein_cost_analysis=dict(protein_cost),
         target_growth_analysis=dict(target_growth),
         yield_improvement_recommendations=dict(yield_recommendations),
+        value_of_information=dict(value_of_information),
         medium_condition=dict(medium_condition),
     )
 

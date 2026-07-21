@@ -536,14 +536,15 @@ def test_streamlit_relative_signal_charts_render_biologist_facing_figures() -> N
         _short_reaction_label,
     )
 
-    # biologist-facing labels: strip boilerplate suffix, middle-truncate huge ids, and fill the
-    # dominant folding layer that the engine leaves as 'unknown' (marked as an inference).
+    # biologist-facing labels: strip boilerplate suffix, middle-truncate huge ids, and localize the
+    # engine-provided secretory_process code (the engine now classifies sec_* complexes itself, so
+    # this is a straight vocabulary lookup with no name-based inference).
     assert _short_reaction_label("sec_Pdi1p_complex_formation") == "sec_Pdi1p"
     long_id = "PAS_chr2-2_0475_COPII_ERGL_sec_Ypt1p_Uso1p_Bet3p_Bet5p_Trs20p_Trs23p_Trs31p_Trs33p_complex"
     assert len(_short_reaction_label(long_id)) <= 34 and "…" in _short_reaction_label(long_id)
-    assert "折叠" in _resource_layer_label("sec_Pdi1p_complex_formation", "unknown")  # PDI -> folding (inferred)
-    assert _resource_layer_label("Mach_Ribosome_complex_formation", "ribosome") == "翻译（核糖体）"
-    assert _resource_layer_label("some_opaque_reaction", "unknown") == "未解析"  # no wild guessing
+    assert _resource_layer_label("disulfide_folding") == "二硫键折叠 / DSB"  # PDI floor, classified by the engine
+    assert _resource_layer_label("ribosome") == "翻译（核糖体）"
+    assert _resource_layer_label("unknown") == "未解析"  # unmapped code degrades gracefully, no guessing
 
     # R2 dose-response -> factor on x, relative gain (%) on y, baseline factor 1.0 anchors at 0%
     oe_payload = {
@@ -566,27 +567,30 @@ def test_streamlit_relative_signal_charts_render_biologist_facing_figures() -> N
     assert curve.loc[curve["过表达倍数"] == 1.0, "分泌相对提升(%)"].iloc[0] == 0.0
     assert "饱和型" in curve["反应｜形状"].iloc[0]
 
-    # R1 OE-actionable bottlenecks -> horizontal bar with the resource layer localized to Chinese
+    # R1 OE-actionable bottlenecks -> horizontal bar with the resource layer localized to Chinese.
+    # secretory_process codes are the engine's own (sec_Pdi1p -> disulfide_folding), not inferred.
     lp_payload = {
         "oe_actionable_bottlenecks": [
-            {"reaction_id": "sec_Pdi1p_complex_formation", "abs_marginal": 0.92, "secretory_process": "chaperone_folding"},
+            {"reaction_id": "sec_Pdi1p_complex_formation", "abs_marginal": 0.92, "secretory_process": "disulfide_folding"},
             {"reaction_id": "Mach_Ribosome_complex_formation", "abs_marginal": 0.5, "secretory_process": "ribosome"},
         ]
     }
     bars = _lp_oe_bottleneck_frame(lp_payload)
-    assert set(bars["分泌资源层"]) == {"分子伴侣折叠", "翻译（核糖体）"}
+    assert set(bars["分泌资源层"]) == {"二硫键折叠 / DSB", "翻译（核糖体）"}
     assert bars["影子价格(绝对值)"].max() == 0.92
 
-    # the large lower-bound floors are the 'why is it limited' answer and are charted separately
+    # the large lower-bound floors are the 'why is it limited' answer and are charted separately.
+    # hLF's dominant floor is the PDI disulfide-folding complex: the engine tags it disulfide_folding
+    # in the payload (it used to fall through to 'unknown'), so it charts as the folding layer here.
     floor_payload = {
         "floor_constraints_not_oe_addressable": [
-            {"reaction_id": "sec_Pdi1p_complex_formation", "abs_marginal": 5073.9, "secretory_process": "unknown"},
+            {"reaction_id": "sec_Pdi1p_complex_formation", "abs_marginal": 5073.9, "secretory_process": "disulfide_folding"},
             {"reaction_id": "Mach_Ribosome_complex_formation", "abs_marginal": 180.8, "secretory_process": "ribosome"},
         ]
     }
     floors = _lp_floor_bottleneck_frame(floor_payload)
     assert floors["影子价格(绝对值)"].max() == 5073.9
-    assert "翻译（核糖体）" in set(floors["分泌资源层"])
+    assert set(floors["分泌资源层"]) == {"二硫键折叠 / DSB", "翻译（核糖体）"}
 
 
 def test_streamlit_value_of_information_panel_is_localized_and_chart_backed() -> None:
@@ -1530,6 +1534,12 @@ def test_response_summary_exposes_target_metadata_and_warnings() -> None:
             "summary_counts": {"recommended": 1, "not_recommended": 0, "unresolved": 0},
             "recommended_candidates": [{"display_name": "PEP4"}],
         },
+        value_of_information={
+            "result_status": "draft_value_of_information",
+            "has_actionable_ambiguity": False,
+            "ranked_candidates": [{"rank": 1, "candidate_id": "PEP4", "score": 0.5}],
+            "information_items": [],
+        },
         medium_condition={
             "condition_id": "glucose_glycerol_ynb_core_aa_corrected",
             "carbon_source_id": "glucose_glycerol",
@@ -1553,6 +1563,10 @@ def test_response_summary_exposes_target_metadata_and_warnings() -> None:
     assert summary["target_growth_analysis"]["growth_sensitivity_label"] == "increasing"
     assert summary["target_growth_analysis"]["growth_sensitivity_reason"] == "monotonic_increasing_successful_grid"
     assert summary["yield_improvement_recommendations"]["result_status"] == "draft_model_recommendation"
+    # R4 (value-of-information) must flow through the cached response dict the results page reads,
+    # not only via the summary-file fallback, so the panel renders consistently with the others.
+    assert summary["value_of_information"]["result_status"] == "draft_value_of_information"
+    assert summary["value_of_information"]["ranked_candidates"][0]["candidate_id"] == "PEP4"
     assert summary["yield_improvement_recommendations"]["recommended_candidates"][0]["display_name"] == "PEP4"
     assert summary["medium_condition"]["condition_id"] == "glucose_glycerol_ynb_core_aa_corrected"
     assert summary["medium_condition"]["scientific_status"] == "draft_co_carbon_boundary_requires_promoter_context"

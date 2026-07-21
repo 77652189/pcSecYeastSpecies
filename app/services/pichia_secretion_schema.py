@@ -76,6 +76,7 @@ class SecretionRunResponse:
     protein_cost_analysis: dict[str, Any] = field(default_factory=dict)
     target_growth_analysis: dict[str, Any] = field(default_factory=dict)
     yield_improvement_recommendations: dict[str, Any] = field(default_factory=dict)
+    value_of_information: dict[str, Any] = field(default_factory=dict)
     medium_condition: dict[str, Any] = field(default_factory=dict)
 
 

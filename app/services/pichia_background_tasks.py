@@ -136,6 +136,7 @@ def response_to_summary(response: SecretionRunResponse) -> dict[str, Any]:
         "protein_cost_analysis": response.protein_cost_analysis,
         "target_growth_analysis": response.target_growth_analysis,
         "yield_improvement_recommendations": response.yield_improvement_recommendations,
+        "value_of_information": response.value_of_information,
         "medium_condition": response.medium_condition,
     }
 
