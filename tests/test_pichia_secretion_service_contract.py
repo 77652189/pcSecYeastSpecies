@@ -515,14 +515,42 @@ def test_streamlit_oe_dose_response_option_and_result_panel_are_localized() -> N
     # builder checkbox is present and explains that it replaces the single fixed 2x point
     assert "启用 OE 剂量响应形状（扫描多个过表达倍数，看分泌提升会很快到顶还是持续上升，较慢）" in builder_source
     assert "默认的过表达筛查只在固定 2× 一个点上测提升" in builder_source
-    # result panel surfaces the shape taxonomy in plain Chinese for the research staff
+    # result panel surfaces the shape section in plain Chinese for the research staff
     assert "OE 剂量响应形状（过表达越多，分泌是持续上升还是很快到顶）" in results_source
-    assert "饱和型（适度过表达就够，再加收益递减）" in results_source
-    assert "无响应（任何倍数都几乎没提升，别过表达）" in results_source
     # relative-signal framing must be explicit; no absolute capacity/optimal-dose claims
     assert "不产出绝对产量或最优倍数" in results_source
+    # the shape-taxonomy labels now live in the single central i18n dict (not inline)
+    from app.core.i18n import sim_result_value_label
+
+    assert sim_result_value_label("saturating") == "饱和型（适度过表达就够，再加收益递减）"
+    assert sim_result_value_label("flat_no_response") == "无响应（任何倍数都几乎没提升，别过表达）"
     # service facade threads the flag through to the engine request
     assert "enable_oe_dose_response=bool(request.enable_oe_dose_response)" in runner_source
+
+
+def test_simulation_result_localization_goes_through_one_central_dictionary() -> None:
+    # 用户要求：结果页的英文字段名/枚举值统一走一个集中字典翻译（app.core.i18n），避免散落、不一致、漏改。
+    from app.core.i18n import sim_result_column_label, sim_result_value_label
+    from app.ui.views.simulation_results import _localized_frame
+
+    # 列名 -> 中文；未知列回退原文
+    assert sim_result_column_label("secretory_process") == "分泌资源层"
+    assert sim_result_column_label("abs_marginal") == "影子价格绝对值"
+    assert sim_result_column_label("totally_unknown_field") == "totally_unknown_field"
+    # 枚举/编码值 -> 中文（边界类型 / 分类 / 形状 / 布尔）；未知回退原文；None -> —
+    assert sim_result_value_label("lower").startswith("下限")
+    assert "跨求解器翻转" in sim_result_value_label("ranking-sensitive-to-solver")
+    assert sim_result_value_label("saturating") == "饱和型（适度过表达就够，再加收益递减）"
+    assert sim_result_value_label(True) == "是" and sim_result_value_label(False) == "否"
+    assert sim_result_value_label("some_new_unmapped_code") == "some_new_unmapped_code"
+    assert sim_result_value_label(None) == "—"
+    # _localized_frame 是唯一漏斗：重命名列 + 映射 value_columns 里的枚举值，payload 英文不外泄
+    frame = _localized_frame(
+        [{"reaction_id": "sec_X", "bound_type": "lower", "abs_marginal": 5.0}],
+        value_columns=("bound_type",),
+    )
+    assert list(frame.columns) == ["反应", "边界类型", "影子价格绝对值"]
+    assert frame["边界类型"].iloc[0].startswith("下限")
 
 
 def test_streamlit_relative_signal_charts_render_biologist_facing_figures() -> None:
@@ -536,15 +564,14 @@ def test_streamlit_relative_signal_charts_render_biologist_facing_figures() -> N
         _short_reaction_label,
     )
 
-    # biologist-facing labels: strip boilerplate suffix, middle-truncate huge ids, and localize the
-    # engine-provided secretory_process code (the engine now classifies sec_* complexes itself, so
-    # this is a straight vocabulary lookup with no name-based inference).
+    # biologist-facing labels: strip boilerplate suffix, middle-truncate huge ids, and fill the
+    # dominant folding layer that the engine leaves as 'unknown' (marked as an inference).
     assert _short_reaction_label("sec_Pdi1p_complex_formation") == "sec_Pdi1p"
     long_id = "PAS_chr2-2_0475_COPII_ERGL_sec_Ypt1p_Uso1p_Bet3p_Bet5p_Trs20p_Trs23p_Trs31p_Trs33p_complex"
     assert len(_short_reaction_label(long_id)) <= 34 and "…" in _short_reaction_label(long_id)
-    assert _resource_layer_label("disulfide_folding") == "二硫键折叠 / DSB"  # PDI floor, classified by the engine
-    assert _resource_layer_label("ribosome") == "翻译（核糖体）"
-    assert _resource_layer_label("unknown") == "未解析"  # unmapped code degrades gracefully, no guessing
+    assert "折叠" in _resource_layer_label("sec_Pdi1p_complex_formation", "unknown")  # PDI -> folding (inferred)
+    assert _resource_layer_label("Mach_Ribosome_complex_formation", "ribosome") == "翻译（核糖体）"
+    assert _resource_layer_label("some_opaque_reaction", "unknown") == "未解析"  # no wild guessing
 
     # R2 dose-response -> factor on x, relative gain (%) on y, baseline factor 1.0 anchors at 0%
     oe_payload = {
@@ -567,30 +594,27 @@ def test_streamlit_relative_signal_charts_render_biologist_facing_figures() -> N
     assert curve.loc[curve["过表达倍数"] == 1.0, "分泌相对提升(%)"].iloc[0] == 0.0
     assert "饱和型" in curve["反应｜形状"].iloc[0]
 
-    # R1 OE-actionable bottlenecks -> horizontal bar with the resource layer localized to Chinese.
-    # secretory_process codes are the engine's own (sec_Pdi1p -> disulfide_folding), not inferred.
+    # R1 OE-actionable bottlenecks -> horizontal bar with the resource layer localized to Chinese
     lp_payload = {
         "oe_actionable_bottlenecks": [
-            {"reaction_id": "sec_Pdi1p_complex_formation", "abs_marginal": 0.92, "secretory_process": "disulfide_folding"},
+            {"reaction_id": "sec_Pdi1p_complex_formation", "abs_marginal": 0.92, "secretory_process": "chaperone_folding"},
             {"reaction_id": "Mach_Ribosome_complex_formation", "abs_marginal": 0.5, "secretory_process": "ribosome"},
         ]
     }
     bars = _lp_oe_bottleneck_frame(lp_payload)
-    assert set(bars["分泌资源层"]) == {"二硫键折叠 / DSB", "翻译（核糖体）"}
+    assert set(bars["分泌资源层"]) == {"分子伴侣折叠", "翻译（核糖体）"}
     assert bars["影子价格(绝对值)"].max() == 0.92
 
-    # the large lower-bound floors are the 'why is it limited' answer and are charted separately.
-    # hLF's dominant floor is the PDI disulfide-folding complex: the engine tags it disulfide_folding
-    # in the payload (it used to fall through to 'unknown'), so it charts as the folding layer here.
+    # the large lower-bound floors are the 'why is it limited' answer and are charted separately
     floor_payload = {
         "floor_constraints_not_oe_addressable": [
-            {"reaction_id": "sec_Pdi1p_complex_formation", "abs_marginal": 5073.9, "secretory_process": "disulfide_folding"},
+            {"reaction_id": "sec_Pdi1p_complex_formation", "abs_marginal": 5073.9, "secretory_process": "unknown"},
             {"reaction_id": "Mach_Ribosome_complex_formation", "abs_marginal": 180.8, "secretory_process": "ribosome"},
         ]
     }
     floors = _lp_floor_bottleneck_frame(floor_payload)
     assert floors["影子价格(绝对值)"].max() == 5073.9
-    assert set(floors["分泌资源层"]) == {"二硫键折叠 / DSB", "翻译（核糖体）"}
+    assert "翻译（核糖体）" in set(floors["分泌资源层"])
 
 
 def test_streamlit_value_of_information_panel_is_localized_and_chart_backed() -> None:

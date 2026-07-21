@@ -13,6 +13,7 @@ from app.services.pichia_background_tasks import (
     poll_background_simulation,
     save_last_result,
 )
+from app.core.i18n import sim_result_column_label, sim_result_value_label
 from app.ui.common import PATHS
 from app.ui.views.candidate_path_graph import render_secretion_path_graph
 from app.ui.views.simulation_display import (
@@ -21,6 +22,22 @@ from app.ui.views.simulation_display import (
     candidate_row_label,
     normalise_candidate_frame_for_display,
 )
+
+
+def _localized_frame(records: object, value_columns: tuple[str, ...] = ()) -> pd.DataFrame:
+    """Raw payload records -> display DataFrame with Chinese column names + mapped enum values.
+
+    Single funnel so the engine payload's English field names / enum codes never leak onto the
+    results page. Values in ``value_columns`` are translated via the central i18n value dict; all
+    column names via the central column dict. Unknown keys/values fall back to their raw text.
+    """
+    frame = pd.DataFrame(list(records or []))
+    if frame.empty:
+        return frame
+    for column in value_columns:
+        if column in frame.columns:
+            frame[column] = frame[column].map(sim_result_value_label)
+    return frame.rename(columns={column: sim_result_column_label(column) for column in frame.columns})
 
 
 def render_pichia_results() -> None:
@@ -254,13 +271,6 @@ def _value_of_information_payload(data: dict[str, object]) -> dict[str, object]:
     return payload if isinstance(payload, dict) else {}
 
 
-_VOI_AMBIGUITY_LABELS = {
-    "near_tie": "近似并列（模型分不清谁更好）",
-    "capacity_flip": "跨容量假设翻转",
-    "solver_flip": "跨求解器翻转",
-}
-
-
 def _render_value_of_information(payload: dict[str, object]) -> None:
     items = [item for item in (payload.get("information_items") or []) if isinstance(item, dict)]
     ranked = [row for row in (payload.get("ranked_candidates") or []) if isinstance(row, dict)]
@@ -305,15 +315,25 @@ def _render_value_of_information(payload: dict[str, object]) -> None:
             st.plotly_chart(figure, use_container_width=True)
 
         if items:
-            rows = [
-                {
-                    "优先级": item.get("priority_rank"),
-                    "歧义类型": _VOI_AMBIGUITY_LABELS.get(str(item.get("ambiguity_kind")), str(item.get("ambiguity_kind"))),
-                    "涉及候选": "、".join(str(candidate) for candidate in (item.get("candidates") or [])),
-                    "建议测量": item.get("suggested_measurement"),
-                }
-                for item in items
-            ]
+            rows = []
+            for item in items:
+                candidate_text = "、".join(
+                    _short_reaction_label(str(candidate)) for candidate in (item.get("candidates") or [])
+                )
+                # Rebuild the measurement suggestion in Chinese from structured fields — the engine
+                # emits it in English (prioritize_value_of_information); the UI owns the localized wording.
+                measurement = (
+                    f"对候选 {candidate_text} 做靶点特异的分泌定量湿实验，消解它们的相对次序"
+                    + ("（影响 top 名次，优先做）" if item.get("resolves_top_of_ranking") else "")
+                )
+                rows.append(
+                    {
+                        "优先级": item.get("priority_rank"),
+                        "歧义类型": sim_result_value_label(item.get("ambiguity_kind")),
+                        "涉及候选": candidate_text,
+                        "建议测量": measurement,
+                    }
+                )
             st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
         for warning in payload.get("warnings") or []:
             st.caption(str(warning))
@@ -323,7 +343,7 @@ def _render_protein_cost_analysis(protein_cost: dict[str, object]) -> None:
     # Only rendered when 启用蛋白成本斜率对比 was on (pipeline.py sets protein_cost_analysis
     # to None otherwise) - everything shown here is LP-solve-derived, not a heuristic score.
     with st.expander("目标蛋白成本分析", expanded=True):
-        st.caption(f"状态: {protein_cost.get('result_status', 'draft_cost_slope_analysis')}")
+        st.caption(f"状态: {sim_result_value_label(protein_cost.get('result_status', 'draft_cost_slope_analysis'))}")
         lp_attribution = protein_cost.get("lp_attribution")
         if isinstance(lp_attribution, dict) and lp_attribution:
             _render_lp_attribution(lp_attribution)
@@ -349,48 +369,24 @@ def _render_solver_robustness(solver_robustness: dict[str, object]) -> None:
     classification = str(solver_robustness.get("classification", "—"))
     c1, c2, c3 = st.columns([2, 1, 1])
     with c1:
-        st.metric("稳健性分类", classification)
+        st.metric("稳健性分类", sim_result_value_label(classification))
     with c2:
-        st.metric("瓶颈跨求解器一致", str(solver_robustness.get("top_bottleneck_stable", "—")))
+        st.metric("瓶颈跨求解器一致", "是" if solver_robustness.get("top_bottleneck_stable") else "否")
     with c3:
-        st.metric("主导块跨求解器一致", str(solver_robustness.get("top_block_stable", "—")))
+        st.metric("主导块跨求解器一致", "是" if solver_robustness.get("top_block_stable") else "否")
     if classification == "ranking-sensitive-to-solver":
         st.warning(str(solver_robustness.get("detail", "")))
     else:
         st.caption(str(solver_robustness.get("detail", "")))
     per_method = solver_robustness.get("per_method") or []
     if per_method:
-        st.dataframe(pd.DataFrame(per_method), use_container_width=True, hide_index=True)
+        st.dataframe(
+            _localized_frame(per_method, value_columns=("result_status", "top_dominant_block")),
+            use_container_width=True,
+            hide_index=True,
+        )
     for warning in solver_robustness.get("warnings") or []:
         st.warning(str(warning))
-
-
-_OE_DOSE_RESPONSE_SHAPE_LABELS = {
-    "saturating": "饱和型（适度过表达就够，再加收益递减）",
-    "linear": "线性型（还在涨，值得进一步加大表达）",
-    "threshold": "阈值型（要超过某个最小倍数才起效）",
-    "flat_no_response": "无响应（任何倍数都几乎没提升，别过表达）",
-    "non_monotonic_numerical_artifact": "非单调（数值假象，不可作结论）",
-    "insufficient_points": "数据点不足",
-}
-
-# Chinese labels for the LP secretory-process / resource-layer codes. Kept local because the
-# Streamlit facade may not import the engine (see test_streamlit_ui_does_not_import_engine_directly).
-_SECRETORY_PROCESS_LABELS = {
-    "ribosome": "翻译（核糖体）",
-    "proteasome_degradation": "蛋白降解（蛋白酶体）",
-    "disulfide_folding": "二硫键折叠 / DSB",
-    "n_glycan_processing": "N-糖基化",
-    "o_glycan_processing": "O-糖基化",
-    "chaperone_folding": "分子伴侣折叠",
-    "erad_misfolding": "错误折叠 / ERAD",
-    "er_translocation": "ER 转运",
-    "er_to_golgi_transport": "ER→Golgi 转运",
-    "golgi_surface_transport": "Golgi→胞外运输",
-    "secretory_capacity": "分泌容量",
-    "metabolic_or_other": "代谢 / 其它",
-    "unknown": "未解析",
-}
 
 
 def _short_reaction_label(reaction_id: str, max_len: int = 34) -> str:
@@ -417,16 +413,16 @@ def _resource_layer_label(reaction_id: str, process: object) -> str:
     labels are marked 「按名称推断」 so they are not mistaken for the engine's own classification.
     """
     code = str(process or "unknown")
-    if code != "unknown" and code in _SECRETORY_PROCESS_LABELS:
-        return _SECRETORY_PROCESS_LABELS[code]
+    if code != "unknown":
+        return sim_result_value_label(code)
     lowered = str(reaction_id).lower()
     if any(token in lowered for token in ("pdi", "ero1", "_ero", "erv")):
         return "二硫键折叠（按名称推断）"
     if "ribosome" in lowered:
-        return "翻译（核糖体）"
+        return sim_result_value_label("ribosome")
     if "misfold" in lowered or "erad" in lowered:
-        return "错误折叠 / ERAD"
-    return _SECRETORY_PROCESS_LABELS.get(code, "未解析")
+        return sim_result_value_label("misfolding_erad")
+    return sim_result_value_label("unknown")
 
 
 def _oe_dose_response_curve_frame(oe_dose_response: dict[str, object]) -> pd.DataFrame:
@@ -440,7 +436,7 @@ def _oe_dose_response_curve_frame(oe_dose_response: dict[str, object]) -> pd.Dat
         if not isinstance(shape, dict):
             continue
         reaction = _short_reaction_label(str(shape.get("reaction_id", "?")))
-        shape_label = _OE_DOSE_RESPONSE_SHAPE_LABELS.get(str(shape.get("shape")), str(shape.get("shape")))
+        shape_label = sim_result_value_label(shape.get("shape"))
         legend = f"{reaction}｜{shape_label}"
         for point in shape.get("point_deltas") or []:
             if not isinstance(point, dict):
@@ -499,14 +495,14 @@ def _render_oe_dose_response(oe_dose_response: dict[str, object]) -> None:
     shapes = [s for s in (oe_dose_response.get("reaction_shapes") or []) if isinstance(s, dict)]
     rows = [
         {
-            "反应": shape.get("reaction_id", "—"),
-            "形状": _OE_DOSE_RESPONSE_SHAPE_LABELS.get(str(shape.get("shape")), str(shape.get("shape"))),
+            "反应": _short_reaction_label(str(shape.get("reaction_id", "—"))),
+            "形状": sim_result_value_label(shape.get("shape")),
             "最大相对增益": _pct(shape.get("max_relative_gain")),
             "半增益倍数(拐点)": (
                 f"{float(shape['half_gain_factor']):g}×" if shape.get("half_gain_factor") is not None else "—"
             ),
             "最强剂量处相对增益": _pct(shape.get("relative_gain_at_max_factor")),
-            "单调不减": shape.get("monotonic_non_decreasing", "—"),
+            "单调不减": sim_result_value_label(shape.get("monotonic_non_decreasing")),
         }
         for shape in shapes
     ]
@@ -573,11 +569,11 @@ def _lp_floor_bottleneck_frame(lp_attribution: dict[str, object]) -> pd.DataFram
 
 def _render_lp_attribution(lp_attribution: dict[str, object]) -> None:
     st.markdown("**LP 级归因证据**")
-    st.caption("Python draft LP sensitivity，基于 SciPy HiGHS marginals；不是 MATLAB/SoPlex fully aligned shadow price。")
+    st.caption("Python 草稿版 LP 灵敏度（基于 SciPy HiGHS 影子价格）；不是 MATLAB/SoPlex 完全对齐的影子价格。")
     objective = lp_attribution.get("objective_evidence") if isinstance(lp_attribution.get("objective_evidence"), dict) else {}
     c1, c2, c3 = st.columns([1, 1, 1])
     with c1:
-        st.metric("LP 归因状态", lp_attribution.get("result_status", "—"))
+        st.metric("LP 归因状态", sim_result_value_label(lp_attribution.get("result_status")))
     with c2:
         st.metric("目标反应", objective.get("objective_reaction", "—") if isinstance(objective, dict) else "—")
     with c3:
@@ -611,7 +607,11 @@ def _render_lp_attribution(lp_attribution: dict[str, object]) -> None:
                 yaxis={"categoryorder": "total ascending"},
             )
             st.plotly_chart(figure, use_container_width=True)
-        st.dataframe(pd.DataFrame(oe_actionable), use_container_width=True, hide_index=True)
+        st.dataframe(
+            _localized_frame(oe_actionable, value_columns=("bound_type", "secretory_process", "oe_actionable")),
+            use_container_width=True,
+            hide_index=True,
+        )
     else:
         st.caption("（当前解没有 binding 的上限产能约束）")
     if floor_only:
@@ -640,24 +640,32 @@ def _render_lp_attribution(lp_attribution: dict[str, object]) -> None:
                 yaxis={"categoryorder": "total ascending"},
             )
             st.plotly_chart(figure, use_container_width=True)
-        st.dataframe(pd.DataFrame(floor_only), use_container_width=True, hide_index=True)
+        st.dataframe(
+            _localized_frame(floor_only, value_columns=("bound_type", "secretory_process", "oe_actionable")),
+            use_container_width=True,
+            hide_index=True,
+        )
 
     sections = (
-        ("主导约束块", "dominant_constraint_blocks"),
-        ("Top constraint marginals", "top_constraint_marginals"),
-        ("Top bound marginals（未按 bound_type 分离的原始表）", "top_bound_marginals"),
-        ("目标相关 flux", "target_related_fluxes"),
+        ("主导约束块（按资源层汇总）", "dominant_constraint_blocks"),
+        ("约束级影子价格 Top", "top_constraint_marginals"),
+        ("边界级影子价格 Top（未按边界类型分离的原始表）", "top_bound_marginals"),
+        ("目标相关通量", "target_related_fluxes"),
     )
     for title, key in sections:
         rows = lp_attribution.get(key) or []
         if rows:
             st.write(f"**{title}**")
-            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+            st.dataframe(
+                _localized_frame(rows, value_columns=("constraint_type", "block", "bound_type", "secretory_process")),
+                use_container_width=True,
+                hide_index=True,
+            )
     counts = lp_attribution.get("active_bound_counts")
     if isinstance(counts, dict) and counts:
-        st.write("**Active bound marginal counts**")
+        st.write("**生效边界影子价格计数**")
         st.dataframe(
-            pd.DataFrame([{"项目": key, "数量": value} for key, value in counts.items()]),
+            pd.DataFrame([{"项目": sim_result_column_label(key), "数量": value} for key, value in counts.items()]),
             use_container_width=True,
             hide_index=True,
         )
@@ -666,18 +674,18 @@ def _render_lp_attribution(lp_attribution: dict[str, object]) -> None:
 
 
 def _render_cost_slope_compatibility(cost_slope: dict[str, object]) -> None:
-    st.markdown("**MATLAB-compatible 蛋白成本 slope（可选）**")
+    st.markdown("**MATLAB 兼容的蛋白成本斜率对比（可选）**")
     st.caption(
-        "当前默认路线是固定生长率、corrected medium、最大化目标蛋白分泌通量；"
-        "历史 MATLAB 成本路线是固定目标分泌比例和生长率、优化 Ex_glc_D，用于 Protein_cost_TP 定义对比。"
+        "当前默认路线是固定生长率、corrected 培养基、最大化目标蛋白分泌通量；"
+        "历史 MATLAB 成本路线是固定目标分泌比例和生长率、优化葡萄糖摄取 Ex_glc_D，用于 Protein_cost_TP 定义对比。"
     )
     c1, c2, c3 = st.columns([1, 1, 1])
     with c1:
-        st.metric("开启状态", str(cost_slope.get("enabled", False)))
+        st.metric("开启状态", sim_result_value_label(cost_slope.get("enabled", False)))
     with c2:
-        st.metric("结果状态", cost_slope.get("result_status", "—"))
+        st.metric("结果状态", sim_result_value_label(cost_slope.get("result_status")))
     with c3:
-        st.metric("成功", str(cost_slope.get("success", "—")))
+        st.metric("成功", sim_result_value_label(cost_slope.get("success")))
     _render_cost_slope_ratio_policy(cost_slope)
     st.caption(
         f"培养基兼容模式: {cost_slope.get('medium_compatibility_mode', 'corrected')}；"
@@ -685,19 +693,23 @@ def _render_cost_slope_compatibility(cost_slope: dict[str, object]) -> None:
     )
     overrides = cost_slope.get("medium_bound_overrides") or []
     if overrides:
-        st.write("**MATLAB legacy medium bound overrides**")
-        st.dataframe(pd.DataFrame(overrides), use_container_width=True, hide_index=True)
+        st.write("**MATLAB 历史培养基边界覆盖**")
+        st.dataframe(_localized_frame(overrides), use_container_width=True, hide_index=True)
 
     sections = (
-        ("Glucose cost slopes", "glucose_cost_slopes"),
-        ("Ribosome cost slopes", "ribosome_cost_slopes"),
-        ("Cost slope rows", "rows"),
+        ("葡萄糖成本斜率", "glucose_cost_slopes"),
+        ("核糖体成本斜率", "ribosome_cost_slopes"),
+        ("成本斜率明细", "rows"),
     )
     for title, key in sections:
         rows = cost_slope.get(key) or []
         if rows:
             st.write(f"**{title}**")
-            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+            st.dataframe(
+                _localized_frame(rows, value_columns=("status", "glucose_cost_status", "success", "cost_key")),
+                use_container_width=True,
+                hide_index=True,
+            )
     comparison_scope = cost_slope.get("comparison_scope")
     if isinstance(comparison_scope, dict) and comparison_scope:
         with st.expander("对比定义", expanded=False):
