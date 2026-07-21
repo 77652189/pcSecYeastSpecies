@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import streamlit as st
 
+from app.core.i18n import sim_result_value_label
 from app.ui.views.simulation_display import display_value
 
 
@@ -27,14 +28,15 @@ def _target_ptm_counts(summary: dict[str, object]) -> dict[str, object]:
 def render_secretion_path_graph(row: dict[str, object], summary: dict[str, object]) -> None:
     """用 graphviz 展示选定候选的分泌路径影响图。"""
     gene = display_value(row.get("input_gene_id") or row.get("gene_id") or row.get("candidate_id"))
-    intervention = display_value(row.get("intervention_type"))
+    # 枚举码统一走集中字典翻译（与结果页表格一致）；基因/反应是标识符、Δ是数值，保持原样。
+    intervention = sim_result_value_label(row.get("intervention_type"))
     effect = display_value(row.get("effect_label"), "未解析")
     delta = display_value(row.get("delta_objective"), "无可行目标值")
-    process = display_value(row.get("secretory_process"))
+    process = sim_result_value_label(row.get("secretory_process"))
     reaction = display_value(row.get("resolved_reaction_id") or row.get("reaction_id"))
-    confidence = display_value(row.get("mapping_confidence"), "未解析")
+    confidence = sim_result_value_label(row.get("mapping_confidence")) if row.get("mapping_confidence") else "未解析"
     interpretation = display_value(row.get("mapping_interpretation"))
-    basis = display_value(row.get("simulation_basis"), "未声明")
+    basis = sim_result_value_label(row.get("simulation_basis")) if row.get("simulation_basis") else "未声明"
     ptm = _target_ptm_counts(summary)
     ptm_label = f"目标 PTM\nDSB={ptm.get('DSB')} / NG={ptm.get('NG')} / OG={ptm.get('OG')}"
 

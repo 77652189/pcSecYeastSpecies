@@ -224,6 +224,10 @@ SIMULATION_RESULT_VALUE_LABELS = {
     "experiment_calibrated": "已实验校准",
     "not_gene_candidate": "非基因候选",
     "gene_candidate": "基因候选",
+    # 映射置信度
+    "high": "高",
+    "medium": "中",
+    "low": "低",
     # 布尔
     True: "是",
     False: "否",
