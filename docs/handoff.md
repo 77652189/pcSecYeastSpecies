@@ -1,7 +1,7 @@
 # pcSecPichia Handoff
 
 状态：active
-最后更新：2026-07-20
+最后更新：2026-07-21
 
 ## 当前执行位置
 
@@ -26,6 +26,9 @@ relative_signal_r4_value_of_information_status: implemented
 relative_signal_all_four_directions_status: implemented_relative_layer_only_absolute_stays_unavailable
 streamlit_biologist_charts_status: implemented_r1_bottleneck_r2_dose_response_r4_ranking_confidence
 lp_solver_determinism_status: fixed_default_pinned_to_highs_ds
+results_page_localization_status: implemented_central_app_core_i18n_dict
+lp_attribution_sec_complex_classification_status: implemented_engine_classifies_sec_complexes_no_unknown
+relative_signal_and_localization_delivery: all_merged_to_origin_main_87f99ac
 ```
 
 ## 当前状态
@@ -53,6 +56,7 @@ lp_solver_determinism_status: fixed_default_pinned_to_highs_ds
 - **Streamlit 图表化（面向生物学家，2026-07-21，用户明确要求"终端用户是生物学家不是工程师"）**：结果页相对信号产出从纯表格升级为 Plotly 图（沿用 app 既有 `plotly.express` 约定）。**R1** 两张横向条形图——「为什么受限：最强约束层」（下界 floor，PDI 折叠/核糖体一眼可见，OE 动不了）+「OE 可缓解瓶颈」（上限）；**R2** 剂量响应折线图（倍数 vs 相对提升%，形状类别进图例）；**R4** 候选排序条形图（分数越接近越难区分＝越该测）。取数助手均为纯函数、已单测。**真实 R1 读出已跑**（`tools/run_target_bottleneck_lp_attribution_check.py` 对 hLF/OPN 真实求解）：hLF 最强约束是 PDI 折叠下界（影子价格 5074）、OPN 是核糖体装配下界（345），二者都是"最低要求"floor（OE 动不了），可 OE 放宽的上限瓶颈都是弱信号（~1e-3 代谢反应）——精确解释了为何 PDI 单敲≈0%、组合 PDI/ERO1/ERV2 才 +8.15%，也印证"模型缩小范围、湿实验定行动"的分工。诚实边界：图表渲染未驱动 live 浏览器 run（需完整求解+构建页导航，之前 eval 超时），以 figure 可建 + 纯助手单测 + 沿用已验证 plotly 模式为准。
 - **方向 4（组合/多基因设计）确认暂不做**：经用户战略确认——组合收益靠上位性、建立在单基因分数之上，单基因分数还不够可信时做组合＝"把不可信的东西相乘"＋放大代理/退化解误差＝虚假严谨的平方；且湿实验本就先测单点再组合。留到 R1–R4 产出带稳定性标注的可信单基因排序之后，且届时也不是全基因组组合搜索，而是 top 短名单上有界两两上位性检查（O(k²)、小 k、复用现有筛查、仍相对）。
 - **求解器确定性：已用 Fix A 从根上修复（钉死默认求解算法为 `highs-ds`）（2026-07-21）**：`test_simulation_entrypoints.py` 的目标值断言此前脆弱——**根因**是 `method="highs"` 让 HiGHS 自动选算法 + 并行，退化最优面上顶点不唯一，run-to-run 落到最优面的不同顶点、目标值/marginal 抖动 ~2e-6 相对，偶尔超出 `pytest.approx` 默认 1e-6 容差（同代码 3 次跑出 2 个值实测确认）。测试期望值本就是按对偶单纯形落定的那个顶点标定的。**Fix A（用户拍板）**：新增常量 `DEFAULT_SOLVER_METHOD = "highs-ds"`，把 `probe/_prototype.py` 两个 solve 函数、`solve_secretion_capacity`、乃至 OE 筛选路径的默认求解算法全部统一钉到 `highs-ds`（对偶单纯形，单线程、天然确定，稳定落到被标定的那个顶点）。这不是压制症状，而是把非确定性的来源本身去掉。**验证（按上一轮教训，只认全量隔离套件）**：`python_pichia/tests/` 全量隔离 **551 passed / 21 skipped / 0 failed**，计数与回退基线逐字一致——即 `highs-ds` 返回的目标值与每一处 `pytest.approx(1e-6)` 断言的标定值完全吻合、**没有挪动任何测试的期望值**；此前脆弱的 `test_simulation_entrypoints.py` 单独重跑 10 passed；`highs-ds` 的确定性由算法本身保证（无并行竞速、无随机主元）。**诚实提示**：目标数值不变（已证），但全局默认**算法**确实从 `highs` 改成了 `highs-ds`——这是有意为之、用户已授权的行为改变，不是"默认不变"。**已废弃的错误假设**：之前记为"跨文件状态污染 + `threads=1` 复用进程态放大漂移"的推断已被证伪——全量隔离套件在 `highs-ds` 下 551/0 说明并不存在会致败的共享状态污染；此前 `threads=1`/`random_seed=0` 那次回退（隔离 5/5 但全量 20 失）更可能是它确定性地把 ~20 个退化 LP 逼到了一个**错误顶点**（不是"进程态复用"），而单文件跑很少撞到只是因为求解次数少、抽中非标定顶点的概率低，与"污染"无关。**两条仍然成立的教训：① 不要并发跑两个求解密集 pytest 套件（独立进程但共享 `local_runs` 文件系统态，并发污染 fixture）；② 求解器选项的效果必须在全量隔离套件里验证，不能只信单测隔离。**
+- **结果页汉化统一到集中字典 + 引擎 sec_ 分类修复（2026-07-21，已合并 `origin/main`）**：① **结果页汉化**——此前大量 `st.dataframe` 直接倒引擎 payload 的英文字段名/枚举值。统一走 `app/core/i18n.py` 一个集中字典（`SIMULATION_RESULT_COLUMN_LABELS` 列名 / `SIMULATION_RESULT_VALUE_LABELS` 枚举 / `SIMULATION_RESULT_WARNING_RULES` 引擎警告按子串匹配 + `sim_result_column_label`/`sim_result_value_label`/`sim_result_warning_label` 三个 helper）；`simulation_results.py` 加唯一漏斗 `_localized_frame(records, value_columns)`，所有原始表、枚举、引擎警告、产量推荐表、分泌路径图（`candidate_path_graph.py`）全部中文化，未知键/值回退原文；此前散落在 UI 的形状/资源层/歧义三个本地字典也收编进集中字典。用户要求"单独建一个字典再翻译，避免以后改代码时散落/漏改"。② **引擎 sec_ 分类修复**（PR `87f99ac`，另一个会话产出、经本会话独立验证后快进合并）——`analysis/_lp_reaction_process` 补齐对 `sec_*` 分泌复合体的分类（PDI→`disulfide_folding` 等），LP 归因 payload 的 `secretory_process` 不再落 `unknown`；随之把 UI 里 `_resource_layer_label` 的"按名称推断"权宜兜底移除、简化为单参（只映射引擎给的 process code），**分类收敛到引擎单一来源**。副作用（已接受）：`target_related_fluxes` 调试表里 BIOMASS/Ex_glc_D/Ex_o2 的 process 从 `growth`/`medium_exchange` 变 `metabolic_or_other`（canonical 分类器无 biomass/培养基分支），只影响调试表、不影响瓶颈图，i18n 对三者都有中文。③ **交付**：本会话 ADR-004 四方向 + 面向生物学家图表 + 结果页集中字典汉化 + 引擎 sec_ 分类，全部合并到 `origin/main`（HEAD `87f99ac`）；根 `tests/` 323 passed、`python_pichia/tests/` 555 passed 为合并前基线，合并 PR 相关面独立复跑绿。
 - **文档收敛为五类（2026-07-20 续）**：把仍独立的 `data_and_results_policy.md` 的关键边界并入 `pichia_current_architecture_and_requirements.md` 新增的“数据与产物治理”章节，原文按 archive 约定归档到 `docs/archive/`（与 `pichia_next_plan.md` 一致）；active 文档收敛为需求与架构、ADR、handoff、执行计划四份 + README 索引。同步更新 `test_docs_active_boundary.py`（ACTIVE_DOCS 去除 data_policy 并计入 NON_ACTIVE 参考集）、`test_data_results_boundaries.py`（两处改读架构文档）、根 `README.md`/`README.zh.md` 指向 data_policy 的链接。这一步取代了上面 2026-07-20 首轮清理里“data_policy 仍作为独立 active 文档”的中间状态。
 
 `direction_3_secretory_resource_round_0` 已完成并通过验收（见下）。随后完成的 `direction_3_erad_constraint_activation`：验证了 hLF 的求解可行性、理解了已知的 MATLAB 兼容性差异、决定 ERAD/misfolding 约束保持可选（不改默认值）。**明确不做**目标蛋白降解通路（PEP4/PRB1/YPS 家族）建模——基因身份本身低置信度待复核、没有合理动力学路径，等真实湿实验结果，不是"以后再看"。进入方向 4，或将方向 5 从"局部验收维度"扩展为完整跨条件排名产品，由用户决定何时推进，不会自动展开为下一轮实现提示词。
