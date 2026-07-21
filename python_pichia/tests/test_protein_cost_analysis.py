@@ -5,7 +5,9 @@ from pathlib import Path
 from pcsec_pichia.analysis import (
     ProteinLpAttributionResult,
     analyze_target_protein_lp_attribution,
+    classify_oe_dose_response_shape,
     compare_solver_robustness,
+    summarize_oe_dose_response_shape,
     summarize_protein_cost_slope_compatibility,
     summarize_protein_lp_attribution,
     summarize_solver_robustness,
@@ -193,6 +195,68 @@ def test_compare_solver_robustness_flags_solver_dependent_bottleneck() -> None:
     )
     assert with_error.classification == "inconclusive"
     assert any(row["result_status"] == "draft_lp_sensitivity_unavailable" for row in with_error.per_method)
+
+
+def test_classify_oe_dose_response_shape_distinguishes_curve_shapes() -> None:
+    # Concave: most of the gain arrives early, then plateaus -> saturating (modest OE is enough).
+    saturating = classify_oe_dose_response_shape(
+        "sec_X_complex_formation", [(1.0, 1.0), (2.0, 1.08), (4.0, 1.11), (8.0, 1.12)]
+    )
+    assert saturating.shape == "saturating"
+    assert saturating.normalized_auc is not None and saturating.normalized_auc > 0.6
+    assert saturating.monotonic_non_decreasing is True
+    # relative gain is expressed against the baseline, never as an absolute capacity
+    assert abs(saturating.max_relative_gain - 0.12) < 1e-9
+    assert saturating.half_gain_factor is not None and saturating.half_gain_factor < 2.0
+
+    # Straight line: gain grows proportionally, no plateau reached -> linear (push expression higher).
+    linear = classify_oe_dose_response_shape(
+        "sec_X_complex_formation", [(1.0, 1.0), (2.0, 1.02), (4.0, 1.06), (8.0, 1.14)]
+    )
+    assert linear.shape == "linear"
+
+    # Convex: little until a higher dose -> threshold (a minimum dose is required).
+    threshold = classify_oe_dose_response_shape(
+        "sec_X_complex_formation", [(1.0, 1.0), (2.0, 1.005), (4.0, 1.02), (8.0, 1.14)]
+    )
+    assert threshold.shape == "threshold"
+    assert threshold.half_gain_factor is not None and threshold.half_gain_factor > 4.0
+
+
+def test_classify_oe_dose_response_shape_flat_and_artifact_guards() -> None:
+    # All gains under the noise floor -> no detectable response, no AUC computed.
+    flat = classify_oe_dose_response_shape(
+        "sec_flat", [(1.0, 1.0), (2.0, 1.0000005), (4.0, 1.0000008), (8.0, 1.0000009)]
+    )
+    assert flat.shape == "flat_no_response"
+    assert flat.normalized_auc is None
+
+    # OE relaxes a ceiling (enlarges the feasible region), so a beyond-noise decrease cannot be
+    # a real dose-response: it must be reported as a numerical artifact, not a shape to trust.
+    artifact = classify_oe_dose_response_shape(
+        "sec_degenerate", [(1.0, 1.0), (2.0, 1.1), (4.0, 1.05), (8.0, 1.2)]
+    )
+    assert artifact.shape == "non_monotonic_numerical_artifact"
+    assert artifact.monotonic_non_decreasing is False
+    assert artifact.normalized_auc is None
+
+    # Fewer than two usable points cannot yield a shape.
+    insufficient = classify_oe_dose_response_shape("sec_X", [(2.0, 1.1)])
+    assert insufficient.shape == "insufficient_points"
+    assert insufficient.result_status == "draft_oe_dose_response_insufficient"
+
+    # A failed solve (None objective) is dropped, not treated as zero.
+    with_failed = classify_oe_dose_response_shape(
+        "sec_X", [(1.0, 1.0), (2.0, None), (4.0, 1.06), (8.0, 1.14)]
+    )
+    assert with_failed.shape == "linear"
+    assert [p["factor"] for p in with_failed.point_deltas] == [1.0, 4.0, 8.0]
+
+    # The summary carries the relative-signal caveats and never fabricates an absolute capacity.
+    summary = summarize_oe_dose_response_shape(with_failed)
+    assert summary["shape"] == "linear"
+    assert any("RELATIVE signal" in w for w in summary["warnings"])
+    assert "capacity" not in {k for k in summary}  # no absolute-capacity field is emitted
 
 
 def test_lp_attribution_handles_missing_sensitivity_without_crashing() -> None:

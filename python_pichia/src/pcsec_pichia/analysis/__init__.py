@@ -80,6 +80,35 @@ class SolverRobustnessResult:
 
 
 @dataclass(frozen=True)
+class OeDoseResponseShapeResult:
+    """R2 (ADR-004) dose-response *shape* of secretion vs an OE capacity multiplier.
+
+    Overexpression relaxes an upper-bound / kcat ceiling, i.e. it enlarges the feasible
+    region, so the maximum-secretion objective is theoretically monotone non-decreasing in
+    the OE factor. This classifies the *shape* of that response across a swept factor grid
+    (flat / saturating / linear / threshold), replacing the single arbitrary 2.0x point. It
+    is a relative signal: it never produces an absolute capacity or an mg/L value, only the
+    qualitative shape and relative gains. An observed decrease violates the monotonicity OE
+    must satisfy and is flagged as a numerical artifact, not a biological conclusion.
+    """
+
+    reaction_id: str
+    result_status: str
+    shape: str
+    monotonic_non_decreasing: bool
+    tested_factors: tuple[float, ...]
+    baseline_objective: float | None
+    point_deltas: tuple[dict[str, object], ...]
+    max_relative_gain: float | None
+    relative_gain_at_max_factor: float | None
+    max_gain_factor: float | None
+    half_gain_factor: float | None
+    normalized_auc: float | None
+    detail: str
+    warnings: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class YieldImprovementCandidateRecommendation:
     candidate_id: str
     display_name: str
@@ -411,6 +440,228 @@ def summarize_solver_robustness(result: SolverRobustnessResult) -> dict[str, obj
         "top_bottleneck_stable": result.top_bottleneck_stable,
         "top_block_stable": result.top_block_stable,
         "classification": result.classification,
+        "detail": result.detail,
+        "warnings": list(result.warnings),
+    }
+
+
+# R2 (ADR-004): OE dose-response shape thresholds. flat_relative_epsilon is the fraction of
+# the baseline objective below which the largest gain counts as "no response" (also the
+# monotonicity noise tolerance). linear_band is the half-width of the AUC band around 0.5
+# that reads as "linear" (outside it: >0.5 concave/saturating, <0.5 convex/threshold).
+OE_DOSE_RESPONSE_FLAT_RELATIVE_EPSILON = 1e-3
+OE_DOSE_RESPONSE_LINEAR_BAND = 0.1
+
+_OE_DOSE_RESPONSE_WARNINGS = (
+    "Dose-response shape is a RELATIVE signal for how secretion responds to an OE capacity "
+    "multiplier; it is not an absolute capacity, an optimal dose, or an mg/L value.",
+    "Gains are model objective deltas relative to the no-OE baseline, not measured titers.",
+    "A shape read near the noise floor (tiny max gain) is unreliable; 'flat_no_response' means "
+    "'no detectable model response', not proof of biological irrelevance.",
+    "The legacy single 2.0x OE point is one point on this curve; the shape shows whether that "
+    "point over- or under-states the achievable relative gain.",
+)
+
+
+def classify_oe_dose_response_shape(
+    reaction_id: str,
+    points: object,
+    *,
+    baseline_objective: float | None = None,
+    flat_relative_epsilon: float = OE_DOSE_RESPONSE_FLAT_RELATIVE_EPSILON,
+    linear_band: float = OE_DOSE_RESPONSE_LINEAR_BAND,
+) -> OeDoseResponseShapeResult:
+    """Classify the shape of the secretion objective vs OE factor (pure, no solving).
+
+    ``points`` is an iterable of ``(factor, objective_value)`` pairs from an OE factor sweep
+    (objective_value may be None for a failed solve, which is dropped). Baseline preference:
+    explicit ``baseline_objective`` > the point at factor 1.0 > the smallest-factor point.
+    """
+
+    usable: dict[float, float] = {}
+    for entry in points or ():
+        if entry is None:
+            continue
+        factor, value = entry
+        if factor is None or value is None:
+            continue
+        f = float(factor)
+        v = float(value)
+        if f <= 0.0 or v != v:  # skip nonpositive factor / NaN objective
+            continue
+        usable[f] = v  # unique factors; a later duplicate overwrites an earlier one
+    factors = tuple(sorted(usable))
+
+    def _degenerate(status: str, shape: str, detail: str) -> OeDoseResponseShapeResult:
+        return OeDoseResponseShapeResult(
+            reaction_id=reaction_id,
+            result_status=status,
+            shape=shape,
+            monotonic_non_decreasing=True,
+            tested_factors=factors,
+            baseline_objective=baseline_objective,
+            point_deltas=(),
+            max_relative_gain=None,
+            relative_gain_at_max_factor=None,
+            max_gain_factor=None,
+            half_gain_factor=None,
+            normalized_auc=None,
+            detail=detail,
+            warnings=_OE_DOSE_RESPONSE_WARNINGS,
+        )
+
+    if len(factors) < 2:
+        return _degenerate(
+            "draft_oe_dose_response_insufficient",
+            "insufficient_points",
+            "Fewer than two usable (factor, objective) points; cannot judge a dose-response shape.",
+        )
+
+    if baseline_objective is not None and float(baseline_objective) == float(baseline_objective):
+        base = float(baseline_objective)
+    elif any(abs(f - 1.0) <= 1e-9 for f in factors):
+        base = usable[next(f for f in factors if abs(f - 1.0) <= 1e-9)]
+    else:
+        base = usable[factors[0]]
+
+    base_scale = abs(base) if abs(base) > 0.0 else None
+    if base_scale is None:
+        return _degenerate(
+            "draft_oe_dose_response_unavailable",
+            "insufficient_points",
+            "Baseline objective is zero or unavailable; cannot express a relative dose-response gain.",
+        )
+
+    deltas = [(f, usable[f] - base) for f in factors]
+    point_deltas = tuple(
+        {
+            "factor": f,
+            "objective_value": usable[f],
+            "delta_vs_baseline": d,
+            "relative_gain": d / base_scale,
+        }
+        for f, d in deltas
+    )
+    d_values = [d for _, d in deltas]
+    max_gain = max(d_values)
+    max_gain_factor = next(f for f, d in deltas if d == max_gain)
+    final_delta = deltas[-1][1]
+    tol = flat_relative_epsilon * base_scale
+    has_decrease = any(deltas[i + 1][1] < deltas[i][1] - tol for i in range(len(deltas) - 1))
+    max_relative_gain = max_gain / base_scale
+    relative_gain_at_max_factor = final_delta / base_scale
+
+    common = {
+        "reaction_id": reaction_id,
+        "tested_factors": factors,
+        "baseline_objective": base,
+        "point_deltas": point_deltas,
+        "max_relative_gain": max_relative_gain,
+        "relative_gain_at_max_factor": relative_gain_at_max_factor,
+        "max_gain_factor": max_gain_factor,
+        "warnings": _OE_DOSE_RESPONSE_WARNINGS,
+    }
+
+    # OE enlarges the feasible region, so the objective must be monotone non-decreasing in the
+    # factor; a beyond-noise drop can only be a degenerate-optimum / solve artifact, never signal.
+    if has_decrease and max_relative_gain > flat_relative_epsilon:
+        return OeDoseResponseShapeResult(
+            result_status="draft_oe_dose_response",
+            shape="non_monotonic_numerical_artifact",
+            monotonic_non_decreasing=False,
+            half_gain_factor=None,
+            normalized_auc=None,
+            detail=(
+                "Secretion objective decreases at some higher OE factor, which OE (a feasible-region "
+                "relaxation) cannot truly cause; treat this as a numerical artifact of a degenerate "
+                "optimum, not a real dose-response, and do not use its magnitude."
+            ),
+            **common,
+        )
+
+    if max_relative_gain <= flat_relative_epsilon:
+        return OeDoseResponseShapeResult(
+            result_status="draft_oe_dose_response",
+            shape="flat_no_response",
+            monotonic_non_decreasing=not has_decrease,
+            half_gain_factor=None,
+            normalized_auc=None,
+            detail=(
+                f"Largest relative gain across the tested factors is {max_relative_gain:.2e}, at or "
+                f"below the {flat_relative_epsilon:.0e} noise floor: no detectable model response to OE."
+            ),
+            **common,
+        )
+
+    # Monotone non-decreasing with a meaningful gain: judge concavity by the area under the
+    # min-max-normalized (factor, gain) curve. Concave (saturating) sits above the diagonal
+    # (AUC>0.5); convex (threshold) sits below (AUC<0.5); a straight line is ~0.5.
+    f_min, f_max = factors[0], factors[-1]
+    d_min, d_max = min(d_values), max_gain
+    f_span = f_max - f_min
+    d_span = d_max - d_min
+    fn = [(f - f_min) / f_span for f in factors]
+    dn = [(d - d_min) / d_span for _, d in deltas]
+    auc = sum(0.5 * (dn[i] + dn[i + 1]) * (fn[i + 1] - fn[i]) for i in range(len(fn) - 1))
+
+    half_target = 0.5 * max_gain
+    half_gain_factor = f_min
+    for i in range(len(deltas)):
+        if deltas[i][1] >= half_target:
+            if i == 0:
+                half_gain_factor = deltas[0][0]
+            else:
+                f_prev, d_prev = deltas[i - 1]
+                f_cur, d_cur = deltas[i]
+                step = d_cur - d_prev
+                frac = (half_target - d_prev) / step if step > 0 else 0.0
+                half_gain_factor = f_prev + frac * (f_cur - f_prev)
+            break
+
+    if auc > 0.5 + linear_band:
+        shape = "saturating"
+        detail = (
+            f"Concave response (normalized AUC {auc:.2f} > 0.5): most of the relative gain is "
+            f"captured early (~{half_gain_factor:.2g}x reaches half of it) and higher OE gives "
+            "diminishing returns."
+        )
+    elif auc < 0.5 - linear_band:
+        shape = "threshold"
+        detail = (
+            f"Convex response (normalized AUC {auc:.2f} < 0.5): little gain until higher OE factors, "
+            f"crossing half of the gain only near {half_gain_factor:.2g}x; a minimum dose is needed."
+        )
+    else:
+        shape = "linear"
+        detail = (
+            f"Roughly linear response (normalized AUC {auc:.2f} ~ 0.5): relative gain grows about "
+            "proportionally with OE across the tested range, with no plateau reached yet."
+        )
+    return OeDoseResponseShapeResult(
+        result_status="draft_oe_dose_response",
+        shape=shape,
+        monotonic_non_decreasing=not has_decrease,
+        half_gain_factor=half_gain_factor,
+        normalized_auc=auc,
+        detail=detail,
+        **common,
+    )
+
+
+def summarize_oe_dose_response_shape(result: OeDoseResponseShapeResult) -> dict[str, object]:
+    return {
+        "reaction_id": result.reaction_id,
+        "result_status": result.result_status,
+        "shape": result.shape,
+        "monotonic_non_decreasing": result.monotonic_non_decreasing,
+        "tested_factors": list(result.tested_factors),
+        "baseline_objective": result.baseline_objective,
+        "point_deltas": list(result.point_deltas),
+        "max_relative_gain": result.max_relative_gain,
+        "relative_gain_at_max_factor": result.relative_gain_at_max_factor,
+        "max_gain_factor": result.max_gain_factor,
+        "half_gain_factor": result.half_gain_factor,
+        "normalized_auc": result.normalized_auc,
         "detail": result.detail,
         "warnings": list(result.warnings),
     }
@@ -1240,6 +1491,7 @@ def _json_payload(value: object) -> object:
 
 __all__ = [
     "GrowthTradeoffPoint",
+    "OeDoseResponseShapeResult",
     "ProteinLpAttributionResult",
     "SolverRobustnessResult",
     "TargetGrowthAnalysisResult",
@@ -1250,7 +1502,9 @@ __all__ = [
     "analyze_yield_improvement_candidates",
     "build_growth_tradeoff_item_table",
     "build_yield_recommendation_table",
+    "classify_oe_dose_response_shape",
     "compare_solver_robustness",
+    "summarize_oe_dose_response_shape",
     "summarize_protein_lp_attribution",
     "summarize_protein_cost_slope_compatibility",
     "summarize_solver_robustness",
