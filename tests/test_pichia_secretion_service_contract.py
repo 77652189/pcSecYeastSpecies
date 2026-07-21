@@ -524,6 +524,47 @@ def test_streamlit_oe_dose_response_option_and_result_panel_are_localized() -> N
     assert "enable_oe_dose_response=bool(request.enable_oe_dose_response)" in runner_source
 
 
+def test_streamlit_relative_signal_charts_render_biologist_facing_figures() -> None:
+    # End users are biologists, not engineers: R1 bottlenecks and R2 dose-response are charted
+    # (Plotly), not just tabulated. These pure frame helpers back those charts.
+    from app.ui.views.simulation_results import (
+        _lp_oe_bottleneck_frame,
+        _oe_dose_response_curve_frame,
+    )
+
+    # R2 dose-response -> factor on x, relative gain (%) on y, baseline factor 1.0 anchors at 0%
+    oe_payload = {
+        "reaction_shapes": [
+            {
+                "reaction_id": "sec_PDI1_ERV2_Ero1p_complex_formation",
+                "shape": "saturating",
+                "point_deltas": [
+                    {"factor": 1.0, "relative_gain": 0.0},
+                    {"factor": 2.0, "relative_gain": 0.08},
+                    {"factor": 4.0, "relative_gain": 0.11},
+                ],
+            }
+        ]
+    }
+    curve = _oe_dose_response_curve_frame(oe_payload)
+    assert list(curve.columns) == ["过表达倍数", "分泌相对提升(%)", "反应｜形状"]
+    assert len(curve) == 3
+    assert curve.loc[curve["过表达倍数"] == 2.0, "分泌相对提升(%)"].iloc[0] == 8.0
+    assert curve.loc[curve["过表达倍数"] == 1.0, "分泌相对提升(%)"].iloc[0] == 0.0
+    assert "饱和型" in curve["反应｜形状"].iloc[0]
+
+    # R1 OE-actionable bottlenecks -> horizontal bar with the resource layer localized to Chinese
+    lp_payload = {
+        "oe_actionable_bottlenecks": [
+            {"reaction_id": "sec_Pdi1p_complex_formation", "abs_marginal": 0.92, "secretory_process": "chaperone_folding"},
+            {"reaction_id": "Mach_Ribosome_complex_formation", "abs_marginal": 0.5, "secretory_process": "ribosome"},
+        ]
+    }
+    bars = _lp_oe_bottleneck_frame(lp_payload)
+    assert set(bars["分泌资源层"]) == {"分子伴侣折叠", "翻译（核糖体）"}
+    assert bars["影子价格(绝对值)"].max() == 0.92
+
+
 def test_python_draft_service_does_not_depend_on_legacy_app_engines() -> None:
     service_path = REPO_ROOT / "app" / "services" / "pichia_secretion_service.py"
     module_ast = ast.parse(service_path.read_text(encoding="utf-8"))

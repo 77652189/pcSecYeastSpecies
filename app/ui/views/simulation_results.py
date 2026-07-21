@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import pandas as pd
+import plotly.express as px
 import streamlit as st
 
 from app.services.pichia_background_tasks import (
@@ -290,6 +291,54 @@ _OE_DOSE_RESPONSE_SHAPE_LABELS = {
     "insufficient_points": "数据点不足",
 }
 
+# Chinese labels for the LP secretory-process / resource-layer codes. Kept local because the
+# Streamlit facade may not import the engine (see test_streamlit_ui_does_not_import_engine_directly).
+_SECRETORY_PROCESS_LABELS = {
+    "ribosome": "翻译（核糖体）",
+    "proteasome_degradation": "蛋白降解（蛋白酶体）",
+    "disulfide_folding": "二硫键折叠 / DSB",
+    "n_glycan_processing": "N-糖基化",
+    "o_glycan_processing": "O-糖基化",
+    "chaperone_folding": "分子伴侣折叠",
+    "erad_misfolding": "错误折叠 / ERAD",
+    "er_translocation": "ER 转运",
+    "er_to_golgi_transport": "ER→Golgi 转运",
+    "golgi_surface_transport": "Golgi→胞外运输",
+    "secretory_capacity": "分泌容量",
+    "metabolic_or_other": "代谢 / 其它",
+    "unknown": "未解析",
+}
+
+
+def _oe_dose_response_curve_frame(oe_dose_response: dict[str, object]) -> pd.DataFrame:
+    """Flatten the per-reaction dose-response points into a long frame for a line chart.
+
+    One row per (reaction, factor): factor on x, relative gain (%) on y. The factor-1.0 baseline
+    is included so each curve starts at 0%. Points with a missing factor/gain are dropped.
+    """
+    rows: list[dict[str, object]] = []
+    for shape in oe_dose_response.get("reaction_shapes") or []:
+        if not isinstance(shape, dict):
+            continue
+        reaction = str(shape.get("reaction_id", "?"))
+        shape_label = _OE_DOSE_RESPONSE_SHAPE_LABELS.get(str(shape.get("shape")), str(shape.get("shape")))
+        legend = f"{reaction}｜{shape_label}"
+        for point in shape.get("point_deltas") or []:
+            if not isinstance(point, dict):
+                continue
+            factor = point.get("factor")
+            gain = point.get("relative_gain")
+            if factor is None or gain is None:
+                continue
+            rows.append(
+                {
+                    "过表达倍数": float(factor),
+                    "分泌相对提升(%)": float(gain) * 100.0,
+                    "反应｜形状": legend,
+                }
+            )
+    return pd.DataFrame(rows)
+
 
 def _render_oe_dose_response(oe_dose_response: dict[str, object]) -> None:
     st.markdown("**OE 剂量响应形状（过表达越多，分泌是持续上升还是很快到顶）**")
@@ -306,6 +355,23 @@ def _render_oe_dose_response(oe_dose_response: dict[str, object]) -> None:
         st.metric("无 OE 基线分泌目标", baseline_txt)
     with c2:
         st.metric("扫描的过表达倍数", factors_txt)
+
+    curve = _oe_dose_response_curve_frame(oe_dose_response)
+    if not curve.empty:
+        figure = px.line(
+            curve.sort_values("过表达倍数"),
+            x="过表达倍数",
+            y="分泌相对提升(%)",
+            color="反应｜形状",
+            markers=True,
+            title="OE 剂量响应曲线：过表达倍数越高，分泌相对提升怎么走",
+        )
+        figure.update_layout(
+            xaxis_title="过表达倍数（×，1 = 不过表达）",
+            yaxis_title="分泌相对提升（%）",
+            legend_title_text="反应｜形状",
+        )
+        st.plotly_chart(figure, use_container_width=True)
 
     def _pct(value: object) -> str:
         return f"{value * 100:.2f}%" if isinstance(value, (int, float)) else "—"
@@ -336,6 +402,31 @@ def _render_oe_dose_response(oe_dose_response: dict[str, object]) -> None:
         st.warning(str(warning))
 
 
+def _lp_oe_bottleneck_frame(lp_attribution: dict[str, object]) -> pd.DataFrame:
+    """Frame of OE-actionable bottlenecks for a horizontal bar chart (which resource layer binds).
+
+    Only the OE-actionable (binding upper-bound) entries are charted — the lower-bound floors are
+    not OE targets and are deliberately excluded so the chart cannot suggest acting on them.
+    """
+    rows: list[dict[str, object]] = []
+    for entry in lp_attribution.get("oe_actionable_bottlenecks") or []:
+        if not isinstance(entry, dict):
+            continue
+        marginal = entry.get("abs_marginal")
+        if marginal is None:
+            marginal = abs(float(entry.get("marginal") or 0.0))
+        rows.append(
+            {
+                "反应": str(entry.get("reaction_id", "?")),
+                "影子价格(绝对值)": abs(float(marginal or 0.0)),
+                "分泌资源层": _SECRETORY_PROCESS_LABELS.get(
+                    str(entry.get("secretory_process", "unknown")), str(entry.get("secretory_process", "unknown"))
+                ),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
 def _render_lp_attribution(lp_attribution: dict[str, object]) -> None:
     st.markdown("**LP 级归因证据**")
     st.caption("Python draft LP sensitivity，基于 SciPy HiGHS marginals；不是 MATLAB/SoPlex fully aligned shadow price。")
@@ -356,6 +447,22 @@ def _render_lp_attribution(lp_attribution: dict[str, object]) -> None:
         "注意这只是线索不是保证：耦合结构下放宽一个上限会让瓶颈转移，需与真实 reaction_oe_tradeoff 交叉验证。"
     )
     if oe_actionable:
+        bottleneck_frame = _lp_oe_bottleneck_frame(lp_attribution)
+        if not bottleneck_frame.empty:
+            figure = px.bar(
+                bottleneck_frame.sort_values("影子价格(绝对值)"),
+                x="影子价格(绝对值)",
+                y="反应",
+                color="分泌资源层",
+                orientation="h",
+                title="OE 可缓解瓶颈：哪一层最限制分泌（影子价格绝对值越大越紧）",
+            )
+            figure.update_layout(
+                xaxis_title="影子价格绝对值（越大越限制分泌）",
+                yaxis_title="",
+                legend_title_text="分泌资源层",
+            )
+            st.plotly_chart(figure, use_container_width=True)
         st.dataframe(pd.DataFrame(oe_actionable), use_container_width=True, hide_index=True)
     else:
         st.caption("（当前解没有 binding 的上限产能约束）")
