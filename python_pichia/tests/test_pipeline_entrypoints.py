@@ -582,6 +582,29 @@ def test_pipeline_populates_oe_dose_response_only_when_flag_enabled(tmp_path: Pa
 
 
 @slow_pipeline
+def test_pipeline_always_populates_value_of_information_from_candidate_ranking(tmp_path: Path) -> None:
+    # R4 (ADR-004): value-of-information is pure post-processing of the candidate ranking (no extra
+    # solve), so it is always in the summary with no opt-in. It flags where the model cannot order
+    # candidates and prioritizes the measurement to resolve it; it never predicts yield or promotes.
+    output_dir = tmp_path / "opn_voi"
+    result = run_pichia_secretion_simulation(
+        PichiaSimulationRequest(
+            target_id="OPN_ALPHA_FULL_PROJECT",
+            candidate_id="OPN_ALPHA_FULL_PROJECT",
+        ),
+        output_dir=output_dir,
+    )
+    summary = json.loads(result.summary_path.read_text(encoding="utf-8"))
+    voi = summary["value_of_information"]
+    assert voi is not None
+    assert voi["result_status"] == "draft_value_of_information"
+    assert voi["absolute_status"] == "unavailable"
+    assert "ranked_candidates" in voi and "information_items" in voi
+    # relative-only invariants surface in the payload the UI reads
+    assert any("does not predict" in warning for warning in voi["warnings"])
+
+
+@slow_pipeline
 def test_pipeline_runs_builtin_hlf_with_project_710_alignment_artifact(tmp_path: Path) -> None:
     output_dir = tmp_path / "hlf"
     result = run_pichia_secretion_simulation(

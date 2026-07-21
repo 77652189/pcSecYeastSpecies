@@ -109,6 +109,53 @@ class OeDoseResponseShapeResult:
 
 
 @dataclass(frozen=True)
+class RankingRobustnessResult:
+    """R3 (ADR-004): robustness of a candidate RANKING to capacity assumptions and to the solver.
+
+    The absolute capacity behind each candidate is permanently unavailable, so the only honest
+    question is whether the RELATIVE ranking survives perturbing the (uncalibrated) capacity
+    assumption across a bandwidth, and whether it survives changing the LP solver. A ranking that
+    holds is a trustworthy relative signal; one that flips is an artifact of the assumption, not a
+    conclusion. The swept bandwidth is an uncertainty-analysis input, NEVER an asserted capacity
+    value, and the absolute status stays ``unavailable`` in every case.
+    """
+
+    target_id: str
+    result_status: str
+    top_k: int
+    baseline_ranking: tuple[str, ...]
+    capacity_classification: str
+    solver_classification: str
+    per_condition: tuple[dict[str, object], ...]
+    absolute_status: str
+    detail: str
+    warnings: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ValueOfInformationResult:
+    """R4 (ADR-004): which single minimal measurement would most resolve ranking ambiguity.
+
+    Given a relative candidate ranking (plus optionally an R3 robustness verdict), this flags the
+    ambiguities that the model alone cannot resolve — near-tied scores near the top, and orderings
+    that flip under capacity-bandwidth/solver perturbation — and prioritizes the wet-lab measurement
+    that would most resolve them. It only prioritizes measurements; it never predicts a measurement
+    outcome or an absolute yield, and never promotes a candidate to experiment_calibrated. Absolute
+    status stays ``unavailable``.
+    """
+
+    target_id: str
+    result_status: str
+    top_k: int
+    ranked_candidates: tuple[dict[str, object], ...]
+    information_items: tuple[dict[str, object], ...]
+    has_actionable_ambiguity: bool
+    absolute_status: str
+    detail: str
+    warnings: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class YieldImprovementCandidateRecommendation:
     candidate_id: str
     display_name: str
@@ -686,6 +733,238 @@ def summarize_oe_dose_response_shape(result: OeDoseResponseShapeResult) -> dict[
         "max_gain_factor": result.max_gain_factor,
         "half_gain_factor": result.half_gain_factor,
         "normalized_auc": result.normalized_auc,
+        "detail": result.detail,
+        "warnings": list(result.warnings),
+    }
+
+
+_RANKING_ROBUSTNESS_WARNINGS = (
+    "Ranking robustness is a RELATIVE signal: it only says whether the candidate ordering survives "
+    "perturbing the uncalibrated capacity assumption and the solver; it never asserts an absolute capacity.",
+    "The swept bandwidth is an uncertainty-analysis input, not a capacity value or mg/L, and must not be "
+    "written to a formal capacity asset or used as a promotion basis.",
+    "Absolute capacity / executability stays 'unavailable' regardless of the ranking verdict.",
+)
+
+
+def compare_ranking_robustness(
+    target_id: str,
+    baseline_ranking,
+    capacity_bandwidth_rankings=None,
+    solver_rankings=None,
+    *,
+    top_k: int = 3,
+) -> RankingRobustnessResult:
+    """Classify whether a candidate ranking is robust to capacity-bandwidth and solver perturbations (pure).
+
+    ``baseline_ranking`` is the candidate order under the nominal assumption. ``capacity_bandwidth_rankings``
+    and ``solver_rankings`` map a perturbation label -> the candidate order under that perturbation. A
+    dimension whose top-k order matches the baseline everywhere is ``ranking-insensitive-to-<dim>``; any flip
+    makes it ``ranking-sensitive-to-<dim>``; an empty dimension is ``inconclusive``. No solving here.
+    """
+
+    baseline_top = tuple(str(candidate) for candidate in list(baseline_ranking)[:top_k])
+    per_condition: list[dict[str, object]] = []
+
+    def _dimension(rankings, kind: str) -> str:
+        mapping = dict(rankings or {})
+        if not mapping or not baseline_top:
+            return "inconclusive"
+        stable = True
+        for label, ranking in mapping.items():
+            condition_top = tuple(str(candidate) for candidate in list(ranking)[:top_k])
+            matches = condition_top == baseline_top
+            stable = stable and matches
+            per_condition.append(
+                {
+                    "label": label,
+                    "kind": kind,
+                    "top_k_ranking": list(condition_top),
+                    "matches_baseline": matches,
+                }
+            )
+        return f"ranking-insensitive-to-{kind}" if stable else f"ranking-sensitive-to-{kind}"
+
+    capacity_classification = _dimension(capacity_bandwidth_rankings, "capacity")
+    solver_classification = _dimension(solver_rankings, "solver")
+
+    flips = []
+    if capacity_classification == "ranking-sensitive-to-capacity":
+        flips.append("capacity bandwidth")
+    if solver_classification == "ranking-sensitive-to-solver":
+        flips.append("solver")
+    if flips:
+        detail = (
+            f"Top-{top_k} candidate ranking flips across {', '.join(flips)}; the ordering is an artifact of "
+            "the perturbed assumption, not a robust relative signal. Absolute capacity stays unavailable."
+        )
+    elif capacity_classification == "inconclusive" and solver_classification == "inconclusive":
+        detail = "No capacity-bandwidth or solver perturbations were supplied; ranking robustness is inconclusive."
+    else:
+        detail = (
+            f"Top-{top_k} candidate ranking is stable across the supplied perturbations; it is a relative signal "
+            "that holds despite the unknown absolute capacity (which stays unavailable)."
+        )
+
+    return RankingRobustnessResult(
+        target_id=target_id,
+        result_status="draft_ranking_robustness",
+        top_k=top_k,
+        baseline_ranking=baseline_top,
+        capacity_classification=capacity_classification,
+        solver_classification=solver_classification,
+        per_condition=tuple(per_condition),
+        absolute_status="unavailable",
+        detail=detail,
+        warnings=_RANKING_ROBUSTNESS_WARNINGS,
+    )
+
+
+def summarize_ranking_robustness(result: RankingRobustnessResult) -> dict[str, object]:
+    return {
+        "target_id": result.target_id,
+        "result_status": result.result_status,
+        "top_k": result.top_k,
+        "baseline_ranking": list(result.baseline_ranking),
+        "capacity_classification": result.capacity_classification,
+        "solver_classification": result.solver_classification,
+        "per_condition": list(result.per_condition),
+        "absolute_status": result.absolute_status,
+        "detail": result.detail,
+        "warnings": list(result.warnings),
+    }
+
+
+_VALUE_OF_INFORMATION_WARNINGS = (
+    "Value-of-information only prioritizes which measurement would most resolve a ranking ambiguity; it does "
+    "not predict the measurement outcome or any absolute yield.",
+    "It never promotes a candidate to experiment_calibrated or absolute-executable; absolute status stays unavailable.",
+    "Priority is relative to the current model ranking's ambiguities and is a wet-lab planning aid, not a result.",
+)
+
+
+def prioritize_value_of_information(
+    target_id: str,
+    ranked_candidates,
+    ranking_robustness=None,
+    *,
+    top_k: int = 3,
+    relative_tie_epsilon: float = 0.1,
+) -> ValueOfInformationResult:
+    """Prioritize the minimal measurement that would most resolve ranking ambiguity (pure, qualitative).
+
+    ``ranked_candidates`` is an iterable of ``(candidate_id, score)`` already ordered best-first (higher
+    score = better); score may be None. ``ranking_robustness`` is an optional R3 ``RankingRobustnessResult``.
+    Ambiguities considered: near-tied consecutive scores near the top, and top-k order flips reported by R3.
+    It ranks measurements, never predicts outcomes or absolute yields.
+    """
+
+    normalized: list[tuple[str, float | None]] = []
+    for entry in ranked_candidates or ():
+        if entry is None:
+            continue
+        cid, score = entry
+        normalized.append((str(cid), float(score) if score is not None else None))
+
+    items: list[dict[str, object]] = []
+
+    # (1) near-tie ambiguities among consecutive candidates near the top of the ranking
+    window = min(top_k, len(normalized) - 1) if normalized else 0
+    for i in range(max(window, 0)):
+        (cid_a, score_a), (cid_b, score_b) = normalized[i], normalized[i + 1]
+        if score_a is None or score_b is None:
+            continue
+        scale = max(abs(score_a), abs(score_b))
+        if scale <= 0:
+            continue
+        rel_diff = abs(score_a - score_b) / scale
+        if rel_diff < relative_tie_epsilon:
+            items.append(
+                {
+                    "candidates": [cid_a, cid_b],
+                    "ambiguity_kind": "near_tie",
+                    "ambiguity_detail": (
+                        f"Relative scores of {cid_a} and {cid_b} differ by only {rel_diff:.1%}, below the "
+                        f"{relative_tie_epsilon:.0%} tie threshold; the model alone cannot confidently order them."
+                    ),
+                    "suggested_measurement": (
+                        f"Measure target-specific secretion for {cid_a} and {cid_b} to resolve their near-tied "
+                        "relative order (ADR-001 target_specific priority)."
+                    ),
+                    "resolves_top_of_ranking": i == 0,
+                    "_rank_hint": i,
+                    "_ambiguity_hint": rel_diff,
+                }
+            )
+
+    # (2) robustness-flip ambiguities carried over from R3 (top-k order not stable under a perturbation)
+    if ranking_robustness is not None:
+        for condition in getattr(ranking_robustness, "per_condition", ()) or ():
+            if condition.get("matches_baseline") is False:
+                kind = condition.get("kind")
+                items.append(
+                    {
+                        "candidates": list(getattr(ranking_robustness, "baseline_ranking", ()))[:top_k],
+                        "ambiguity_kind": f"{kind}_flip",
+                        "ambiguity_detail": (
+                            f"Top-{top_k} order flips under {kind} perturbation '{condition.get('label')}' "
+                            f"(becomes {condition.get('top_k_ranking')}); the ordering is assumption-dependent."
+                        ),
+                        "suggested_measurement": (
+                            f"Measure target-specific secretion for the top-{top_k} candidates to pin down their "
+                            f"true order independent of the {kind} assumption (ADR-001 target_specific priority)."
+                        ),
+                        "resolves_top_of_ranking": True,
+                        "_rank_hint": -1,  # a flip outranks a near-tie: it is a more fundamental ambiguity
+                        "_ambiguity_hint": 0.0,
+                    }
+                )
+
+    # flips first (rank_hint -1), then near-ties nearer the top, then the more ambiguous (smaller rel_diff)
+    items.sort(key=lambda item: (item["_rank_hint"], item["_ambiguity_hint"]))
+    for rank, item in enumerate(items, start=1):
+        item["priority_rank"] = rank
+        item.pop("_rank_hint", None)
+        item.pop("_ambiguity_hint", None)
+
+    has_actionable = bool(items)
+    if has_actionable:
+        detail = (
+            f"{len(items)} ranking ambiguity item(s) identified; the highest-value measurement is: "
+            f"{items[0]['suggested_measurement']}"
+        )
+    else:
+        detail = (
+            f"Top-{top_k} ranking shows no near-ties or robustness flips; no single measurement is currently the "
+            "clear highest-value one. Absolute status stays unavailable."
+        )
+
+    ranked_rows = tuple(
+        {"rank": index + 1, "candidate_id": cid, "score": score}
+        for index, (cid, score) in enumerate(normalized)
+    )
+    return ValueOfInformationResult(
+        target_id=target_id,
+        result_status="draft_value_of_information",
+        top_k=top_k,
+        ranked_candidates=ranked_rows,
+        information_items=tuple(items),
+        has_actionable_ambiguity=has_actionable,
+        absolute_status="unavailable",
+        detail=detail,
+        warnings=_VALUE_OF_INFORMATION_WARNINGS,
+    )
+
+
+def summarize_value_of_information(result: ValueOfInformationResult) -> dict[str, object]:
+    return {
+        "target_id": result.target_id,
+        "result_status": result.result_status,
+        "top_k": result.top_k,
+        "ranked_candidates": list(result.ranked_candidates),
+        "information_items": list(result.information_items),
+        "has_actionable_ambiguity": result.has_actionable_ambiguity,
+        "absolute_status": result.absolute_status,
         "detail": result.detail,
         "warnings": list(result.warnings),
     }
@@ -1517,7 +1796,9 @@ __all__ = [
     "GrowthTradeoffPoint",
     "OeDoseResponseShapeResult",
     "ProteinLpAttributionResult",
+    "RankingRobustnessResult",
     "SolverRobustnessResult",
+    "ValueOfInformationResult",
     "TargetGrowthAnalysisResult",
     "YieldImprovementCandidateRecommendation",
     "YieldImprovementRecommendationResult",
@@ -1528,11 +1809,15 @@ __all__ = [
     "build_yield_recommendation_table",
     "classify_oe_dose_response_shape",
     "classify_oe_dose_response_sweep",
+    "compare_ranking_robustness",
     "compare_solver_robustness",
+    "prioritize_value_of_information",
     "summarize_oe_dose_response_shape",
     "summarize_protein_lp_attribution",
     "summarize_protein_cost_slope_compatibility",
+    "summarize_ranking_robustness",
     "summarize_solver_robustness",
     "summarize_target_growth_analysis",
+    "summarize_value_of_information",
     "summarize_yield_improvement_recommendations",
 ]

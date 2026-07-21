@@ -577,6 +577,23 @@ def test_streamlit_relative_signal_charts_render_biologist_facing_figures() -> N
     assert "翻译（核糖体）" in set(floors["分泌资源层"])
 
 
+def test_streamlit_value_of_information_panel_is_localized_and_chart_backed() -> None:
+    # R4 (ADR-004): the value-of-information panel is a ranking-confidence + what-to-measure product,
+    # framed as relative (never absolute yield), and reads the pipeline's value_of_information payload.
+    results_source = (REPO_ROOT / "app" / "ui" / "views" / "simulation_results.py").read_text(encoding="utf-8")
+    assert "排序可信度 & 该测什么（价值-of-information）" in results_source
+    assert "只排测量优先级，不预测结果、不自动认定谁更好" in results_source
+    assert "候选排序：分数越接近越难区分" in results_source
+
+    from app.ui.views.simulation_results import _value_of_information_payload
+
+    assert _value_of_information_payload({}) == {}
+    payload = _value_of_information_payload(
+        {"value_of_information": {"has_actionable_ambiguity": False, "ranked_candidates": []}}
+    )
+    assert payload["has_actionable_ambiguity"] is False
+
+
 def test_python_draft_service_does_not_depend_on_legacy_app_engines() -> None:
     service_path = REPO_ROOT / "app" / "services" / "pichia_secretion_service.py"
     module_ast = ast.parse(service_path.read_text(encoding="utf-8"))

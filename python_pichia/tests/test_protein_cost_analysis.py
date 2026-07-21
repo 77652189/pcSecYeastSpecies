@@ -6,11 +6,15 @@ from pcsec_pichia.analysis import (
     ProteinLpAttributionResult,
     analyze_target_protein_lp_attribution,
     classify_oe_dose_response_shape,
+    compare_ranking_robustness,
     compare_solver_robustness,
+    prioritize_value_of_information,
     summarize_oe_dose_response_shape,
     summarize_protein_cost_slope_compatibility,
     summarize_protein_lp_attribution,
+    summarize_ranking_robustness,
     summarize_solver_robustness,
+    summarize_value_of_information,
 )
 from pcsec_pichia.simulation import ProteinCostSlopeCompatibilityResult
 from pcsec_pichia.secretion_plan import build_secretion_plan
@@ -257,6 +261,81 @@ def test_classify_oe_dose_response_shape_flat_and_artifact_guards() -> None:
     assert summary["shape"] == "linear"
     assert any("RELATIVE signal" in w for w in summary["warnings"])
     assert "capacity" not in {k for k in summary}  # no absolute-capacity field is emitted
+
+
+def test_compare_ranking_robustness_covers_bandwidth_and_solver_classes() -> None:
+    # R3 (ADR-004): a candidate ranking that survives capacity-bandwidth and solver perturbations is
+    # a trustworthy relative signal; one that flips is an artifact. Absolute status stays unavailable
+    # in every class, and no 'capacity-robust'-style label is used.
+    baseline = ["A", "B", "C", "D"]
+
+    # class 1: bandwidth-stable -> ranking-insensitive-to-capacity
+    stable = compare_ranking_robustness(
+        "hLF",
+        baseline,
+        capacity_bandwidth_rankings={"x0.7": ["A", "B", "C", "Z"], "x1.3": ["A", "B", "C", "Q"]},
+    )
+    assert stable.capacity_classification == "ranking-insensitive-to-capacity"
+    assert stable.absolute_status == "unavailable"
+
+    # class 2: bandwidth-flip -> ranking-sensitive-to-capacity
+    flip = compare_ranking_robustness(
+        "hLF",
+        baseline,
+        capacity_bandwidth_rankings={"x0.7": ["A", "B", "C"], "x1.3": ["B", "A", "C"]},
+    )
+    assert flip.capacity_classification == "ranking-sensitive-to-capacity"
+    assert flip.absolute_status == "unavailable"
+
+    # class 3: solver-flip -> ranking-sensitive-to-solver
+    solver_flip = compare_ranking_robustness("hLF", baseline, solver_rankings={"highs-ipm": ["B", "A", "C"]})
+    assert solver_flip.solver_classification == "ranking-sensitive-to-solver"
+    assert solver_flip.absolute_status == "unavailable"
+
+    # invariant: no 'capacity-robust'-style naming in any label, absolute stays unavailable everywhere
+    labels = {stable.capacity_classification, flip.capacity_classification, solver_flip.solver_classification}
+    assert not any("capacity-robust" in label for label in labels)
+    for result in (stable, flip, solver_flip):
+        assert summarize_ranking_robustness(result)["absolute_status"] == "unavailable"
+
+    # no perturbations supplied -> inconclusive, not a false verdict
+    empty = compare_ranking_robustness("hLF", baseline)
+    assert empty.capacity_classification == "inconclusive"
+    assert empty.solver_classification == "inconclusive"
+
+
+def test_prioritize_value_of_information_ranks_measurements_without_predicting_yield() -> None:
+    # R4 (ADR-004): flag where the model cannot confidently order candidates and prioritize the
+    # minimal measurement that resolves it; never predict an outcome or promote a candidate.
+    near_tie = prioritize_value_of_information("hLF", [("A", 1.0), ("B", 0.98), ("C", 0.5)])
+    assert near_tie.has_actionable_ambiguity is True
+    top_item = near_tie.information_items[0]
+    assert top_item["ambiguity_kind"] == "near_tie"
+    assert top_item["candidates"] == ["A", "B"]
+    assert top_item["resolves_top_of_ranking"] is True
+    assert "target-specific" in top_item["suggested_measurement"]
+    # the ranking (with scores) is carried so the UI can chart near-ties as near-equal bars
+    assert [row["candidate_id"] for row in near_tie.ranked_candidates] == ["A", "B", "C"]
+
+    # clearly separated scores -> no actionable ambiguity
+    separated = prioritize_value_of_information("hLF", [("A", 1.0), ("B", 0.5), ("C", 0.2)])
+    assert separated.has_actionable_ambiguity is False
+
+    # an R3 ranking flip becomes the highest-priority information item (fed straight from R3)
+    robustness = compare_ranking_robustness(
+        "hLF", ["A", "B", "C"], capacity_bandwidth_rankings={"x1.3": ["B", "A", "C"]}
+    )
+    with_flip = prioritize_value_of_information(
+        "hLF", [("A", 1.0), ("B", 0.5), ("C", 0.2)], ranking_robustness=robustness
+    )
+    assert with_flip.information_items[0]["ambiguity_kind"] == "capacity_flip"
+    assert with_flip.information_items[0]["priority_rank"] == 1
+
+    # invariants: no absolute yield prediction / promotion; absolute status unavailable
+    summary = summarize_value_of_information(with_flip)
+    assert summary["absolute_status"] == "unavailable"
+    assert any("does not predict" in w for w in summary["warnings"])
+    assert any("never promotes" in w for w in summary["warnings"])
 
 
 def test_lp_attribution_handles_missing_sensitivity_without_crashing() -> None:

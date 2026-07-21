@@ -139,6 +139,9 @@ def render_pichia_results() -> None:
     yield_recommendations = _yield_recommendation_payload(data)
     if yield_recommendations:
         _render_yield_improvement_recommendations(yield_recommendations)
+    value_of_information = _value_of_information_payload(data)
+    if value_of_information:
+        _render_value_of_information(value_of_information)
 
     candidate_path = data.get("candidate_table_path")
     if candidate_path and Path(candidate_path).exists():
@@ -234,6 +237,83 @@ def _yield_recommendation_payload(data: dict[str, object]) -> dict[str, object]:
         return {}
     payload = summary.get("yield_improvement_recommendations") if isinstance(summary, dict) else None
     return payload if isinstance(payload, dict) else {}
+
+
+def _value_of_information_payload(data: dict[str, object]) -> dict[str, object]:
+    payload = data.get("value_of_information")
+    if isinstance(payload, dict) and payload:
+        return payload
+    summary_path = data.get("summary_path")
+    if not summary_path or not Path(str(summary_path)).exists():
+        return {}
+    try:
+        summary = json.loads(Path(str(summary_path)).read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    payload = summary.get("value_of_information") if isinstance(summary, dict) else None
+    return payload if isinstance(payload, dict) else {}
+
+
+_VOI_AMBIGUITY_LABELS = {
+    "near_tie": "近似并列（模型分不清谁更好）",
+    "capacity_flip": "跨容量假设翻转",
+    "solver_flip": "跨求解器翻转",
+}
+
+
+def _render_value_of_information(payload: dict[str, object]) -> None:
+    items = [item for item in (payload.get("information_items") or []) if isinstance(item, dict)]
+    ranked = [row for row in (payload.get("ranked_candidates") or []) if isinstance(row, dict)]
+    if not items and not ranked:
+        return
+    with st.expander("排序可信度 & 该测什么（价值-of-information）", expanded=True):
+        st.caption(
+            "模型给的是相对排序、不是绝对产量。这里标出顶部名次里模型分不清的候选（排序不可信），"
+            "并给出最能消解歧义的最小湿实验——只排测量优先级，不预测结果、不自动认定谁更好。"
+        )
+        if payload.get("has_actionable_ambiguity"):
+            st.warning(
+                f"顶部排序有 {len(items)} 处歧义（近似并列或跨假设翻转），当前名次不完全可信——见下方建议测量。"
+            )
+        else:
+            st.success("顶部候选分数分离明显，当前相对排序较可信（未检测到近似并列或翻转）。")
+
+        frame = pd.DataFrame(
+            [
+                {"候选": str(row.get("candidate_id", "?")), "推荐分数": float(row.get("score") or 0.0), "名次": int(row.get("rank") or 0)}
+                for row in ranked
+                if row.get("score") is not None
+            ]
+        )
+        if not frame.empty:
+            head = frame.sort_values("名次").head(10)
+            figure = px.bar(
+                head,
+                x="推荐分数",
+                y="候选",
+                orientation="h",
+                title="候选排序：分数越接近越难区分（越该做湿实验测）",
+            )
+            figure.update_layout(
+                xaxis_title="推荐分数（相对，非绝对产量）",
+                yaxis_title="",
+                yaxis={"categoryorder": "total ascending"},
+            )
+            st.plotly_chart(figure, use_container_width=True)
+
+        if items:
+            rows = [
+                {
+                    "优先级": item.get("priority_rank"),
+                    "歧义类型": _VOI_AMBIGUITY_LABELS.get(str(item.get("ambiguity_kind")), str(item.get("ambiguity_kind"))),
+                    "涉及候选": "、".join(str(candidate) for candidate in (item.get("candidates") or [])),
+                    "建议测量": item.get("suggested_measurement"),
+                }
+                for item in items
+            ]
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        for warning in payload.get("warnings") or []:
+            st.caption(str(warning))
 
 
 def _render_protein_cost_analysis(protein_cost: dict[str, object]) -> None:

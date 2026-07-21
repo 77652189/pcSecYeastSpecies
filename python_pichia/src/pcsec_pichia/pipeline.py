@@ -11,11 +11,13 @@ from pcsec_pichia.analysis import (
     analyze_yield_improvement_candidates,
     classify_oe_dose_response_sweep,
     compare_solver_robustness,
+    prioritize_value_of_information,
     summarize_oe_dose_response_shape,
     summarize_protein_cost_slope_compatibility,
     summarize_protein_lp_attribution,
     summarize_solver_robustness,
     summarize_target_growth_analysis,
+    summarize_value_of_information,
     summarize_yield_improvement_recommendations,
 )
 from pcsec_pichia.alignment import (
@@ -386,6 +388,21 @@ def run_pichia_secretion_simulation(
         baseline_secretion_flux=simulation.secretion_flux,
         curated_gene_evidence=tuple(build_lightweight_secretion_gene_evidence(screen_model)),
     )
+    # R4 (ADR-004): value-of-information. Pure post-processing (no extra solve), so always computed
+    # when there is a candidate ranking. Flags where the model cannot confidently order candidates
+    # (near-tied recommendation scores = R3's "ranking not trustworthy" signal) and prioritizes the
+    # minimal measurement that would resolve it. It never predicts an outcome or promotes a candidate.
+    ranked_candidates = [
+        (candidate.candidate_id, candidate.recommendation_score)
+        for candidate in sorted(
+            yield_recommendations.recommended_candidates,
+            key=lambda candidate: candidate.recommendation_score,
+            reverse=True,
+        )
+    ]
+    value_of_information = summarize_value_of_information(
+        prioritize_value_of_information(target.target_id, ranked_candidates)
+    )
     report = write_simulation_outputs(
         simulation,
         tradeoff,
@@ -444,6 +461,7 @@ def run_pichia_secretion_simulation(
             "protein_cost_analysis": protein_cost_payload,
             "target_growth_analysis": summarize_target_growth_analysis(growth_analysis),
             "yield_improvement_recommendations": summarize_yield_improvement_recommendations(yield_recommendations),
+            "value_of_information": value_of_information,
             "alignment_summary": alignment_payload,
             "target_metadata": _target_metadata(target, request),
             "target_warnings": _target_warnings(target),
