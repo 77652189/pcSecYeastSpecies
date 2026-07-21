@@ -13,7 +13,7 @@ from app.services.pichia_background_tasks import (
     poll_background_simulation,
     save_last_result,
 )
-from app.core.i18n import sim_result_column_label, sim_result_value_label
+from app.core.i18n import sim_result_column_label, sim_result_value_label, sim_result_warning_label
 from app.ui.common import PATHS
 from app.ui.views.candidate_path_graph import render_secretion_path_graph
 from app.ui.views.simulation_display import (
@@ -140,7 +140,7 @@ def render_pichia_results() -> None:
     if warns:
         with st.expander("注意事项", expanded=False):
             for warning in warns:
-                st.warning(warning)
+                st.warning(sim_result_warning_label(warning))
     errors = data.get("errors") or []
     if errors:
         with st.expander("错误", expanded=True):
@@ -336,7 +336,7 @@ def _render_value_of_information(payload: dict[str, object]) -> None:
                 )
             st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
         for warning in payload.get("warnings") or []:
-            st.caption(str(warning))
+            st.caption(sim_result_warning_label(warning))
 
 
 def _render_protein_cost_analysis(protein_cost: dict[str, object]) -> None:
@@ -357,7 +357,7 @@ def _render_protein_cost_analysis(protein_cost: dict[str, object]) -> None:
         if isinstance(cost_slope, dict) and cost_slope:
             _render_cost_slope_compatibility(cost_slope)
         for warning in protein_cost.get("warnings") or []:
-            st.warning(str(warning))
+            st.warning(sim_result_warning_label(warning))
 
 
 def _render_solver_robustness(solver_robustness: dict[str, object]) -> None:
@@ -386,7 +386,7 @@ def _render_solver_robustness(solver_robustness: dict[str, object]) -> None:
             hide_index=True,
         )
     for warning in solver_robustness.get("warnings") or []:
-        st.warning(str(warning))
+        st.warning(sim_result_warning_label(warning))
 
 
 def _short_reaction_label(reaction_id: str, max_len: int = 34) -> str:
@@ -515,7 +515,7 @@ def _render_oe_dose_response(oe_dose_response: dict[str, object]) -> None:
         if shape.get("shape") == "non_monotonic_numerical_artifact":
             st.warning(f"{shape.get('reaction_id')}：{shape.get('detail', '')}")
     for warning in oe_dose_response.get("warnings") or []:
-        st.warning(str(warning))
+        st.warning(sim_result_warning_label(warning))
 
 
 def _lp_oe_bottleneck_frame(lp_attribution: dict[str, object]) -> pd.DataFrame:
@@ -670,7 +670,7 @@ def _render_lp_attribution(lp_attribution: dict[str, object]) -> None:
             hide_index=True,
         )
     for warning in lp_attribution.get("warnings") or []:
-        st.warning(str(warning))
+        st.warning(sim_result_warning_label(warning))
 
 
 def _render_cost_slope_compatibility(cost_slope: dict[str, object]) -> None:
@@ -715,7 +715,7 @@ def _render_cost_slope_compatibility(cost_slope: dict[str, object]) -> None:
         with st.expander("对比定义", expanded=False):
             st.json(comparison_scope)
     for warning in cost_slope.get("warnings") or []:
-        st.warning(str(warning))
+        st.warning(sim_result_warning_label(warning))
 
 
 def _render_cost_slope_ratio_policy(cost_slope: dict[str, object]) -> None:
@@ -768,7 +768,7 @@ def _render_target_growth_analysis(target_growth: dict[str, object]) -> None:
                 hide_index=True,
             )
         for warning in target_growth.get("warnings") or []:
-            st.warning(str(warning))
+            st.warning(sim_result_warning_label(warning))
 
 
 def _render_yield_improvement_recommendations(payload: dict[str, object]) -> None:
@@ -786,6 +786,19 @@ def _render_yield_improvement_recommendations(payload: dict[str, object]) -> Non
         rows = payload.get("recommended_candidates") or []
         if rows:
             frame = pd.DataFrame(rows)
+            # 单元格里的英文枚举码统一走集中字典翻译（表头由 display_columns 负责）
+            for enum_column in (
+                "recommendation_tier",
+                "recommendation_label",
+                "intervention_type",
+                "execution_mode",
+                "wet_lab_readiness",
+                "standard_name_status",
+                "model_gpr_executable",
+                "oe_reaction_proxy",
+            ):
+                if enum_column in frame.columns:
+                    frame[enum_column] = frame[enum_column].map(sim_result_value_label)
             display_columns = {
                 "recommendation_tier": "证据分级",
                 "recommendation_label": "推荐等级",
@@ -797,7 +810,7 @@ def _render_yield_improvement_recommendations(payload: dict[str, object]) -> Non
                 "standard_name_status": "命名状态",
                 "intervention_type": "扰动",
                 "execution_mode": "执行模式",
-                "delta_objective": "Δobjective",
+                "delta_objective": "Δ目标值",
                 "secretory_process": "分泌环节",
                 "database_annotation_sources": "数据库注释来源",
                 "model_gpr_executable": "模型 GPR 可执行",
@@ -812,7 +825,7 @@ def _render_yield_improvement_recommendations(payload: dict[str, object]) -> Non
             st.info("当前候选没有进入模型内提升推荐。")
         st.caption("gene-level KO 与 reaction-level OE proxy 是不同证据层级；OE proxy 不能直接等同于湿实验基因过表达。")
         for warning in payload.get("warnings") or []:
-            st.warning(str(warning))
+            st.warning(sim_result_warning_label(warning))
 
 
 __all__ = ["render_pichia_results"]

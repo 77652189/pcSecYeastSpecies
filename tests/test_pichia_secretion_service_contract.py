@@ -530,7 +530,7 @@ def test_streamlit_oe_dose_response_option_and_result_panel_are_localized() -> N
 
 def test_simulation_result_localization_goes_through_one_central_dictionary() -> None:
     # 用户要求：结果页的英文字段名/枚举值统一走一个集中字典翻译（app.core.i18n），避免散落、不一致、漏改。
-    from app.core.i18n import sim_result_column_label, sim_result_value_label
+    from app.core.i18n import sim_result_column_label, sim_result_value_label, sim_result_warning_label
     from app.ui.views.simulation_results import _localized_frame
 
     # 列名 -> 中文；未知列回退原文
@@ -551,6 +551,16 @@ def test_simulation_result_localization_goes_through_one_central_dictionary() ->
     )
     assert list(frame.columns) == ["反应", "边界类型", "影子价格绝对值"]
     assert frame["边界类型"].iloc[0].startswith("下限")
+    # 产量提升推荐表的单元格枚举也走同一字典
+    assert sim_result_value_label("model_executable") == "模型可执行"
+    assert sim_result_value_label("OE_reaction") == "反应级过表达（OE）"
+    # 引擎英文警告按标志性子串翻译；未命中回退原文
+    lp_warning = (
+        "LP sensitivity is a Python draft based on SciPy HiGHS marginals; "
+        "it is not MATLAB/SoPlex fully aligned shadow pricing."
+    )
+    assert sim_result_warning_label(lp_warning).startswith("LP 灵敏度")
+    assert sim_result_warning_label("a brand new unmapped warning") == "a brand new unmapped warning"
 
 
 def test_streamlit_relative_signal_charts_render_biologist_facing_figures() -> None:

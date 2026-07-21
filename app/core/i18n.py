@@ -208,12 +208,85 @@ SIMULATION_RESULT_VALUE_LABELS = {
     "eq": "等式约束",
     "ub": "上界约束",
     "lb": "下界约束",
+    # 产量提升推荐表枚举
+    "model_executable": "模型可执行",
+    "promising_but_proxy_only": "有潜力（仅反应代理）",
+    "not_recommended_low_evidence": "证据不足，暂不推荐",
+    "unresolved": "未解析",
+    "OE_reaction": "反应级过表达（OE）",
+    "OE_gene_proxy": "基因过表达（反应代理）",
+    "OE_gene": "基因过表达（OE）",
+    "KO_gene": "基因敲除（KO）",
+    "KO_reaction": "反应级敲除（KO）",
+    "reaction_level_oe_proxy": "反应级 OE 代理",
+    "gene_level_ko": "基因级敲除",
+    "model_only_not_experiment_ready": "仅模型内，未达实验就绪",
+    "experiment_calibrated": "已实验校准",
+    "not_gene_candidate": "非基因候选",
+    "gene_candidate": "基因候选",
     # 布尔
     True: "是",
     False: "否",
     "True": "是",
     "False": "否",
 }
+
+
+# 结果页里引擎生成的英文警告语句 -> 中文。用「标志性子串」匹配（而非整句精确匹配）：
+# 警告常量是多行拼接、偶有内插，子串匹配更稳、对轻微改动不敏感；命中第一条即用其中文，
+# 未命中回退显示原文。新增警告时在这里加一条 (子串, 中文)。
+SIMULATION_RESULT_WARNING_RULES = (
+    ("bound_type='lower') reflects a floor",
+     "下界（最低要求类）约束的大影子价格反映的是“最低需求”，而过表达放宽的是上限、解决不了下界——"
+     "把很大的 top_bound_marginals 当成 OE 线索前，先看 bound_type（实测：PDI1 单敲、核糖体装配都是很大的下界影子价格、但 OE 效果≈0）。"),
+    ("oe_actionable_bottlenecks lists only binding UPPER-bound",
+     "OE 可缓解瓶颈只列当前解处 binding 的上限天花板（OE 真能放宽的）；下界 floor 由“为什么受限”单列、OE 动不了。"
+     "OE 可缓解天花板只是线索不是保证：放宽后耦合结构会让瓶颈转移，用前请与真实 reaction_oe_tradeoff 交叉验证。"),
+    ("LP sensitivity is a Python draft",
+     "LP 灵敏度是基于 SciPy HiGHS 影子价格的 Python 草稿，不是 MATLAB/SoPlex 完全对齐的影子价格。"),
+    ("maximization problem is solved through SciPy minimization",
+     "最大化问题通过 SciPy 最小化求解，符号应按“草稿灵敏度证据”来理解。"),
+    ("Only compressed top-N attribution rows",
+     "报告与摘要只写压缩后的 top-N 归因行。"),
+    ("Solver robustness re-solves the same LP",
+     "求解器稳健性用不同 HiGHS 算法重解同一个 LP，不改变 corrected 管道的目标、约束或默认求解器。"),
+    ("'ranking-sensitive-to-solver' result means",
+     "“跨求解器翻转”表示瓶颈归因是退化最优处的数值假象，不能当作真实瓶颈上报。"),
+    ("OE dose-response sweep re-solves the target LP",
+     "OE 剂量响应扫描会在多个产能倍数下重解目标 LP；它是可选的相对探针，不改变默认单次仿真的目标值。"),
+    ("Objective values are relative model secretion",
+     "目标值是模型的相对分泌量、不是绝对滴度；倍数是产能乘子、不是实测表达量。"),
+    ("shape read near the noise floor",
+     "靠近噪声底（最大增益极小）时形状不可靠；“无响应”意为“模型无可检测响应”，不等于生物学上无关。"),
+    ("legacy single 2.0x OE point is one point",
+     "固定的 2.0× 单点只是这条曲线上的一个点；形状能看出该点是高估还是低估了可达的相对增益。"),
+    ("Value-of-information only prioritizes",
+     "价值-of-information 只对“测哪个最能消解排序歧义”排优先级，不预测测量结果、也不预测任何绝对产量。"),
+    ("never promotes a candidate to experiment_calibrated",
+     "不会把任何候选提升为 experiment_calibrated 或绝对可执行；绝对状态保持 unavailable。"),
+    ("Priority is relative to the current model ranking",
+     "优先级只相对于当前模型排序里的歧义，是湿实验规划辅助、不是结论。"),
+    ("Ranking robustness is a RELATIVE signal",
+     "排序稳健性是相对信号：只说明候选排序在扰动容量假设/换求解器时稳不稳，绝不断言绝对容量。"),
+    ("swept bandwidth is an uncertainty",
+     "扫描带宽是不确定性分析输入，不是容量值或 mg/L，不得写入正式容量资产、不得作为 promotion 依据。"),
+    ("Absolute capacity / executability stays",
+     "无论排序结论如何，绝对容量 / 可执行性都保持 unavailable。"),
+    ("MATLAB-compatible protein cost slope mode is disabled",
+     "MATLAB 兼容蛋白成本斜率模式默认关闭。"),
+    ("MATLAB-compatible cost slope mode is an opt-in",
+     "MATLAB 兼容成本斜率模式是可选的 Python 草稿探针，不替代默认 corrected 管道。"),
+    ("Definition: fix target exchange ratios",
+     "定义：固定目标分泌比例和生长率，再优化葡萄糖摄取 Ex_glc_D 以估算葡萄糖成本斜率。"),
+    ("Ribosome slope uses Mach_Ribosome",
+     "核糖体斜率在该反应可用时取 Mach_Ribosome_complex_formation 通量，否则报告为不可用。"),
+    ("Cost slope medium compatibility mode",
+     "成本斜率的培养基兼容模式已设置；未应用 MATLAB 历史培养基边界。"),
+    ("No explicit target secretion ratios were provided",
+     "未提供显式目标分泌比例，成本斜率比例按当前分泌 capacity 分数自动生成。"),
+    ("At least one cost-slope row produced positive Ex_glc_D flux",
+     "至少有一行成本斜率产生了正的 Ex_glc_D 通量，该行不按葡萄糖摄取成本处理。"),
+)
 
 
 def sim_result_column_label(name: object) -> str:
@@ -228,6 +301,15 @@ def sim_result_value_label(value: object) -> str:
     if value in SIMULATION_RESULT_VALUE_LABELS:
         return SIMULATION_RESULT_VALUE_LABELS[value]
     return SIMULATION_RESULT_VALUE_LABELS.get(str(value), str(value))
+
+
+def sim_result_warning_label(text: object) -> str:
+    """结果页引擎英文警告 -> 中文（按标志性子串匹配，命中即翻译；未命中回退原文）。"""
+    raw = str(text)
+    for marker, chinese in SIMULATION_RESULT_WARNING_RULES:
+        if marker in raw:
+            return chinese
+    return raw
 
 
 def species_label(code: str | None) -> str:
