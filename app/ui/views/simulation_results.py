@@ -246,6 +246,9 @@ def _render_protein_cost_analysis(protein_cost: dict[str, object]) -> None:
         solver_robustness = protein_cost.get("solver_robustness")
         if isinstance(solver_robustness, dict) and solver_robustness:
             _render_solver_robustness(solver_robustness)
+        oe_dose_response = protein_cost.get("oe_dose_response")
+        if isinstance(oe_dose_response, dict) and oe_dose_response:
+            _render_oe_dose_response(oe_dose_response)
         cost_slope = protein_cost.get("cost_slope_compatibility")
         if isinstance(cost_slope, dict) and cost_slope:
             _render_cost_slope_compatibility(cost_slope)
@@ -275,6 +278,61 @@ def _render_solver_robustness(solver_robustness: dict[str, object]) -> None:
     if per_method:
         st.dataframe(pd.DataFrame(per_method), use_container_width=True, hide_index=True)
     for warning in solver_robustness.get("warnings") or []:
+        st.warning(str(warning))
+
+
+_OE_DOSE_RESPONSE_SHAPE_LABELS = {
+    "saturating": "饱和型（适度过表达就够，再加收益递减）",
+    "linear": "线性型（还在涨，值得进一步加大表达）",
+    "threshold": "阈值型（要超过某个最小倍数才起效）",
+    "flat_no_response": "无响应（任何倍数都几乎没提升，别过表达）",
+    "non_monotonic_numerical_artifact": "非单调（数值假象，不可作结论）",
+    "insufficient_points": "数据点不足",
+}
+
+
+def _render_oe_dose_response(oe_dose_response: dict[str, object]) -> None:
+    st.markdown("**OE 剂量响应形状（过表达越多，分泌是持续上升还是很快到顶）**")
+    st.caption(
+        "对候选反应扫描一组过表达倍数，把分泌响应的形状分类——替代只在固定 2× 一个点看提升。"
+        "这是相对形状信号，只说明趋势，不产出绝对产量或最优倍数。"
+    )
+    baseline = oe_dose_response.get("baseline_objective")
+    baseline_txt = f"{float(baseline):.4g}" if isinstance(baseline, (int, float)) else "—"
+    factors = oe_dose_response.get("tested_factors") or []
+    factors_txt = "、".join(f"{float(f):g}×" for f in factors) or "—"
+    c1, c2 = st.columns([1, 2])
+    with c1:
+        st.metric("无 OE 基线分泌目标", baseline_txt)
+    with c2:
+        st.metric("扫描的过表达倍数", factors_txt)
+
+    def _pct(value: object) -> str:
+        return f"{value * 100:.2f}%" if isinstance(value, (int, float)) else "—"
+
+    shapes = [s for s in (oe_dose_response.get("reaction_shapes") or []) if isinstance(s, dict)]
+    rows = [
+        {
+            "反应": shape.get("reaction_id", "—"),
+            "形状": _OE_DOSE_RESPONSE_SHAPE_LABELS.get(str(shape.get("shape")), str(shape.get("shape"))),
+            "最大相对增益": _pct(shape.get("max_relative_gain")),
+            "半增益倍数(拐点)": (
+                f"{float(shape['half_gain_factor']):g}×" if shape.get("half_gain_factor") is not None else "—"
+            ),
+            "最强剂量处相对增益": _pct(shape.get("relative_gain_at_max_factor")),
+            "单调不减": shape.get("monotonic_non_decreasing", "—"),
+        }
+        for shape in shapes
+    ]
+    if rows:
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    else:
+        st.caption("（没有可用的剂量响应结果）")
+    # A decrease that OE cannot truly cause is a degenerate-optimum artifact: flag it explicitly.
+    for shape in shapes:
+        if shape.get("shape") == "non_monotonic_numerical_artifact":
+            st.warning(f"{shape.get('reaction_id')}：{shape.get('detail', '')}")
+    for warning in oe_dose_response.get("warnings") or []:
         st.warning(str(warning))
 
 

@@ -55,6 +55,8 @@ class PichiaSecretionRunRequest(BaseModel):
     enable_cost_slope_compatibility: bool = False
     cost_slope_medium_compatibility_mode: str = "corrected"
     enable_solver_robustness_check: bool = False
+    enable_oe_dose_response: bool = False
+    oe_dose_response_reaction_limit: int = 3
     mu: float = 0.10
     media_type: int = 4
     carbon_source_id: str = "glucose"
@@ -89,6 +91,8 @@ class PichiaSecretionRunRequest(BaseModel):
             enable_cost_slope_compatibility=self.enable_cost_slope_compatibility,
             cost_slope_medium_compatibility_mode=self.cost_slope_medium_compatibility_mode,
             enable_solver_robustness_check=self.enable_solver_robustness_check,
+            enable_oe_dose_response=self.enable_oe_dose_response,
+            oe_dose_response_reaction_limit=self.oe_dose_response_reaction_limit,
             mu=self.mu,
             media_type=self.media_type,
             carbon_source_id=self.carbon_source_id,

@@ -103,6 +103,7 @@ def _render_pichia_builder() -> None:
                       enable_cost_slope_compatibility=build_state.enable_cost_slope_compatibility,
                       cost_slope_medium_compatibility_mode=build_state.cost_slope_medium_compatibility_mode,
                       enable_solver_robustness_check=build_state.enable_solver_robustness_check,
+                      enable_oe_dose_response=build_state.enable_oe_dose_response,
                       mu=build_state.mu, media_type=build_state.media_type, carbon_source_id=build_state.carbon_source_id,
                       ko_gene_ids=gene_state.ko_gene_ids,
                       ko_reaction_ids=gene_state.ko_reaction_ids,

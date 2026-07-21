@@ -44,6 +44,7 @@ class TargetBuildFormState:
     enable_cost_slope_compatibility: bool
     cost_slope_medium_compatibility_mode: str
     enable_solver_robustness_check: bool
+    enable_oe_dose_response: bool
     mu: float
     media_type: int
     carbon_source_id: str
@@ -168,6 +169,17 @@ def render_target_build_form() -> TargetBuildFormState:
             "勾选后每多一个求解算法就多跑一次完整 pcSec LP，不影响默认分泌仿真本身的数值结果，也不改默认求解器。"
         ),
     )
+    enable_oe_dose_response = st.checkbox(
+        "启用 OE 剂量响应形状（扫描多个过表达倍数，看分泌提升会很快到顶还是持续上升，较慢）",
+        value=False,
+        help=(
+            "默认的过表达筛查只在固定 2× 一个点上测提升，看不出再加大表达量还有没有用。"
+            "勾选后会对候选反应扫描一组过表达倍数（默认 1.25/1.5/2/3/5/8×），把分泌响应形状分成四类："
+            "饱和型（适度过表达就够，再加收益递减）、线性型（还在涨，值得进一步加大）、"
+            "阈值型（要超过某个最小倍数才起效）、无响应（任何倍数都几乎没提升，别过表达这个基因）。"
+            "这是相对形状信号，不产出绝对产量或最优倍数；每个倍数都要多跑一次 LP，不影响默认分泌仿真的数值结果。"
+        ),
+    )
     cost_slope_medium_compatibility_mode = "corrected"
     if enable_cost_slope_compatibility:
         cost_slope_medium_compatibility_mode = st.selectbox(
@@ -231,6 +243,7 @@ def render_target_build_form() -> TargetBuildFormState:
         enable_cost_slope_compatibility=enable_cost_slope_compatibility,
         cost_slope_medium_compatibility_mode=cost_slope_medium_compatibility_mode,
         enable_solver_robustness_check=enable_solver_robustness_check,
+        enable_oe_dose_response=enable_oe_dose_response,
         mu=float(mu),
         media_type=media_type,
         carbon_source_id=str(carbon_source_id),

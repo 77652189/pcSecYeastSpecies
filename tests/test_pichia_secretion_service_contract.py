@@ -67,7 +67,9 @@ def test_runner_refreshes_stale_pcsec_analysis_module(monkeypatch) -> None:
     def fake_reload(module):
         module.analyze_target_growth_impact = lambda *args, **kwargs: None
         module.analyze_yield_improvement_candidates = lambda *args, **kwargs: None
+        module.classify_oe_dose_response_sweep = lambda *args, **kwargs: ()
         module.compare_solver_robustness = lambda *args, **kwargs: None
+        module.summarize_oe_dose_response_shape = lambda *args, **kwargs: {}
         module.summarize_protein_cost_slope_compatibility = lambda *args, **kwargs: {}
         module.summarize_solver_robustness = lambda *args, **kwargs: {}
         module.summarize_yield_improvement_recommendations = lambda *args, **kwargs: {}
@@ -502,6 +504,24 @@ def test_streamlit_solver_robustness_option_and_result_panel_are_localized() -> 
     assert "ranking-sensitive-to-solver" in results_source
     # service facade threads the flag through to the engine request
     assert "enable_solver_robustness_check=bool(request.enable_solver_robustness_check)" in runner_source
+
+
+def test_streamlit_oe_dose_response_option_and_result_panel_are_localized() -> None:
+    builder_source = (REPO_ROOT / "app" / "ui" / "views" / "simulation_builder.py").read_text(encoding="utf-8")
+    results_source = (REPO_ROOT / "app" / "ui" / "views" / "simulation_results.py").read_text(encoding="utf-8")
+    runner_source = (REPO_ROOT / "app" / "services" / "pichia_secretion_runner.py").read_text(encoding="utf-8")
+
+    # builder checkbox is present and explains that it replaces the single fixed 2x point
+    assert "启用 OE 剂量响应形状（扫描多个过表达倍数，看分泌提升会很快到顶还是持续上升，较慢）" in builder_source
+    assert "默认的过表达筛查只在固定 2× 一个点上测提升" in builder_source
+    # result panel surfaces the shape taxonomy in plain Chinese for the research staff
+    assert "OE 剂量响应形状（过表达越多，分泌是持续上升还是很快到顶）" in results_source
+    assert "饱和型（适度过表达就够，再加收益递减）" in results_source
+    assert "无响应（任何倍数都几乎没提升，别过表达）" in results_source
+    # relative-signal framing must be explicit; no absolute capacity/optimal-dose claims
+    assert "不产出绝对产量或最优倍数" in results_source
+    # service facade threads the flag through to the engine request
+    assert "enable_oe_dose_response=bool(request.enable_oe_dose_response)" in runner_source
 
 
 def test_python_draft_service_does_not_depend_on_legacy_app_engines() -> None:

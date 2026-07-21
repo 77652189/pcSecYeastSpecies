@@ -48,6 +48,8 @@ def run_pichia_pipeline_draft(
             cost_slope_medium_compatibility_mode=str(request.cost_slope_medium_compatibility_mode),
             enable_solver_robustness_check=bool(request.enable_solver_robustness_check),
             solver_robustness_methods=tuple(request.solver_robustness_methods),
+            enable_oe_dose_response=bool(request.enable_oe_dose_response),
+            oe_dose_response_reaction_limit=int(request.oe_dose_response_reaction_limit),
             **sequence_contract,
         )
         result = run_pichia_secretion_simulation(engine_request, output_dir=output_dir)
@@ -129,7 +131,9 @@ def _ensure_pcsec_pichia_analysis_api() -> None:
     required = {
         "analyze_target_growth_impact",
         "analyze_yield_improvement_candidates",
+        "classify_oe_dose_response_sweep",
         "compare_solver_robustness",
+        "summarize_oe_dose_response_shape",
         "summarize_protein_cost_slope_compatibility",
         "summarize_solver_robustness",
         "summarize_yield_improvement_recommendations",

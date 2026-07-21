@@ -46,6 +46,8 @@ class SecretionRunRequest:
     cost_slope_medium_compatibility_mode: str = "corrected"
     enable_solver_robustness_check: bool = False
     solver_robustness_methods: tuple[str, ...] = ("highs-ds", "highs-ipm")
+    enable_oe_dose_response: bool = False
+    oe_dose_response_reaction_limit: int = 3
     mu: float = 0.10
     media_type: int = 4
     carbon_source_id: str = "glucose"
