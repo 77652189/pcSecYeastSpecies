@@ -499,7 +499,8 @@ def test_streamlit_solver_robustness_option_and_result_panel_are_localized() -> 
     assert "对偶解在退化最优解处并不唯一" in builder_source
     # result panel surfaces the OE-actionable vs floor split and the solver-robustness verdict
     assert "OE 可缓解瓶颈（binding 上限，按复合体）" in results_source
-    assert "下界/floor 约束（OE 动不了，仅供参考）" in results_source
+    # the floor block was reframed as the 'why is it limited' answer (largest shadow prices, OE cannot relax)
+    assert "为什么受限：最强约束层（下界/最低要求，OE 动不了）" in results_source
     assert "求解器稳健性（瓶颈归因是否跨求解器稳定）" in results_source
     assert "ranking-sensitive-to-solver" in results_source
     # service facade threads the flag through to the engine request
