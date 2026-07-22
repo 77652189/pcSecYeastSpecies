@@ -33,10 +33,10 @@ def render_overview() -> None:
     )
 
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("可浏览结果文件", len(datasets))
-    col2.metric("结果主题数量", datasets["category_label"].nunique() if not datasets.empty else 0)
-    col3.metric("模型物种数量", 3)
-    col4.metric("最近输出文件", len(RunLogService(PATHS).recent_files()))
+    col1.metric("结果文件", len(datasets))
+    col2.metric("结果主题", datasets["category_label"].nunique() if not datasets.empty else 0)
+    col3.metric("模型物种", 3)
+    col4.metric("最近输出", len(RunLogService(PATHS).recent_files()))
 
     with st.expander("这个网站能做什么、输入是什么、输出是什么", expanded=True):
         st.markdown(

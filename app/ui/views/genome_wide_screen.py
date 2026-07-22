@@ -14,7 +14,7 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from app.core.i18n import sim_result_value_label, sim_result_warning_label
+from app.core.i18n import sim_result_column_label, sim_result_value_label, sim_result_warning_label
 from app.services import genome_wide_screen_analysis as analysis
 from app.services import genome_wide_screen_service as service
 from app.services import genome_wide_screen_shortlist as shortlist_service
@@ -150,13 +150,13 @@ def _run_table_frame(runs: list[RunInfo]) -> pd.DataFrame:
     return pd.DataFrame(
         [
             {
-                "run_name": run.run_name,
-                "状态": run.status,
+                "运行名": run.run_name,
+                "状态": sim_result_value_label(run.status),
                 "进度": run.progress_label,
                 "靶点": ", ".join(run.targets),
-                "模式": run.mode,
+                "模式": sim_result_value_label(run.mode),
                 "更新时间": run.updated_at,
-                "心跳超时未更新": run.is_stale,
+                "心跳超时未更新": sim_result_value_label(run.is_stale),
             }
             for run in runs
         ]
@@ -307,7 +307,7 @@ def _render_results_section(paths, runs: list[RunInfo]) -> None:
         with tabs[-1]:
             divergence = analysis.analyze_target_divergence(frame, target_ids)
             st.markdown("同一个基因的KO，在不同靶点上效应差异最大的候选：")
-            st.dataframe(divergence, width='stretch', hide_index=True)
+            st.dataframe(_localize_screen_frame(divergence), width='stretch', hide_index=True)
 
     st.divider()
     _render_llm_report_section(paths, selected_run, csv_path)
@@ -344,7 +344,7 @@ def _render_shortlist_readout(readout: dict, *, target_id: str) -> None:
                 "（floor≠可 OE 杠杆）。此 R1 读出对该靶点单独计算、单独缓存，不是本次筛查的产物。"
             )
             floor_frame = pd.DataFrame(
-                [{"反应": str(f["reaction_id"]), "影子价格(绝对值)": float(f["abs_marginal"])} for f in floors]
+                [{"反应": _short_reaction(f["reaction_id"]), "影子价格(绝对值)": float(f["abs_marginal"])} for f in floors]
             )
             figure = px.bar(
                 floor_frame.sort_values("影子价格(绝对值)"),
@@ -521,10 +521,44 @@ def _render_dose_response_curve(readout: dict, shortlist: list) -> None:
     st.plotly_chart(figure, use_container_width=True)
 
 
+_SCREEN_VALUE_COLUMNS = (
+    "candidate_kind",
+    "gpr_role",
+    "intervention_type",
+    "feasibility_interpretation",
+    "annotation_confidence",
+    "standard_name_status",
+    "has_timeout",
+    "secretory_process",
+)
+
+
+def _localize_screen_frame(df: pd.DataFrame) -> pd.DataFrame:
+    """筛查表的展示用中文副本：枚举列映射成中文、列名走中央 i18n 字典。不改原 df——
+    行选择逻辑仍按原始英文列名（`gene_id` 等）读，见 _render_verifiable_table。"""
+    if len(df.columns) == 0:
+        return df  # 真正无列的空 df 无需处理；有列的空 df 仍要汉化表头
+    display = df.copy()
+    for column in _SCREEN_VALUE_COLUMNS:
+        if column in display.columns:
+            display[column] = display[column].map(sim_result_value_label)
+    return display.rename(columns={column: sim_result_column_label(column) for column in display.columns})
+
+
+def _short_reaction(reaction_id: object) -> str:
+    """去掉复合体反应名冗长的样板后缀，缩短图表 y 轴标签（模型自身实体名，非保密内容）。"""
+    label = str(reaction_id)
+    for suffix in ("_complex_formation", "_complex", "_formation"):
+        if label.endswith(suffix):
+            label = label[: -len(suffix)]
+            break
+    return label if len(label) <= 34 else label[:31] + "…"
+
+
 def _render_dimension_tables(result: analysis.DimensionalResults) -> None:
     st.metric("必需基因数（KO后任何测试生长速率下都不可行）", len(result.essential_genes))
     with st.expander(f"必需基因清单（{len(result.essential_genes)}）"):
-        st.dataframe(result.essential_genes, width='stretch', hide_index=True)
+        st.dataframe(_localize_screen_frame(result.essential_genes), width='stretch', hide_index=True)
 
     if not result.solver_inconclusive_rows.empty:
         st.warning(
@@ -532,10 +566,10 @@ def _render_dimension_tables(result: analysis.DimensionalResults) -> None:
             "这些不是必需基因结论。"
         )
     with st.expander(f"求解未定的候选行（{len(result.solver_inconclusive_rows)}）", expanded=False):
-        st.dataframe(result.solver_inconclusive_rows, width='stretch', hide_index=True)
+        st.dataframe(_localize_screen_frame(result.solver_inconclusive_rows), width='stretch', hide_index=True)
 
     with st.expander(f"求解器重试证据（{len(result.solver_retry_evidence)}）", expanded=False):
-        st.dataframe(result.solver_retry_evidence, width='stretch', hide_index=True)
+        st.dataframe(_localize_screen_frame(result.solver_retry_evidence), width='stretch', hide_index=True)
 
     st.markdown(f"**产量升高但生长受损的KO候选（{len(result.ko_yield_up_growth_cost)}）** — 需要额外生物学方法补救才具备实验可行性")
     _render_verifiable_table(
@@ -600,10 +634,10 @@ def _render_verifiable_table(df: pd.DataFrame, *, target_id: str, intervention_t
     in one click instead of re-typing the target/gene IDs by hand.
     """
     if df.empty:
-        st.dataframe(df, width='stretch', hide_index=True)
+        st.dataframe(_localize_screen_frame(df), width='stretch', hide_index=True)
         return
     event = st.dataframe(
-        df,
+        _localize_screen_frame(df),  # 展示用中文副本
         width='stretch',
         hide_index=True,
         on_select="rerun",
@@ -612,7 +646,7 @@ def _render_verifiable_table(df: pd.DataFrame, *, target_id: str, intervention_t
     )
     selected_rows = event.selection.rows if event and event.selection else []
     if selected_rows:
-        row = df.iloc[selected_rows[0]]
+        row = df.iloc[selected_rows[0]]  # 行选择按原始英文列 df、按位置对齐（展示副本行序一致）
         candidate_id = str(row["gene_id"])
         candidate_kind = str(row["candidate_kind"]) if "candidate_kind" in row else "gene"
         common_name = str(row["common_name"]) if "common_name" in row and row["common_name"] else ""
@@ -648,11 +682,13 @@ def _render_llm_report_section(paths, selected_run: RunInfo, csv_path: Path) -> 
 
     target_summary = fact_summary.get("targets", {})
     st.dataframe(
-        pd.DataFrame(
-            [
-                {"靶点": target, **counts}
-                for target, counts in target_summary.items()
-            ]
+        _localize_screen_frame(
+            pd.DataFrame(
+                [
+                    {"靶点": target, **counts}
+                    for target, counts in target_summary.items()
+                ]
+            )
         ),
         width="stretch",
         hide_index=True,

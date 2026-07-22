@@ -58,5 +58,6 @@ def test_dimension_tables_surface_solver_retry_evidence(monkeypatch) -> None:
 
     genome_wide_screen._render_dimension_tables(result)
 
-    assert any(df is retry_evidence for df in rendered_dataframes)
+    # 汉化后渲染的是中文列名的展示副本（不再是原始实例），断言行内容仍到达 st.dataframe
+    assert any(hasattr(df, "to_string") and "PAS_TEST_0001" in df.to_string() for df in rendered_dataframes)
     assert any("求解器重试证据" in label for label in expander_labels)
