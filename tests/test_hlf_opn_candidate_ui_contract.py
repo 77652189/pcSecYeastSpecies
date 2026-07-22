@@ -100,7 +100,7 @@ def test_hlf_opn_candidate_frame_shows_required_evidence_boundaries() -> None:
 
     assert {
         "目标",
-        "gene_id",
+        "基因",
         "标准命名",
         "标准符号",
         "蛋白注释",
@@ -158,7 +158,7 @@ def test_hlf_opn_panel_filters_context_and_adds_only_executable_inputs(monkeypat
     assert fake_st.session_state["pichia_draft_oe_genes"] == "PAS_OE"
     rendered = "\n".join(frame.to_csv(index=False) for frame in fake_st.dataframes)
     assert "PAS_NOT_MODEL" in rendered
-    assert "not_in_model" in rendered
+    assert "不在模型内" in rendered  # operability_status 已汉化（原 not_in_model）
 
 
 def _candidate_row(

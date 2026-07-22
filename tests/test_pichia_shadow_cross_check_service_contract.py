@@ -162,7 +162,7 @@ def test_shadow_cross_check_view_initializes_session_and_triggers_service(monkey
     assert view.SHADOW_CROSS_CHECK_STATE_KEY in fake_st.session_state
     assert view.SHADOW_CROSS_CHECK_MANIFEST_KEY in fake_st.session_state
     assert fake_st.session_state[view.SHADOW_CROSS_CHECK_STATE_KEY]["status"] == "ok"
-    assert fake_st.success_calls == ["aligned"]
+    assert fake_st.success_calls == ["一致（shadow LP 与参考结果对齐）"]
     assert any("cross_check_report.md" in item for item in fake_st.code_calls)
 
 

@@ -433,14 +433,14 @@ def _render_validation(payload: dict[str, Any] | None) -> None:
         st.error("存在阻止正式核对的问题；修正后请作为新 run 重新上传。")
         st.dataframe(
             _translate_rows(errors, column_labels=issue_columns, value_maps=issue_value_maps),
-            use_container_width=True,
+            width='stretch',
             hide_index=True,
         )
     if warnings:
         st.warning("以下记录已保留，但需要复核。")
         st.dataframe(
             _translate_rows(warnings, column_labels=issue_columns, value_maps=issue_value_maps),
-            use_container_width=True,
+            width='stretch',
             hide_index=True,
         )
     run_dir = Path(str(payload.get("run_dir") or ""))
@@ -500,7 +500,7 @@ def _render_linkage(payload: dict[str, Any] | None) -> None:
         }
         st.dataframe(
             _translate_rows(links, column_labels=column_labels, value_maps=value_maps),
-            use_container_width=True,
+            width='stretch',
             hide_index=True,
         )
     else:
@@ -576,7 +576,7 @@ def _render_calibration(payload: dict[str, Any] | None) -> None:
                         "relative_baseline_enrichment": "相对基线富集倍数",
                     },
                 ),
-                use_container_width=True,
+                width='stretch',
                 hide_index=True,
             )
         tier_rows = target.get("evidence_tier_metrics") or []
@@ -591,7 +591,7 @@ def _render_calibration(payload: dict[str, Any] | None) -> None:
                         "hit_rate": "命中率",
                     },
                 ),
-                use_container_width=True,
+                width='stretch',
                 hide_index=True,
             )
         target_records = [record for record in records if record.get("target_id") == target_id]
@@ -632,7 +632,7 @@ def _render_calibration(payload: dict[str, Any] | None) -> None:
                     list_columns=list_columns,
                     reason_columns=("ineligibility_reasons",),
                 ),
-                use_container_width=True,
+                width='stretch',
                 hide_index=True,
             )
 

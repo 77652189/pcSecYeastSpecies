@@ -9,6 +9,7 @@ from app.ui.common import PATHS, rename_columns
 
 
 def render_logs() -> None:
+    st.header("运行日志")
     st.markdown(
         """
         <div class="concept-box">
@@ -32,7 +33,7 @@ def render_logs() -> None:
         st.info("local_runs 目录暂无文件。")
     else:
         recent["修改时间"] = pd.to_datetime(recent["修改时间"], unit="s").dt.strftime("%Y-%m-%d %H:%M:%S")
-        st.dataframe(rename_columns(recent, RUN_FILE_COLUMN_LABELS), use_container_width=True, hide_index=True)
+        st.dataframe(rename_columns(recent, RUN_FILE_COLUMN_LABELS), width='stretch', hide_index=True)
 
     latest, summary = service.latest_soplex_summary()
     if latest and summary:
@@ -47,7 +48,7 @@ def render_logs() -> None:
                 }
             ]
         )
-        st.dataframe(rename_columns(display, SOPLEX_COLUMN_LABELS), use_container_width=True, hide_index=True)
+        st.dataframe(rename_columns(display, SOPLEX_COLUMN_LABELS), width='stretch', hide_index=True)
         with st.expander("查看输出文件末尾日志"):
             text = latest.read_text(encoding="utf-8", errors="replace")
             st.code(text[-12000:], language="text")

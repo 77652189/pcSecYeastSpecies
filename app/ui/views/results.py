@@ -11,6 +11,7 @@ from app.ui.common import PATHS, cached_loaded_dataset, dataset_frame, rename_co
 
 
 def render_results_browser() -> None:
+    st.header("结果浏览")
     datasets = dataset_frame()
     st.markdown(
         """
@@ -54,7 +55,7 @@ def render_results_browser() -> None:
     display_columns = ["name", "category_label", "species_label", "suffix", "size_kb", "modified_at", "id"]
     st.dataframe(
         rename_columns(filtered[display_columns], DATASET_COLUMN_LABELS),
-        use_container_width=True,
+        width='stretch',
         hide_index=True,
     )
     if filtered.empty:
@@ -74,13 +75,13 @@ def render_results_browser() -> None:
 
     if loaded.variable_summary:
         st.markdown("**MATLAB 变量摘要**")
-        st.dataframe(pd.DataFrame(loaded.variable_summary), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(loaded.variable_summary), width='stretch', hide_index=True)
 
     table_names = list(loaded.tables)
     if table_names:
         table_name = st.selectbox("表格或变量", table_names)
         table = pd.DataFrame(loaded_data["tables"][table_name])
-        st.dataframe(table, use_container_width=True, hide_index=True)
+        st.dataframe(table, width='stretch', hide_index=True)
 
         with st.expander("图怎么看"):
             st.markdown(
@@ -91,7 +92,7 @@ def render_results_browser() -> None:
             )
         figure = PlotBuilder().build_chart(loaded, table_name)
         if figure is not None:
-            st.plotly_chart(figure, use_container_width=True)
+            st.plotly_chart(figure, width='stretch')
         else:
             st.info("这个数据集没有适合自动绘图的数值列，建议下载原始文件进一步查看。")
 

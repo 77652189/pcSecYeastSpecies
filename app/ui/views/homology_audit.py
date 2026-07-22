@@ -284,7 +284,7 @@ def _render_rows_table(title: str, rows: list[dict[str, Any]], columns: dict[str
     if not rows:
         st.info("当前筛选条件下没有可显示的行。")
         return
-    st.dataframe(_rows_to_frame(rows, columns), use_container_width=True, hide_index=True)
+    st.dataframe(_rows_to_frame(rows, columns), width='stretch', hide_index=True)
 
 
 def _render_add_to_simulation_controls(rule_rows: list[dict[str, Any]]) -> None:
@@ -484,7 +484,7 @@ def _render_external_reference_cache_status(
     if warnings:
         st.info("外部参考告警: " + "; ".join(str(item) for item in warnings))
     if external_rows:
-        st.dataframe(_rows_to_frame(external_rows, EXTERNAL_REFERENCE_COLUMNS), use_container_width=True, hide_index=True)
+        st.dataframe(_rows_to_frame(external_rows, EXTERNAL_REFERENCE_COLUMNS), width='stretch', hide_index=True)
     else:
         st.info("当前外部参考缓存中没有可显示的基因功能或 GPR 候选行。")
 

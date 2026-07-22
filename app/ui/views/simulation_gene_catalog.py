@@ -87,7 +87,7 @@ def _render_search_results(query: str) -> None:
                 for row in rows
             ]
         ),
-        use_container_width=True,
+        width='stretch',
         hide_index=True,
     )
     if truncated_count:
@@ -305,7 +305,7 @@ def _render_gene_rule_overlay_lookup(query: str) -> None:
                 for row in rows
             ]
         ),
-        use_container_width=True,
+        width='stretch',
         hide_index=True,
     )
 

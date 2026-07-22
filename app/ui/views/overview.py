@@ -13,6 +13,7 @@ def render_overview() -> None:
     health = cached_health()
     items = pd.DataFrame(health["items"])
 
+    st.header("项目总览")
     st.markdown(
         """
         <div class="concept-box">
@@ -55,7 +56,7 @@ def render_overview() -> None:
         status_order = {"ok": 0, "warning": 1, "missing": 2, "error": 3}
         items["sort"] = items["status"].map(status_order).fillna(9)
         display = items.sort_values(["sort", "name"])[["name", "status_label", "detail"]]
-        st.dataframe(rename_columns(display, HEALTH_COLUMN_LABELS), use_container_width=True, hide_index=True)
+        st.dataframe(rename_columns(display, HEALTH_COLUMN_LABELS), width='stretch', hide_index=True)
     with st.expander("怎么看部署状态"):
         st.markdown(
             """
@@ -74,7 +75,7 @@ def render_overview() -> None:
                 {"物种": "马克斯克鲁维酵母（K. marxianus）", "代码": "KMX", "模型": "pcSecKmarx", "当前功能": "结果浏览"},
             ]
         ),
-        use_container_width=True,
+        width='stretch',
         hide_index=True,
     )
 

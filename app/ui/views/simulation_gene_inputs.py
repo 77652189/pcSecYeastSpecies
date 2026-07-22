@@ -208,7 +208,7 @@ def _render_screen_input_preview(target_id: str, state: GenePerturbationFormStat
                 }
             )
     if preview_rows:
-        st.dataframe(pd.DataFrame(preview_rows), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(preview_rows), width='stretch', hide_index=True)
     else:
         st.info("当前没有手动 KO/OE 输入；正式运行会使用小规模默认 smoke 候选。")
 
@@ -216,7 +216,7 @@ def _render_screen_input_preview(target_id: str, state: GenePerturbationFormStat
     if mapping_rows:
         st.markdown("**基因影响路径预览**")
         st.caption("该表只解释 gene -> reaction -> 分泌环节映射，不运行求解器，也不改变 KO/OE 数值结果。")
-        st.dataframe(gene_mapping_rows_for_display(mapping_rows), use_container_width=True, hide_index=True)
+        st.dataframe(gene_mapping_rows_for_display(mapping_rows), width='stretch', hide_index=True)
 
 
 def _join_values(value: object) -> str:

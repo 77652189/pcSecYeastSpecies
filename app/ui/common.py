@@ -226,7 +226,7 @@ def sidebar_navigation() -> str:
     elif NAV_RADIO_KEY not in st.session_state:
         _set_current_page(DEFAULT_PAGE)
 
-    st.sidebar.title("演示导航")
+    st.sidebar.title("功能导航")
     for group_index, (label, options) in enumerate(NAV_GROUPS):
         st.sidebar.caption(f"**{label}**")
         st.sidebar.radio(
@@ -243,7 +243,7 @@ def sidebar_navigation() -> str:
     st.sidebar.divider()
     st.sidebar.markdown(
         """
-        **推荐演示顺序**
+        **推荐使用顺序**
 
         1. 项目总览
         2. 结果浏览

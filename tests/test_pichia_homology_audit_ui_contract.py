@@ -180,8 +180,8 @@ def test_homology_audit_page_gets_rows_from_service_and_renders_tables(monkeypat
     assert len(fake_st.dataframes) == 3
     rendered_text = "\n".join(frame.to_csv(index=False) for frame in fake_st.dataframes)
     assert "KAR2 / BiP" in rendered_text
-    assert "rule_transfer_ready" in rendered_text
-    assert "gpr_candidate" in rendered_text
+    assert "规则迁移·就绪" in rendered_text  # rule_transfer_status 已汉化（原 rule_transfer_ready）
+    assert "gpr_candidate" in rendered_text  # evidence_kind 值未汉化，保持原样
 
 
 def test_homology_audit_export_button_uses_service_export(monkeypatch) -> None:
@@ -243,8 +243,8 @@ def test_homology_audit_cache_tab_shows_external_cache_status(monkeypatch) -> No
     )
 
     rendered_markdown = "\n".join(fake_st.markdown_calls)
-    assert "External name reference cache" in rendered_markdown
-    assert "External reference cache" in rendered_markdown
+    assert "外部命名参考缓存" in rendered_markdown  # 原 External name reference cache
+    assert "外部参考缓存" in rendered_markdown  # 原 External reference cache
     assert "UniProt:1" in rendered_markdown
     assert "gene_function:1" in rendered_markdown
     assert "yeast-GEM" in rendered_markdown

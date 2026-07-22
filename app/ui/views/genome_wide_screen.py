@@ -352,12 +352,12 @@ def _render_shortlist_readout(readout: dict, *, target_id: str) -> None:
                 y="反应",
                 orientation="h",
                 text="影子价格(绝对值)",
-                color_discrete_sequence=["#4C78A8"],
+                color_discrete_sequence=["#0F766E"],
                 title="最强约束层：影子价格绝对值越大越限制分泌（下界，OE 动不了）",
             )
             figure.update_traces(texttemplate="%{text:.3g}", textposition="outside", cliponaxis=False)
             figure.update_layout(xaxis_title="影子价格绝对值（越大越限制分泌）", yaxis_title="", yaxis={"categoryorder": "total ascending"})
-            st.plotly_chart(figure, use_container_width=True)
+            st.plotly_chart(figure, width='stretch')
         else:
             st.caption(
                 "未找到该靶点的 R1 瓶颈读出（local_runs/r1_readout/）。"
@@ -404,7 +404,7 @@ def _render_shortlist_readout(readout: dict, *, target_id: str) -> None:
                 legend_title_text="分泌资源层",
                 yaxis={"categoryorder": "total ascending"},
             )
-            st.plotly_chart(figure, use_container_width=True)
+            st.plotly_chart(figure, width='stretch')
             st.dataframe(shortlist_frame, width="stretch", hide_index=True)
             risky = readout.get("growth_risky_candidates") or []
             if risky:
@@ -518,7 +518,7 @@ def _render_dose_response_curve(readout: dict, shortlist: list) -> None:
         yaxis_title="分泌相对提升（%，相对野生型；非绝对产量）",
         legend_title_text=f"候选（仅显示最大增益≥{_DOSE_RESPONSE_CURVE_MIN_GAIN:.0%} 的前 {_DOSE_RESPONSE_CURVE_MAX_LINES} 个）",
     )
-    st.plotly_chart(figure, use_container_width=True)
+    st.plotly_chart(figure, width='stretch')
 
 
 _SCREEN_VALUE_COLUMNS = (

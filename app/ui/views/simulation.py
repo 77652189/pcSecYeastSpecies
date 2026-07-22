@@ -56,6 +56,7 @@ def apply_simulation_prefill(
 
 
 def render_simulation() -> None:
+    st.header("仿真验证")
     tab_key = "pichia_tab_selector"
     options = ["仿真构建", "仿真结果", "历史 MATLAB OPN 参考"]
 

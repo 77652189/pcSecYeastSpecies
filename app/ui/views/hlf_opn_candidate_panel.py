@@ -79,7 +79,7 @@ def render_hlf_opn_candidate_panel(target_id: str) -> None:
         _render_candidate_metrics(context, candidates, executable, overlay_rows, summary)
         filtered_candidates = _filter_candidates_for_display(candidates, context)
         candidate_frame = _candidate_frame(filtered_candidates)
-        st.dataframe(candidate_frame, use_container_width=True, hide_index=True)
+        st.dataframe(candidate_frame, width='stretch', hide_index=True)
         st.download_button(
             f"导出 {context} 候选表",
             candidate_frame.to_csv(index=False).encode("utf-8-sig"),
@@ -103,7 +103,7 @@ def render_hlf_opn_candidate_panel(target_id: str) -> None:
         if overlay_rows:
             with st.expander("模型外候选 overlay 复核", expanded=False):
                 overlay_frame = _overlay_frame(overlay_rows)
-                st.dataframe(overlay_frame, use_container_width=True, hide_index=True)
+                st.dataframe(overlay_frame, width='stretch', hide_index=True)
                 st.download_button(
                     f"导出 {context} overlay 复核表",
                     overlay_frame.to_csv(index=False).encode("utf-8-sig"),

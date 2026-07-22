@@ -55,7 +55,22 @@ def render_matlab_reference() -> None:
         result_data = st.session_state.get("last_matlab_ref")
         if result_data:
             st.success(result_data["message"]) if result_data["success"] else st.error(result_data["message"])
-            st.dataframe(pd.DataFrame([result_data]), use_container_width=True, hide_index=True)
+            st.dataframe(
+                pd.DataFrame(
+                    [
+                        {"参数": key, "值": value}
+                        for key, value in {
+                            "候选": result_data.get("candidate_id"),
+                            "是否最优": result_data.get("optimal"),
+                            "目标值": result_data.get("objective_value"),
+                            "引擎": result_data.get("engine_mode"),
+                        }.items()
+                        if value is not None
+                    ]
+                ),
+                width='stretch',
+                hide_index=True,
+            )
         else:
             latest, summary = OpnSimulationService(PATHS, MatlabAdapter()).latest_candidate_result()
             if latest and summary:
@@ -70,7 +85,7 @@ def render_matlab_reference() -> None:
                             }
                         ]
                     ),
-                    use_container_width=True,
+                    width='stretch',
                     hide_index=True,
                 )
 

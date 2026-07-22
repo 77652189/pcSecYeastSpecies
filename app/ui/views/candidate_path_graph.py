@@ -76,9 +76,9 @@ def render_secretion_path_graph(row: dict[str, object], summary: dict[str, objec
         import graphviz
 
         graph = graphviz.Source(dot)
-        st.graphviz_chart(graph, use_container_width=True)
+        st.graphviz_chart(graph, width='stretch')
     except ImportError:
-        st.graphviz_chart(dot, use_container_width=True)
+        st.graphviz_chart(dot, width='stretch')
 
     if interpretation:
         st.caption(interpretation)

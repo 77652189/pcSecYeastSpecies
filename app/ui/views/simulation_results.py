@@ -40,6 +40,13 @@ def _localized_frame(records: object, value_columns: tuple[str, ...] = ()) -> pd
     return frame.rename(columns={column: sim_result_column_label(column) for column in frame.columns})
 
 
+def _fmt_num(value: object) -> str:
+    """数值 → 3 位有效数字；非数值 → —（结果页最常看的顶部指标统一格式，避免长浮点串）。"""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return "—"
+    return f"{value:.3g}"
+
+
 def render_pichia_results() -> None:
     tsp = st.session_state.get("pichia_draft_task_status_path")
     if tsp:
@@ -93,7 +100,7 @@ def render_pichia_results() -> None:
     st.success("✅ 仿真完成") if data.get("success") else st.error("❌ 仿真失败")
     c1, c2, c3 = st.columns([2, 1, 1])
     with c1:
-        st.metric("📦 分泌通量", data.get("objective_value", "—"), help="相对比较值，非实际产量")
+        st.metric("分泌通量", _fmt_num(data.get("objective_value")), help="相对比较值，非实际产量")
     with c2:
         st.metric("目标蛋白", data.get("target_id", "—"))
     with c3:
@@ -119,7 +126,7 @@ def render_pichia_results() -> None:
                     if value
                 ]
             ),
-            use_container_width=True,
+            width='stretch',
             hide_index=True,
         )
 
@@ -132,7 +139,7 @@ def render_pichia_results() -> None:
     st.write("**输出文件**")
     st.dataframe(
         pd.DataFrame([{"文件": key, "路径": value} for key, value in files.items() if value]),
-        use_container_width=True,
+        width='stretch',
         hide_index=True,
     )
 
@@ -169,11 +176,10 @@ def render_pichia_results() -> None:
         with st.expander("生长权衡", expanded=False):
             st.dataframe(
                 pd.read_csv(tradeoff_path).rename(columns=sim_result_column_label),
-                use_container_width=True,
+                width='stretch',
                 hide_index=True,
             )
-    with st.expander("原始响应", expanded=False):
-        st.caption("调试用")
+    with st.expander("完整结果数据（高级）", expanded=False):
         st.json(data)
 
 
@@ -199,7 +205,7 @@ def _render_candidate_outputs(candidate_path: str, summary_path: str | None) -> 
             st.info("「约束不可行」表示当前固定生长速率和约束组合下没有可行解，不等同于真实发酵条件必然不可行。")
 
     display = frame.rename(columns={key: value for key, value in CANDIDATE_DISPLAY_COLUMNS.items() if key in frame.columns})
-    st.dataframe(display, use_container_width=True, hide_index=True)
+    st.dataframe(display, width='stretch', hide_index=True)
 
     if len(frame) > 0:
         selectable = frame.reset_index(drop=True)
@@ -307,7 +313,7 @@ def _render_value_of_information(payload: dict[str, object]) -> None:
                 y="候选",
                 orientation="h",
                 text="推荐分数",
-                color_discrete_sequence=["#4C78A8"],
+                color_discrete_sequence=["#0F766E"],
                 title="候选排序：分数越接近越难区分（越该做湿实验测）",
             )
             figure.update_traces(texttemplate="%{text:.3g}", textposition="outside", cliponaxis=False)
@@ -316,7 +322,7 @@ def _render_value_of_information(payload: dict[str, object]) -> None:
                 yaxis_title="",
                 yaxis={"categoryorder": "total ascending"},
             )
-            st.plotly_chart(figure, use_container_width=True)
+            st.plotly_chart(figure, width='stretch')
 
         if items:
             rows = []
@@ -338,7 +344,7 @@ def _render_value_of_information(payload: dict[str, object]) -> None:
                         "建议测量": measurement,
                     }
                 )
-            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(rows), width='stretch', hide_index=True)
         for warning in payload.get("warnings") or []:
             st.caption(sim_result_warning_label(warning))
 
@@ -386,7 +392,7 @@ def _render_solver_robustness(solver_robustness: dict[str, object]) -> None:
     if per_method:
         st.dataframe(
             _localized_frame(per_method, value_columns=("result_status", "top_dominant_block")),
-            use_container_width=True,
+            width='stretch',
             hide_index=True,
         )
     for warning in solver_robustness.get("warnings") or []:
@@ -485,7 +491,7 @@ def _render_oe_dose_response(oe_dose_response: dict[str, object]) -> None:
             yaxis_title="分泌相对提升（%）",
             legend_title_text="反应｜形状",
         )
-        st.plotly_chart(figure, use_container_width=True)
+        st.plotly_chart(figure, width='stretch')
 
     def _pct(value: object) -> str:
         return f"{value * 100:.2f}%" if isinstance(value, (int, float)) else "—"
@@ -505,7 +511,7 @@ def _render_oe_dose_response(oe_dose_response: dict[str, object]) -> None:
         for shape in shapes
     ]
     if rows:
-        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(rows), width='stretch', hide_index=True)
     else:
         st.caption("（没有可用的剂量响应结果）")
     # A decrease that OE cannot truly cause is a degenerate-optimum artifact: flag it explicitly.
@@ -604,10 +610,10 @@ def _render_lp_attribution(lp_attribution: dict[str, object]) -> None:
                 legend_title_text="分泌资源层",
                 yaxis={"categoryorder": "total ascending"},
             )
-            st.plotly_chart(figure, use_container_width=True)
+            st.plotly_chart(figure, width='stretch')
         st.dataframe(
             _localized_frame(oe_actionable, value_columns=("bound_type", "secretory_process", "oe_actionable")),
-            use_container_width=True,
+            width='stretch',
             hide_index=True,
         )
     else:
@@ -637,10 +643,10 @@ def _render_lp_attribution(lp_attribution: dict[str, object]) -> None:
                 legend_title_text="分泌资源层",
                 yaxis={"categoryorder": "total ascending"},
             )
-            st.plotly_chart(figure, use_container_width=True)
+            st.plotly_chart(figure, width='stretch')
         st.dataframe(
             _localized_frame(floor_only, value_columns=("bound_type", "secretory_process", "oe_actionable")),
-            use_container_width=True,
+            width='stretch',
             hide_index=True,
         )
 
@@ -656,7 +662,7 @@ def _render_lp_attribution(lp_attribution: dict[str, object]) -> None:
             st.write(f"**{title}**")
             st.dataframe(
                 _localized_frame(rows, value_columns=("constraint_type", "block", "bound_type", "secretory_process")),
-                use_container_width=True,
+                width='stretch',
                 hide_index=True,
             )
     counts = lp_attribution.get("active_bound_counts")
@@ -664,7 +670,7 @@ def _render_lp_attribution(lp_attribution: dict[str, object]) -> None:
         st.write("**生效边界影子价格计数**")
         st.dataframe(
             pd.DataFrame([{"项目": sim_result_column_label(key), "数量": value} for key, value in counts.items()]),
-            use_container_width=True,
+            width='stretch',
             hide_index=True,
         )
     for warning in lp_attribution.get("warnings") or []:
@@ -692,7 +698,7 @@ def _render_cost_slope_compatibility(cost_slope: dict[str, object]) -> None:
     overrides = cost_slope.get("medium_bound_overrides") or []
     if overrides:
         st.write("**MATLAB 历史培养基边界覆盖**")
-        st.dataframe(_localized_frame(overrides), use_container_width=True, hide_index=True)
+        st.dataframe(_localized_frame(overrides), width='stretch', hide_index=True)
 
     sections = (
         ("葡萄糖成本斜率", "glucose_cost_slopes"),
@@ -705,7 +711,7 @@ def _render_cost_slope_compatibility(cost_slope: dict[str, object]) -> None:
             st.write(f"**{title}**")
             st.dataframe(
                 _localized_frame(rows, value_columns=("status", "glucose_cost_status", "success", "cost_key")),
-                use_container_width=True,
+                width='stretch',
                 hide_index=True,
             )
     comparison_scope = cost_slope.get("comparison_scope")
@@ -762,7 +768,7 @@ def _render_target_growth_analysis(target_growth: dict[str, object]) -> None:
             columns = [key for key in display_columns if key in frame.columns]
             st.dataframe(
                 frame[columns].rename(columns=display_columns),
-                use_container_width=True,
+                width='stretch',
                 hide_index=True,
             )
         for warning in target_growth.get("warnings") or []:
@@ -818,7 +824,7 @@ def _render_yield_improvement_recommendations(payload: dict[str, object]) -> Non
                 "rationale": "推荐理由",
             }
             columns = [key for key in display_columns if key in frame.columns]
-            st.dataframe(frame[columns].rename(columns=display_columns), use_container_width=True, hide_index=True)
+            st.dataframe(frame[columns].rename(columns=display_columns), width='stretch', hide_index=True)
         else:
             st.info("当前候选没有进入模型内提升推荐。")
         st.caption("gene-level KO 与 reaction-level OE proxy 是不同证据层级；OE proxy 不能直接等同于湿实验基因过表达。")
