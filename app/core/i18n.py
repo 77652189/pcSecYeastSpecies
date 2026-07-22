@@ -228,6 +228,7 @@ SIMULATION_RESULT_VALUE_LABELS = {
     "high": "高",
     "medium": "中",
     "low": "低",
+    "curated": "策展（文献证据）",
     # 布尔
     True: "是",
     False: "否",

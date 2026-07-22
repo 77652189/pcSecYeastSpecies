@@ -70,8 +70,14 @@ def _load_r1_floors(r1_dir: Path, target_id: str, top: int = 5) -> list[dict[str
 
 
 def _oe_shortlist(frame: pd.DataFrame, target_id: str, top_n: int) -> list[dict[str, object]]:
-    """target 的 OE 提升候选（ratio>1），按相对提升降序，取 top_n。"""
+    """target 的 OE 提升候选（ratio>1），按相对提升降序，取 top_n。
+
+    剔除 candidate_kind == "complex_oe_hypothesis"（未验证的“整复合体按同比例过表达”猜测，
+    与 analyze_single_target / 服务层 genome_wide_screen_shortlist 保持一致）。
+    """
     sub = frame[(frame["target_id"] == target_id) & (frame["intervention_type"] == "OE")].copy()
+    if "candidate_kind" in sub.columns:
+        sub = sub[sub["candidate_kind"] != "complex_oe_hypothesis"]
     sub = sub.dropna(subset=["secretion_ratio_vs_wildtype"])
     sub["effect"] = sub["secretion_ratio_vs_wildtype"].astype(float) - 1.0
     sub = sub[sub["effect"] > 0].sort_values("effect", ascending=False).head(top_n)

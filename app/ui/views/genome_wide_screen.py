@@ -11,10 +11,13 @@ import json
 from pathlib import Path
 
 import pandas as pd
+import plotly.express as px
 import streamlit as st
 
+from app.core.i18n import sim_result_value_label, sim_result_warning_label
 from app.services import genome_wide_screen_analysis as analysis
 from app.services import genome_wide_screen_service as service
+from app.services import genome_wide_screen_shortlist as shortlist_service
 from app.services import screen_report_service
 from app.services.genome_wide_screen_registry import (
     RunInfo,
@@ -284,9 +287,17 @@ def _render_results_section(paths, runs: list[RunInfo]) -> None:
     meta_cols[2].metric("靶点数", len(target_ids))
     meta_cols[3].metric("候选行数", len(frame))
 
+    # R1 瓶颈读出是 per-target、单独计算并缓存的资产（不随本次筛查产生）；有就显示“为什么受限”，没有优雅降级。
+    r1_readout_dir = paths.local_runs_dir / "r1_readout"
     tabs = st.tabs([f"靶点：{target_id}" for target_id in target_ids] + (["靶点间差异"] if len(target_ids) >= 2 else []))
     for tab, target_id in zip(tabs, target_ids):
         with tab:
+            try:
+                readout = shortlist_service.build_shortlist_readout(frame, target_id, r1_readout_dir=r1_readout_dir)
+                _render_shortlist_readout(readout, target_id=target_id)
+                st.divider()
+            except Exception as exc:  # noqa: BLE001 - 读出只是概览，任何失败都不该拖垮下方的明细表格
+                st.caption(f"候选短名单读出暂不可用：{exc}")
             _render_dimension_tables(per_target_results[target_id])
     if len(target_ids) >= 2:
         with tabs[-1]:
@@ -296,6 +307,131 @@ def _render_results_section(paths, runs: list[RunInfo]) -> None:
 
     st.divider()
     _render_llm_report_section(paths, selected_run, csv_path)
+
+
+def _render_shortlist_readout(readout: dict, *, target_id: str) -> None:
+    """候选短名单读出面板：为什么受限(R1) + OE 提升候选短名单(图表) + 该测什么(R4)。
+
+    复用本次筛查的缓存解 + 单独缓存的 R1 读出，零新增求解；相对信号，非绝对产量。
+    """
+    shortlist = readout.get("oe_shortlist") or []
+    floors = readout.get("why_limited_floors") or []
+    voi = readout.get("value_of_information") or {}
+
+    with st.expander("候选短名单读出：为什么受限 · OE 提升候选 · 该测什么", expanded=True):
+        # 一句话结论
+        if shortlist and readout.get("has_strong_oe_lever"):
+            top = shortlist[0]
+            headline = f"OE 提升候选里 **{top['candidate']}**（{top['layer']}）最强（+{float(top['effect']) * 100:.2f}%）"
+        else:
+            headline = "**没有强 OE 提升杠杆**（最高相对提升 < 1%）——这个靶点大概率不受限于可 OE 的分泌机器上限"
+        top_floor = floors[0]["reaction_id"] if floors else None
+        if top_floor:
+            st.markdown(f"> 一句话：**{target_id}** 的分泌最强约束在 `{top_floor}`（下界/最低要求，OE 动不了）；{headline}。")
+        else:
+            st.markdown(f"> 一句话：**{target_id}** — {headline}。")
+        st.caption("相对信号，非绝对产量 / mg·L⁻¹；复用本次筛查在固定倍数 OE、corrected 培养基下的模型解，零新增求解。")
+
+        # 1. 为什么受限（R1）
+        st.markdown("**为什么受限（R1 LP 影子价格 · 最强约束层）**")
+        if floors:
+            st.caption(
+                "下界=最低要求类约束，承载最大影子价格，是“卡在哪一层”的答案；但 OE 放宽的是上限、对它们无效"
+                "（floor≠可 OE 杠杆）。此 R1 读出对该靶点单独计算、单独缓存，不是本次筛查的产物。"
+            )
+            floor_frame = pd.DataFrame(
+                [{"反应": str(f["reaction_id"]), "影子价格(绝对值)": float(f["abs_marginal"])} for f in floors]
+            )
+            figure = px.bar(
+                floor_frame.sort_values("影子价格(绝对值)"),
+                x="影子价格(绝对值)",
+                y="反应",
+                orientation="h",
+                text="影子价格(绝对值)",
+                color_discrete_sequence=["#4C78A8"],
+                title="最强约束层：影子价格绝对值越大越限制分泌（下界，OE 动不了）",
+            )
+            figure.update_traces(texttemplate="%{text:.3g}", textposition="outside", cliponaxis=False)
+            figure.update_layout(xaxis_title="影子价格绝对值（越大越限制分泌）", yaxis_title="", yaxis={"categoryorder": "total ascending"})
+            st.plotly_chart(figure, use_container_width=True)
+        else:
+            st.caption(
+                "未找到该靶点的 R1 瓶颈读出（local_runs/r1_readout/）。"
+                "可先用 python_pichia/tools/run_target_bottleneck_lp_attribution_check.py 生成，再回来看“为什么受限”。"
+            )
+
+        # 2. OE 提升候选短名单
+        st.markdown(f"**OE 提升候选短名单（按相对提升排序，top-{len(shortlist)}）**")
+        if shortlist:
+            shortlist_frame = pd.DataFrame(
+                [
+                    {
+                        "候选": str(row["candidate"]),
+                        "资源层": str(row["layer"]),
+                        "相对提升(%)": float(row["effect"]) * 100.0,
+                        "生长保持": round(float(row["growth_retention"]), 3),
+                        "证据置信度": sim_result_value_label(row["confidence"]) if row["confidence"] else "—",
+                    }
+                    for row in shortlist
+                ]
+            )
+            figure = px.bar(
+                shortlist_frame.sort_values("相对提升(%)"),
+                x="相对提升(%)",
+                y="候选",
+                color="资源层",
+                orientation="h",
+                text="相对提升(%)",
+                color_discrete_sequence=px.colors.qualitative.Set2,
+                title="OE 提升候选：相对野生型的分泌提升（越长越强，颜色=分泌资源层）",
+            )
+            figure.update_traces(texttemplate="%{text:.2f}%", textposition="outside", cliponaxis=False)
+            figure.update_layout(
+                xaxis_title="相对提升（%，相对野生型；非绝对产量）",
+                yaxis_title="",
+                legend_title_text="分泌资源层",
+                yaxis={"categoryorder": "total ascending"},
+            )
+            st.plotly_chart(figure, use_container_width=True)
+            st.dataframe(shortlist_frame, width="stretch", hide_index=True)
+            risky = readout.get("growth_risky_candidates") or []
+            if risky:
+                st.caption("⚠️ 生长有代价（保持率 < 0.9）：" + "、".join(str(c) for c in risky))
+        else:
+            st.caption("本次筛查在当前 OE 倍数下没有 ratio>1 的 OE 提升候选（不代表无解，可能是单基因、当前倍数强度不足以突破瓶颈）。")
+
+        # 3. 该测什么（R4 价值-of-information）
+        st.markdown("**该测什么（R4 价值-of-information）**")
+        st.caption("模型给的是相对排序、不是绝对产量。这里标出顶部名次里模型分不清的候选，并给出最能消解歧义的最小湿实验——只排测量优先级，不预测结果。")
+        _render_shortlist_voi(voi)
+
+
+def _render_shortlist_voi(voi: dict) -> None:
+    items = [item for item in (voi.get("information_items") or []) if isinstance(item, dict)]
+    if voi.get("has_actionable_ambiguity") and items:
+        st.warning(f"顶部排序有 {len(items)} 处近似并列（模型分不清谁更好），当前名次不完全可信——建议按下表做最小湿实验定序。")
+        rows = []
+        for item in items:
+            candidate_text = "、".join(str(candidate) for candidate in (item.get("candidates") or []))
+            measurement = (
+                f"对候选 {candidate_text} 做靶点特异的分泌定量湿实验，消解它们的相对次序"
+                + ("（影响 top 名次，优先做）" if item.get("resolves_top_of_ranking") else "")
+            )
+            rows.append(
+                {
+                    "优先级": item.get("priority_rank"),
+                    "歧义类型": sim_result_value_label(item.get("ambiguity_kind")),
+                    "涉及候选": candidate_text,
+                    "建议测量": measurement,
+                }
+            )
+        st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+    elif voi.get("ranked_candidates"):
+        st.success("顶部候选相对提升分离明显，当前排序较可信；优先验证榜首即可。")
+    else:
+        st.caption("无可排序的 OE 提升候选，暂无“该测什么”的明确建议。")
+    for warning in voi.get("warnings") or []:
+        st.caption(sim_result_warning_label(warning))
 
 
 def _render_dimension_tables(result: analysis.DimensionalResults) -> None:
