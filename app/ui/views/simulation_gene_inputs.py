@@ -10,6 +10,11 @@ from app.services.pichia_screen_preview_service import preview_screen_inputs
 from app.services.pichia_secretion_schema import SecretionRunRequest
 from app.ui.common import PATHS
 from app.ui.views.hlf_opn_candidate_panel import render_hlf_opn_candidate_panel
+from app.ui.views.simulation_display import (
+    GPR_ROLE_LABELS,
+    KO_SUPPORT_STATUS_LABELS,
+    OE_SUPPORT_STATUS_LABELS,
+)
 from app.ui.views.simulation_gene_catalog import render_gene_lookup_panel
 from app.ui.views.simulation_gene_text import parse_candidate_text
 
@@ -188,10 +193,17 @@ def _render_screen_input_preview(target_id: str, state: GenePerturbationFormStat
                     "状态": "已解析" if row.get("resolved") else "未解析",
                     "解析到的反应数": row.get("resolved_reaction_count"),
                     "反应预览": ", ".join(row.get("resolved_reactions_preview") or []),
-                    "KO 支持": row.get("ko_support_status") or "",
-                    "OE 支持": row.get("oe_support_status") or "",
-                    "GPR 角色": row.get("gpr_role") or "",
-                    "置信度": row.get("confidence") or row.get("mapping_confidence") or "",
+                    "KO 支持": KO_SUPPORT_STATUS_LABELS.get(
+                        row.get("ko_support_status") or "", row.get("ko_support_status") or ""
+                    ),
+                    "OE 支持": OE_SUPPORT_STATUS_LABELS.get(
+                        row.get("oe_support_status") or "", row.get("oe_support_status") or ""
+                    ),
+                    "GPR 角色": GPR_ROLE_LABELS.get(row.get("gpr_role") or "", row.get("gpr_role") or ""),
+                    "置信度": MAPPING_CONFIDENCE_LABELS.get(
+                        row.get("confidence") or row.get("mapping_confidence") or "",
+                        row.get("confidence") or row.get("mapping_confidence") or "",
+                    ),
                     "缺失信息": ", ".join(str(item) for item in row.get("missing_information") or []),
                 }
             )
