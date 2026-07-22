@@ -65,8 +65,8 @@ def render_matlab_reference() -> None:
                         [
                             {
                                 "文件": str(latest),
-                                "optimal": summary.optimal,
-                                "objective": summary.objective_value,
+                                "是否最优": summary.optimal,
+                                "目标值": summary.objective_value,
                             }
                         ]
                     ),

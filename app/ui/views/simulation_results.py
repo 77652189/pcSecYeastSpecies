@@ -97,7 +97,7 @@ def render_pichia_results() -> None:
     with c2:
         st.metric("目标蛋白", data.get("target_id", "—"))
     with c3:
-        st.metric("MATLAB 对齐", data.get("matlab_alignment_status", "—"))
+        st.metric("MATLAB 对齐", sim_result_value_label(data.get("matlab_alignment_status")))
     st.caption("不同构建之间可横向对比。不代表实际发酵产量。")
 
     with st.expander("参数", expanded=False):
@@ -105,7 +105,7 @@ def render_pichia_results() -> None:
         st.dataframe(
             pd.DataFrame(
                 [
-                    {"参数": key, "值": value}
+                    {"参数": key, "值": sim_result_value_label(value)}
                     for key, value in {
                         "目标": data.get("target_id"),
                         "状态": data.get("result_status"),
@@ -167,7 +167,11 @@ def render_pichia_results() -> None:
     tradeoff_path = data.get("tradeoff_path")
     if tradeoff_path and Path(tradeoff_path).exists():
         with st.expander("生长权衡", expanded=False):
-            st.dataframe(pd.read_csv(tradeoff_path), use_container_width=True)
+            st.dataframe(
+                pd.read_csv(tradeoff_path).rename(columns=sim_result_column_label),
+                use_container_width=True,
+                hide_index=True,
+            )
     with st.expander("原始响应", expanded=False):
         st.caption("调试用")
         st.json(data)

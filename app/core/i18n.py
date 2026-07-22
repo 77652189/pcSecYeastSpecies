@@ -217,6 +217,10 @@ SIMULATION_RESULT_VALUE_LABELS = {
     "draft_cost_slope_analysis": "蛋白成本分析（草稿）",
     "draft_matlab_compatible_cost_slope": "MATLAB 兼容成本斜率（草稿）",
     "draft_cost_slope_unavailable": "成本斜率不可用",
+    # MATLAB 对齐状态
+    "aligned": "已对齐",
+    "aligned_except_known_matlab_compatibility_differences": "已对齐（除已知 MATLAB 兼容性差异）",
+    "pending": "待处理",
     # 成本斜率 / 通量状态
     "uptake_flux": "摄取通量",
     "non_uptake_flux": "非摄取通量",
