@@ -49,6 +49,36 @@ RULE_TRANSFER_STATUS_OPTIONS = [
 ]
 TRISTATE_OPTIONS = {ALL_OPTION: None, "是": True, "否": False}
 
+# 同源审计页领域枚举 → 中文（未知值回退原文）；与候选面板 _CANDIDATE_ENUM_LABELS 的重叠项用词一致。
+_HOMOLOGY_ENUM_LABELS = {
+    # review_status / homology_review_status
+    "model_ready_rbh_high_confidence": "RBH 高置信·模型就绪",
+    "rbh_not_in_model": "RBH 命中但不在模型内",
+    "low_identity_review_required": "低相似度·需复核",
+    "coverage_review_required": "覆盖度·需复核",
+    "paralog_risk_review_required": "旁系同源风险·需复核",
+    "no_reciprocal_hit": "无双向最佳命中",
+    "unresolved_query_symbol": "查询符号未解析",
+    "manual_review_required": "需人工复核",
+    # name_consistency_status
+    "name_confirmed_by_rbh": "RBH 确认命名",
+    "alias_confirmed_by_rbh": "RBH 确认别名",
+    "pichia_locus_confirmed_by_rbh": "RBH 确认 Pichia 基因座",
+    "sequence_name_conflict": "序列-命名冲突",
+    "external_name_missing": "缺外部命名",
+    "internal_name_missing": "缺内部命名",
+    # rule_transfer_status
+    "rule_transfer_ready": "规则迁移·就绪",
+    "rule_transfer_supported_not_model_operable": "规则迁移支持·但模型不可操作",
+    "rule_transfer_low_confidence": "规则迁移·低置信",
+    "rule_transfer_paralog_risk": "规则迁移·旁系同源风险",
+    "rule_transfer_unresolved": "规则迁移·未解析",
+    "rule_transfer_not_supported": "规则迁移·不支持",
+    # external_crosscheck_status / 通用
+    "not_available": "不可用",
+    "available": "可用",
+}
+
 NAME_AUDIT_COLUMNS = {
     "internal_common_name": "内部常用名",
     "internal_gene_id": "内部基因ID",
@@ -56,12 +86,12 @@ NAME_AUDIT_COLUMNS = {
     "external_gene_name": "Pichia基因名",
     "external_locus_tag": "Pichia locus tag",
     "external_accession": "外部accession",
-    "external_crosscheck_status": "external DB status",
-    "external_crosscheck_sources": "external DB sources",
-    "external_crosscheck_warnings": "external DB warnings",
-    "identity_pct": "identity %",
-    "query_coverage": "query覆盖 %",
-    "subject_coverage": "subject覆盖 %",
+    "external_crosscheck_status": "外部库校验状态",
+    "external_crosscheck_sources": "外部库来源",
+    "external_crosscheck_warnings": "外部库告警",
+    "identity_pct": "序列一致性 %",
+    "query_coverage": "查询覆盖 %",
+    "subject_coverage": "目标覆盖 %",
     "evalue": "e-value",
     "is_rbh": "RBH",
     "in_model_gene_index": "在模型gene_index",
@@ -75,9 +105,9 @@ RULE_TRANSFER_COLUMNS = {
     "sce_orf": "SCE ORF",
     "pichia_gene_id": "Pichia同源候选",
     "pichia_model_gene_id": "Pichia模型基因ID",
-    "identity_pct": "identity %",
-    "query_coverage": "query覆盖 %",
-    "subject_coverage": "subject覆盖 %",
+    "identity_pct": "序列一致性 %",
+    "query_coverage": "查询覆盖 %",
+    "subject_coverage": "目标覆盖 %",
     "evalue": "e-value",
     "is_rbh": "RBH",
     "in_model_gene_index": "在模型gene_index",
@@ -89,25 +119,25 @@ EXTERNAL_REFERENCE_COLUMNS = {
     "evidence_kind": "证据类型",
     "source_database": "来源库",
     "source_version": "来源版本",
-    "retrieved_at": "retrieved_at",
-    "gene_id": "gene_id",
-    "gene_name": "gene_name",
-    "pichia_gene_id": "Pichia gene",
-    "query_gene_id": "query gene",
-    "protein_name": "protein",
-    "function_description": "function",
-    "evidence_confidence": "confidence",
-    "external_model_sources": "external model sources",
-    "gpr_source_priority": "GPR source priority",
-    "external_gpr_candidate_count": "GPR candidate count",
-    "best_external_gpr_source": "best external GPR source",
-    "source_reaction_id": "source reaction",
-    "source_gene_rule": "source gene rule",
-    "mapped_model_reaction_id": "mapped reaction",
-    "external_gpr_mapping_status": "external GPR mapping",
-    "external_gpr_conflict_warnings": "GPR conflicts",
-    "gpr_transfer_status": "GPR status",
-    "manual_review_reasons": "manual review",
+    "retrieved_at": "抓取时间",
+    "gene_id": "基因ID",
+    "gene_name": "基因名",
+    "pichia_gene_id": "Pichia 基因",
+    "query_gene_id": "查询基因",
+    "protein_name": "蛋白名",
+    "function_description": "功能注释",
+    "evidence_confidence": "证据置信度",
+    "external_model_sources": "外部模型来源",
+    "gpr_source_priority": "GPR 来源优先级",
+    "external_gpr_candidate_count": "GPR 候选数",
+    "best_external_gpr_source": "最佳外部 GPR 来源",
+    "source_reaction_id": "来源反应",
+    "source_gene_rule": "来源基因规则",
+    "mapped_model_reaction_id": "映射到的模型反应",
+    "external_gpr_mapping_status": "外部 GPR 映射状态",
+    "external_gpr_conflict_warnings": "GPR 冲突告警",
+    "gpr_transfer_status": "GPR 迁移状态",
+    "manual_review_reasons": "人工复核原因",
 }
 
 
@@ -209,11 +239,11 @@ def _render_summary_metrics(
     values = _summary_metric_values(summary, name_rows, rule_rows)
     columns = st.columns(6)
     columns[0].metric("总行数", values["total"])
-    columns[1].metric("ready", values["ready"])
-    columns[2].metric("not model operable", values["supported_not_model_operable"])
-    columns[3].metric("low confidence", values["low_confidence"])
-    columns[4].metric("unresolved", values["unresolved"])
-    columns[5].metric("paralog/not supported", values["paralog_or_not_supported"])
+    columns[1].metric("规则迁移就绪", values["ready"])
+    columns[2].metric("支持但模型不可操作", values["supported_not_model_operable"])
+    columns[3].metric("低置信", values["low_confidence"])
+    columns[4].metric("未解析", values["unresolved"])
+    columns[5].metric("旁系风险/不支持", values["paralog_or_not_supported"])
 
 
 def _summary_metric_values(
@@ -341,6 +371,8 @@ def _display_value(value: Any) -> Any:
         return "; ".join(f"{key}:{item}" for key, item in sorted(value.items()))
     if value is None:
         return ""
+    if isinstance(value, str) and value in _HOMOLOGY_ENUM_LABELS:
+        return _HOMOLOGY_ENUM_LABELS[value]
     return value
 
 
@@ -353,9 +385,9 @@ def _render_cache_and_export(
     st.subheader("缓存状态")
     st.markdown(
         f"""
-        - cache root: `{cache_status.get("cache_root", "")}`
-        - generated at: `{cache_status.get("generated_at", "")}`
-        - row count: `{cache_status.get("row_count", 0)}`
+        - 缓存根目录: `{cache_status.get("cache_root", "")}`
+        - 生成时间: `{cache_status.get("generated_at", "")}`
+        - 行数: `{cache_status.get("row_count", 0)}`
         """
     )
     resolved_external_rows = external_rows or []
@@ -382,18 +414,18 @@ def _render_external_cache_status(
     name_rows: list[dict[str, Any]],
     external_rows: list[dict[str, Any]],
 ) -> None:
-    available = "available" if cache_status.get("external_cache_available") else "not_available"
+    available = "可用" if cache_status.get("external_cache_available") else "不可用"
     source_counts = cache_status.get("external_source_counts")
     source_text = _format_source_counts(source_counts if isinstance(source_counts, dict) else {})
     st.markdown(
         f"""
-        **External name reference cache**
+        **外部命名参考缓存**
 
-        - status: `{available}`
-        - cache path: `{cache_status.get("external_cache_path", "")}`
-        - generated at: `{cache_status.get("external_cache_generated_at", "")}`
-        - reference count: `{cache_status.get("external_reference_count", 0)}`
-        - sources: `{source_text}`
+        - 状态: `{available}`
+        - 缓存路径: `{cache_status.get("external_cache_path", "")}`
+        - 生成时间: `{cache_status.get("external_cache_generated_at", "")}`
+        - 参考条目数: `{cache_status.get("external_reference_count", 0)}`
+        - 来源: `{source_text}`
         """
     )
     command = str(cache_status.get("recommended_external_build_command") or "")
@@ -401,18 +433,19 @@ def _render_external_cache_status(
         st.code(command, language="powershell")
     warnings = cache_status.get("external_cache_warnings") or []
     if warnings:
-        st.info("external cache warnings: " + "; ".join(str(item) for item in warnings))
+        st.info("外部缓存告警: " + "; ".join(str(item) for item in warnings))
 
     counts = _count_rows(name_rows, "external_crosscheck_status")
     if counts:
-        count_lines = "\n".join(f"- {status}: {count}" for status, count in sorted(counts.items()))
+        count_lines = "\n".join(
+            f"- {_HOMOLOGY_ENUM_LABELS.get(status, status)}: {count}" for status, count in sorted(counts.items())
+        )
     else:
-        count_lines = "- not_available: 0"
+        count_lines = "- 不可用: 0"
     st.markdown(
-        "**external_crosscheck_status counts**\n\n"
+        "**外部库校验状态计数**\n\n"
         f"{count_lines}\n\n"
-        "External crosscheck is an offline naming reference only. It does not change RBH calls, "
-        "KO/OE recommendation tiers, phenotype evidence, or run live network lookups in Streamlit."
+        "外部库校验只是离线命名参考：不改变 RBH 判定、KO/OE 推荐分级或表型证据，也不会在 Streamlit 里联网查询。"
     )
     _render_external_reference_cache_status(cache_status, external_rows)
 
@@ -430,18 +463,18 @@ def _render_external_reference_cache_status(
     gpr_priority = status.get("gpr_source_priority") if isinstance(status.get("gpr_source_priority"), dict) else {}
     st.markdown(
         f"""
-        **External reference cache**
+        **外部参考缓存**
 
-        - status: `{"available" if status.get("cache_available") else "not_available"}`
-        - records path: `{status.get("records_path", "")}`
-        - record count: `{status.get("record_count", 0)}`
-        - sources: `{_format_source_counts(source_counts)}`
-        - record types: `{_format_source_counts(type_counts)}`
-        - retrieved_at: `{retrieved.get("first", "")}` to `{retrieved.get("last", "")}`
-        - external model sources: `{_display_value(status.get("external_model_sources") or [])}`
-        - external GPR candidates: `{status.get("external_gpr_candidate_count", 0)}`
-        - best external GPR source: `{status.get("best_external_gpr_source", "")}`
-        - best GPR priority tier: `{gpr_priority.get("best_priority_tier", "")}`
+        - 状态: `{"可用" if status.get("cache_available") else "不可用"}`
+        - 记录路径: `{status.get("records_path", "")}`
+        - 记录数: `{status.get("record_count", 0)}`
+        - 来源: `{_format_source_counts(source_counts)}`
+        - 记录类型: `{_format_source_counts(type_counts)}`
+        - 抓取时间: `{retrieved.get("first", "")}` 至 `{retrieved.get("last", "")}`
+        - 外部模型来源: `{_display_value(status.get("external_model_sources") or [])}`
+        - 外部 GPR 候选数: `{status.get("external_gpr_candidate_count", 0)}`
+        - 最佳外部 GPR 来源: `{status.get("best_external_gpr_source", "")}`
+        - 最佳 GPR 优先级档: `{gpr_priority.get("best_priority_tier", "")}`
         """
     )
     command = str(status.get("recommended_refresh_command") or "")
@@ -449,11 +482,11 @@ def _render_external_reference_cache_status(
         st.code(command, language="powershell")
     warnings = status.get("warnings") or []
     if warnings:
-        st.info("external reference warnings: " + "; ".join(str(item) for item in warnings))
+        st.info("外部参考告警: " + "; ".join(str(item) for item in warnings))
     if external_rows:
         st.dataframe(_rows_to_frame(external_rows, EXTERNAL_REFERENCE_COLUMNS), use_container_width=True, hide_index=True)
     else:
-        st.info("当前 external reference cache 中没有可显示的 gene function 或 GPR candidate 行。")
+        st.info("当前外部参考缓存中没有可显示的基因功能或 GPR 候选行。")
 
 
 def _export_slug(export_kind: str) -> str:
