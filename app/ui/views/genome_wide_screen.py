@@ -380,6 +380,11 @@ def _render_shortlist_readout(readout: dict, *, target_id: str) -> None:
                 if dose_available:
                     # 越加越好(线性) / 很快到顶(饱和) / 要过阈值 / 无响应——来自离线剂量响应扫描缓存
                     entry["剂量响应形状"] = sim_result_value_label(row.get("shape")) if row.get("shape") else "—"
+                    max_gain = row.get("shape_max_gain")
+                    entry["最大增益"] = f"+{float(max_gain) * 100:.2f}%" if isinstance(max_gain, (int, float)) else "—"
+                    half = row.get("shape_half_gain_factor")
+                    # 半增益倍数：达到最大增益一半所需的 OE 倍数，越小说明越早到顶（饱和越快）
+                    entry["半增益倍数"] = f"{float(half):.2g}×" if isinstance(half, (int, float)) else "—"
                 table_rows.append(entry)
             shortlist_frame = pd.DataFrame(table_rows)
             figure = px.bar(
@@ -405,6 +410,8 @@ def _render_shortlist_readout(readout: dict, *, target_id: str) -> None:
             if risky:
                 st.caption("⚠️ 生长有代价（保持率 < 0.9）：" + "、".join(str(c) for c in risky))
             _render_dose_response_note(readout, dose_available)
+            if dose_available:
+                _render_dose_response_curve(readout, shortlist)
         else:
             st.caption("本次筛查在当前 OE 倍数下没有 ratio>1 的 OE 提升候选（不代表无解，可能是单基因、当前倍数强度不足以突破瓶颈）。")
 
@@ -458,6 +465,60 @@ def _render_dose_response_note(readout: dict, dose_available: bool) -> None:
     )
     for warning in dose.get("warnings") or []:
         st.caption(sim_result_warning_label(warning))
+
+
+# 曲线只画能看出趋势的杠杆（最大增益≥此值），近乎平的小候选会糊在 x 轴附近、只添乱。
+_DOSE_RESPONSE_CURVE_MIN_GAIN = 0.01  # 1%
+_DOSE_RESPONSE_CURVE_MAX_LINES = 6
+
+
+def _render_dose_response_curve(readout: dict, shortlist: list) -> None:
+    """把短名单头部候选的剂量响应画成曲线：过表达倍数 vs 分泌相对提升(%)，曲线变平=很快到顶。"""
+    dose = readout.get("dose_response") or {}
+    shapes = [s for s in (dose.get("reaction_shapes") or []) if isinstance(s, dict)]
+    if not shapes:
+        return
+    reaction_to_candidate = {str(row["reaction"]): str(row["candidate"]) for row in shortlist}
+    ranked = sorted(shapes, key=lambda s: -(float(s.get("max_relative_gain") or 0.0)))
+    rows: list[dict[str, object]] = []
+    plotted = 0
+    for shape in ranked:
+        max_gain = shape.get("max_relative_gain")
+        if not isinstance(max_gain, (int, float)) or max_gain < _DOSE_RESPONSE_CURVE_MIN_GAIN:
+            continue
+        if plotted >= _DOSE_RESPONSE_CURVE_MAX_LINES:
+            break
+        reaction = str(shape.get("reaction_id"))
+        candidate = reaction_to_candidate.get(reaction, reaction)
+        for point in shape.get("point_deltas") or []:
+            if not isinstance(point, dict):
+                continue
+            factor = point.get("factor")
+            gain = point.get("relative_gain")
+            if factor is None or gain is None:
+                continue
+            rows.append(
+                {"过表达倍数": float(factor), "分泌相对提升(%)": float(gain) * 100.0, "候选": candidate}
+            )
+        plotted += 1
+    if not rows:
+        return
+    curve = pd.DataFrame(rows)
+    figure = px.line(
+        curve.sort_values("过表达倍数"),
+        x="过表达倍数",
+        y="分泌相对提升(%)",
+        color="候选",
+        markers=True,
+        color_discrete_sequence=px.colors.qualitative.Set2,
+        title="剂量响应曲线：过表达倍数越高分泌怎么走（曲线变平＝很快到顶、再加收益递减）",
+    )
+    figure.update_layout(
+        xaxis_title="OE 过表达倍数（×，1＝不过表达）",
+        yaxis_title="分泌相对提升（%，相对野生型；非绝对产量）",
+        legend_title_text=f"候选（仅显示最大增益≥{_DOSE_RESPONSE_CURVE_MIN_GAIN:.0%} 的前 {_DOSE_RESPONSE_CURVE_MAX_LINES} 个）",
+    )
+    st.plotly_chart(figure, use_container_width=True)
 
 
 def _render_dimension_tables(result: analysis.DimensionalResults) -> None:
