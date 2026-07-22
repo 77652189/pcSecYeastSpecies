@@ -175,6 +175,13 @@ def test_direct_probe_imports_in_formal_engine_are_explicit_migration_debt() -> 
         # _prototype_adapter.py could consolidate this to one file.
         "python_pichia/src/pcsec_pichia/analysis/shadow_lp/model_adapter.py",
         "python_pichia/src/pcsec_pichia/analysis/shadow_lp/secretion_capacity.py",
+        # analysis/__init__.py delegates reaction secretory-process classification to the
+        # canonical classify_secretory_process (probe). The sec_ classification convergence
+        # (commit 87f99ac) deliberately routed engine-side LP-attribution reaction classification
+        # through this single source (_lp_reaction_process -> classify_secretory_process) instead
+        # of re-inferring by name, so payloads stop falling to "unknown". Read-only,
+        # single-source-of-truth, not new independent probe reliance.
+        "python_pichia/src/pcsec_pichia/analysis/__init__.py",
     }
     discovered_probe_backed_modules: set[str] = set()
     for source_path in (REPO_ROOT / "python_pichia" / "src" / "pcsec_pichia").rglob("*.py"):
