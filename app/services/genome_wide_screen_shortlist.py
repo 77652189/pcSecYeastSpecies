@@ -57,6 +57,24 @@ def _load_r1_floors(r1_dir: Path | None, target_id: str, top: int = 5) -> list[d
     return rows[:top]
 
 
+def _load_dose_response(dose_response_dir: Path | None, target_id: str) -> dict[str, object]:
+    """读离线扫描缓存 `{target}_dose_response.json`（reaction_id→形状）。缺失/损坏返回空。
+
+    形状本身是模型+反应的属性、与哪次筛查无关，故按 (target, reaction_id) 缓存、跨 run 可复用。
+    生成见 python_pichia/tools/run_shortlist_dose_response.py（有界额外求解，离线/后台跑）。
+    """
+    if dose_response_dir is None:
+        return {}
+    path = Path(dose_response_dir) / f"{target_id}_dose_response.json"
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
 def _oe_shortlist(frame: pd.DataFrame, target_id: str, top_n: int) -> list[dict[str, object]]:
     """target 的 OE 提升候选（ratio>1），按相对提升降序，取 top_n。
 
@@ -90,14 +108,26 @@ def build_shortlist_readout(
     *,
     top_n: int = 8,
     r1_readout_dir: Path | None = None,
+    dose_response_dir: Path | None = None,
 ) -> dict[str, object]:
-    """合成一个 target 的短名单读出 dict（零新增求解）。
+    """合成一个 target 的短名单读出 dict（本模块零新增求解，只读缓存）。
 
     frame: 已经过 load_gene_tradeoff_csv 归一化的筛查 tradeoff 表。
     r1_readout_dir: 缓存 R1 读出目录（None 或缺文件时“为什么受限”段落优雅降级为空）。
+    dose_response_dir: 离线 R2 剂量响应缓存目录（None 或缺文件时不附形状、面板显示“未扫描”）。
     """
     floors = _load_r1_floors(r1_readout_dir, target_id)
     shortlist = _oe_shortlist(frame, target_id, top_n)
+
+    # R2 剂量响应形状（越加越好/很快到顶）——只读离线扫描缓存并按 reaction_id 附到候选，本模块零求解。
+    dose_response = _load_dose_response(dose_response_dir, target_id)
+    shapes_by_reaction = dose_response.get("shapes_by_reaction") or {}
+    for row in shortlist:
+        shape = shapes_by_reaction.get(str(row["reaction"])) if isinstance(shapes_by_reaction, dict) else None
+        if isinstance(shape, dict):
+            row["shape"] = shape.get("shape")
+            row["shape_max_gain"] = shape.get("max_relative_gain")
+            row["shape_half_gain_factor"] = shape.get("half_gain_factor")
 
     # R4 价值-of-information：对 OE 短名单排序（分数=相对提升）检近似并列 → 该测什么。零求解。
     # top_k 设为短名单长度，让它扫遍整个短名单的相邻近似并列（不只 top-3）。
@@ -124,6 +154,15 @@ def build_shortlist_readout(
             row["candidate"] for row in shortlist if float(row["growth_retention"]) < GROWTH_RISK_THRESHOLD
         ],
         "value_of_information": voi,
+        "dose_response_available": bool(shapes_by_reaction),
+        "dose_response": {
+            "tested_factors": dose_response.get("tested_factors"),
+            "baseline_objective": dose_response.get("baseline_objective"),
+            "reaction_shapes": dose_response.get("reaction_shapes"),
+            "warnings": dose_response.get("warnings"),
+        }
+        if dose_response
+        else {},
     }
 
 

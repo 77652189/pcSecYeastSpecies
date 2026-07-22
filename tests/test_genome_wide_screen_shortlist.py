@@ -164,3 +164,46 @@ def test_growth_risky_candidates_flagged() -> None:
     )
     readout = build_shortlist_readout(frame, "hLF")
     assert readout["growth_risky_candidates"] == ["RISK"]
+
+
+def test_dose_response_absent_degrades_gracefully() -> None:
+    frame = pd.DataFrame([_oe("R_A", 1.08, common_name="PDI1/ERO1")])
+    readout = build_shortlist_readout(frame, "hLF", dose_response_dir=None)
+    assert readout["dose_response_available"] is False
+    assert readout["dose_response"] == {}
+    assert "shape" not in readout["oe_shortlist"][0]  # no shape attached when no cache
+
+
+def test_dose_response_shapes_attached_from_cache_by_reaction_id(tmp_path) -> None:
+    (tmp_path / "hLF_dose_response.json").write_text(
+        json.dumps(
+            {
+                "target_id": "hLF",
+                "tested_factors": [1.25, 1.5, 2.0, 3.0, 5.0, 8.0],
+                "baseline_objective": 1.0,
+                "shapes_by_reaction": {
+                    "R_A": {"reaction_id": "R_A", "shape": "saturating", "max_relative_gain": 0.08, "half_gain_factor": 2.0},
+                    "R_B": {"reaction_id": "R_B", "shape": "linear", "max_relative_gain": 0.05, "half_gain_factor": None},
+                },
+                "warnings": ["w"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    frame = pd.DataFrame(
+        [
+            _oe("R_A", 1.08, common_name="PDI1/ERO1"),
+            _oe("R_B", 1.05, common_name="AP-1"),
+            _oe("R_C", 1.02, common_name="OCH1"),  # not in cache -> no shape
+        ]
+    )
+
+    readout = build_shortlist_readout(frame, "hLF", dose_response_dir=tmp_path)
+
+    assert readout["dose_response_available"] is True
+    by_name = {row["candidate"]: row for row in readout["oe_shortlist"]}
+    assert by_name["PDI1/ERO1"]["shape"] == "saturating"
+    assert by_name["PDI1/ERO1"]["shape_half_gain_factor"] == 2.0
+    assert by_name["AP-1"]["shape"] == "linear"
+    assert by_name["OCH1"].get("shape") is None  # reaction absent from cache stays unshaped
+    assert readout["dose_response"]["tested_factors"] == [1.25, 1.5, 2.0, 3.0, 5.0, 8.0]

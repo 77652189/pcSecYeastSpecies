@@ -289,11 +289,15 @@ def _render_results_section(paths, runs: list[RunInfo]) -> None:
 
     # R1 瓶颈读出是 per-target、单独计算并缓存的资产（不随本次筛查产生）；有就显示“为什么受限”，没有优雅降级。
     r1_readout_dir = paths.local_runs_dir / "r1_readout"
+    # R2 剂量响应形状也是离线/后台单独扫描并缓存的（有界额外求解），面板只读缓存；缺失显示“未扫描”。
+    dose_response_dir = paths.local_runs_dir / "candidate_shortlist_readout"
     tabs = st.tabs([f"靶点：{target_id}" for target_id in target_ids] + (["靶点间差异"] if len(target_ids) >= 2 else []))
     for tab, target_id in zip(tabs, target_ids):
         with tab:
             try:
-                readout = shortlist_service.build_shortlist_readout(frame, target_id, r1_readout_dir=r1_readout_dir)
+                readout = shortlist_service.build_shortlist_readout(
+                    frame, target_id, r1_readout_dir=r1_readout_dir, dose_response_dir=dose_response_dir
+                )
                 _render_shortlist_readout(readout, target_id=target_id)
                 st.divider()
             except Exception as exc:  # noqa: BLE001 - 读出只是概览，任何失败都不该拖垮下方的明细表格
@@ -363,18 +367,21 @@ def _render_shortlist_readout(readout: dict, *, target_id: str) -> None:
         # 2. OE 提升候选短名单
         st.markdown(f"**OE 提升候选短名单（按相对提升排序，top-{len(shortlist)}）**")
         if shortlist:
-            shortlist_frame = pd.DataFrame(
-                [
-                    {
-                        "候选": str(row["candidate"]),
-                        "资源层": str(row["layer"]),
-                        "相对提升(%)": float(row["effect"]) * 100.0,
-                        "生长保持": round(float(row["growth_retention"]), 3),
-                        "证据置信度": sim_result_value_label(row["confidence"]) if row["confidence"] else "—",
-                    }
-                    for row in shortlist
-                ]
-            )
+            dose_available = bool(readout.get("dose_response_available"))
+            table_rows = []
+            for row in shortlist:
+                entry = {
+                    "候选": str(row["candidate"]),
+                    "资源层": str(row["layer"]),
+                    "相对提升(%)": float(row["effect"]) * 100.0,
+                    "生长保持": round(float(row["growth_retention"]), 3),
+                    "证据置信度": sim_result_value_label(row["confidence"]) if row["confidence"] else "—",
+                }
+                if dose_available:
+                    # 越加越好(线性) / 很快到顶(饱和) / 要过阈值 / 无响应——来自离线剂量响应扫描缓存
+                    entry["剂量响应形状"] = sim_result_value_label(row.get("shape")) if row.get("shape") else "—"
+                table_rows.append(entry)
+            shortlist_frame = pd.DataFrame(table_rows)
             figure = px.bar(
                 shortlist_frame.sort_values("相对提升(%)"),
                 x="相对提升(%)",
@@ -397,6 +404,7 @@ def _render_shortlist_readout(readout: dict, *, target_id: str) -> None:
             risky = readout.get("growth_risky_candidates") or []
             if risky:
                 st.caption("⚠️ 生长有代价（保持率 < 0.9）：" + "、".join(str(c) for c in risky))
+            _render_dose_response_note(readout, dose_available)
         else:
             st.caption("本次筛查在当前 OE 倍数下没有 ratio>1 的 OE 提升候选（不代表无解，可能是单基因、当前倍数强度不足以突破瓶颈）。")
 
@@ -431,6 +439,24 @@ def _render_shortlist_voi(voi: dict) -> None:
     else:
         st.caption("无可排序的 OE 提升候选，暂无“该测什么”的明确建议。")
     for warning in voi.get("warnings") or []:
+        st.caption(sim_result_warning_label(warning))
+
+
+def _render_dose_response_note(readout: dict, dose_available: bool) -> None:
+    if not dose_available:
+        st.caption(
+            "剂量响应形状：本靶点短名单尚未扫描——这一步要对每个候选重解多个过表达倍数（有界额外求解），"
+            "离线/后台用 `run_shortlist_dose_response.py` 生成后，上表会多出“剂量响应形状”一列。当前先看相对提升排序即可。"
+        )
+        return
+    dose = readout.get("dose_response") or {}
+    factors = dose.get("tested_factors") or []
+    factors_txt = "、".join(f"{float(f):g}×" for f in factors) or "—"
+    st.caption(
+        f"剂量响应形状（扫描倍数 {factors_txt}；相对形状信号、非绝对产量）：饱和型＝适度过表达就够、再加收益递减；"
+        "线性型＝还在涨、值得加大表达；阈值型＝要超过某个最小倍数才起效；无响应＝任何倍数都几乎没提升、别在这过表达。"
+    )
+    for warning in dose.get("warnings") or []:
         st.caption(sim_result_warning_label(warning))
 
 
