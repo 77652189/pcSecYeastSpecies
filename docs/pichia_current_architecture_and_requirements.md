@@ -1,7 +1,7 @@
 # pcSecPichia 当前架构与能力边界
 
 状态：active  
-最后更新：2026-07-20
+最后更新：2026-07-23
 
 ## 原始研发目标
 
@@ -133,6 +133,29 @@ OE 产品能力分为两个独立层级：相对、未校准的决策层用于�
 
 分层决策见 [ADR-002](adr/002-relative-oe-and-absolute-capacity-layers.md)。
 
+## 研发方向与状态
+
+五个研发方向的完整定义与当前状态（[执行计划](EXECUTION_PLAN.md) 只列当前 slice，此处为权威状态）：
+
+1. **实验反馈闭环**：软件闭环已验收（宽表导入/校验/关联/对照/脱敏回放，[ADR-003](adr/003-fermentation-feedback-minimal-fields.md)）。已有真实发酵验证数据到手，存仓库外本地私有区、本地摄入使用（μ、titer 验证锚点、UPR×折叠一致性）；正式"获批 production 数据回填"仍是可选的将来事件。
+2. **gene-level OE capacity**：产品分层已验收关闭。reaction proxy / 相对未校准 / 绝对 unavailable / not-executable 由核心层统一判定；绝对层缺 reviewed baseline capacity 保持 unavailable。
+3. **分泌通路机制约束**：Round 0 完成，七类资源架构与可执行契约冻结；ERAD 约束验证完成、决定保持可选（不改默认值）。不做完整机制求解 / 组合搜索。
+4. **组合改造设计**：**战略性暂缓**——真实组合在模型范围外，模型内搜遗传组合（GA/SA/MILP）低价值；留到有稳定性标注的可信单基因排序后，仅在 top 短名单做有界两两上位性。
+5. **条件鲁棒性筛查**：从局部验收维度**有界升级**为当前 slice（碳源条件标定 + 短名单跨条件稳健性标注，见执行计划阶段① / [ADR-006](adr/006-carbon-source-condition-calibration.md)）。无界完整跨条件排名产品仍不做。
+
+**横切层**（不属于单个方向，叠在相对决策层上）：相对信号深化 R1–R4（[ADR-004](adr/004-relative-signal-deepening-under-permanent-data-gap.md)：瓶颈归因 / 剂量响应形状 / 排序稳健性 / 价值-of-information，均已落地）；RNA-seq 表达约束（[ADR-005](adr/005-rnaseq-expression-constrained-enzyme-capacity.md)，待数据）；碳源条件标定（[ADR-006](adr/006-carbon-source-condition-calibration.md)，进行中）。绝对容量层恒 unavailable；目标蛋白降解层明确不建。
+
+### 碳源条件标定状态（[ADR-006](adr/006-carbon-source-condition-calibration.md)）
+
+模型碳源轴：`glucose / glycerol / methanol / glucose_glycerol / glycerol_methanol`（bound 切换与生长反应选择已接好）。标定分三档：
+
+| 条件 | 当前档 | 说明 |
+| --- | --- | --- |
+| glucose | `corrected_reference` | 已对齐 MATLAB 基准 |
+| glycerol / methanol / 混合 | `draft_boundary` → 目标 `internally_calibrated` | 边界能求解、未条件标定；阶段① 做机械标定（蛋白含量 / 生长反应 / 生物量组成）到内部一致 |
+
+真实工艺：hLF 走甘油生长 → 甘油-葡萄糖过渡 → 葡萄糖生产（组成型启动子，不涉甲醇）；OPN 走甲醇（小规模、验证少）。升到 `corrected_reference` 需补齐数据契约（见 ADR-006）：各碳源 μ / 比摄取速率、per-condition 蛋白含量、甲醇 AOX 酶负担、一个验证锚点；绝对容量无论如何恒 unavailable。
+
 ## 当前主要缺口
 
   1. 绝对 gene-level OE capacity 缺少可审核 baseline capacity，当前必须保持 unavailable。
@@ -216,6 +239,14 @@ app/ui
 ### 实验反馈数据
 
 原始导入进入 `local_runs/experiment_feedback/inbox/`；标准化缓存进入 `.../validated/`；只有人工确认来源、权限、脱敏、单位和上下文后，才单独 checkpoint 提升到 `Data/` 正式目录。失败、无效、不可测和阴性结果必须保留，不能只收集成功实验。
+
+### 保密湿实验数据（仅本地、不入库）
+
+湿实验专有数据（发酵结果、菌株基因型 / 构建、ELISA 产量等）为保密内容，处理规则：
+
+- 只存 **pcSec 仓库之外**的本地私有区（`CursorProject/pcSec_wetlab_private/`），物理上无法被本仓库提交；不上传云端 / GitHub / 任何外部服务。
+- pcSec 代码通过 gitignored 的本地路径配置在运行时读取；提交进仓库的产物（代码、抽象结论、文档）只含机制层抽象，**绝不含基因型 / 位点 / 启动子 / 产量数值**。
+- 提交护栏：私有区路径或含保密数值的文件被 staged 时应由检查拦截。
 
 ### LLM 数据边界
 

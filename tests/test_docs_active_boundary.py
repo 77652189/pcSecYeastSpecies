@@ -76,24 +76,25 @@ def test_obsolete_migration_plans_are_deleted_not_kept_as_active_debt() -> None:
     assert all_doc_names.isdisjoint(DELETED_OBSOLETE_MIGRATION_DOCS)
 
 
-def test_docs_readme_routes_to_secretory_resource_round_0() -> None:
+def test_docs_readme_routes_to_current_slice() -> None:
     text = (REPO_ROOT / "docs" / "README.md").read_text(encoding="utf-8")
 
-    assert "方向 1 与方向 2 产品分层已经验收" in text
-    assert "方向 3 的 secretory resource Round 0 架构与可执行契约" in text
+    assert "碳源条件标定 + 短名单跨条件稳健性" in text
+    assert "方向 4 组合设计与目标蛋白降解通路建模明确不做" in text
 
 
-def test_handoff_points_to_secretory_resource_round_0() -> None:
+def test_handoff_points_to_current_slice() -> None:
+    # handoff 精简为"当前目标 + 下一步 + 必读 + 验证"；current_slice 随推进更新
+    # （从 direction_3_erad 推进到 direction_5 碳源标定 + 跨条件稳健性）。
     text = (REPO_ROOT / "docs" / "handoff.md").read_text(encoding="utf-8")
 
-    assert "current_slice: direction_3_erad_constraint_activation" in text
-    assert "slice_status: complete_kept_optional" in text
-    assert "direction_3_round0_status: complete" in text
+    assert "current_slice: direction_5_carbon_source_calibration_and_condition_robustness" in text
+    assert "slice_status: in_progress" in text
     assert "absolute_capacity_status: unavailable_waiting_for_qualified_evidence" in text
-    assert "direction_2_status: accepted_product_tiering_closed" in text
-    assert "`direction_3_secretory_resource_round_0` 已完成并通过验收" in text
-    assert "不得实现完整 secretory mechanism 求解" in text
-    assert "不得自动进入方向 3 的机制实现" in text
+    assert "碳源条件标定 + 跨条件稳健性" in text
+    # 硬边界必须在场
+    assert "glucose 的 corrected_reference 结果不得改动" in text
+    assert "保密湿实验数据只存仓库外本地私有区" in text
 
 
 def test_active_architecture_indexes_layered_oe_decision() -> None:

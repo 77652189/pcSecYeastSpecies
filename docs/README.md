@@ -1,11 +1,11 @@
 # pcSecPichia 文档索引
 
 状态：active  
-最后更新：2026-07-20
+最后更新：2026-07-23
 
 项目文档围绕一个原始研发目标组织：通过 KO/OE 和分泌路径改造，提高 hLF、OPN 等目标蛋白在 Pichia 中的分泌表现。
 
-当前系统已经具备 KO/OE 候选生成、证据复核、实验反馈回放、独立的 reaction proxy 与相对未校准 gene-capacity 求解，以及外部 baseline capacity 候选的审核链路，但不能承诺真实发酵产量、mg/L 绝对值或实验成功率。方向 1 与方向 2 产品分层已经验收；绝对容量仍等待合格审核锚点。方向 3 的 secretory resource Round 0 架构与可执行契约，以及随后的 ERAD 约束验证与激活决定，均已完成——决定是约束保持可选，不改默认值；目标蛋白降解通路（PEP4/PRB1/YPS）建模明确不做。下一步范围由用户决定何时推进，不自动展开。
+当前系统已具备 KO/OE 候选生成、证据复核、实验反馈回放、reaction proxy 与相对未校准 gene-capacity 求解、外部 baseline capacity 审核链路，以及相对信号深化 R1–R4（瓶颈归因 / 剂量响应 / 排序稳健性 / 价值-of-information）；但不承诺真实发酵产量、mg/L 绝对值或实验成功率。方向 1、2 产品分层已验收，方向 3 secretory resource Round 0 与 ERAD 决定已完成（约束保持可选），绝对容量恒 unavailable。**当前 slice：方向 5 有界升级为碳源条件标定 + 短名单跨条件稳健性**（见 [执行计划](EXECUTION_PLAN.md) 阶段① 与 [ADR-006](adr/006-carbon-source-condition-calibration.md)）。方向 4 组合设计与目标蛋白降解通路建模明确不做。五方向完整状态见架构文档，当前任务见执行计划 / handoff。
 
 ## 当前入口
 
