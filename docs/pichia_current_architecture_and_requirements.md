@@ -156,6 +156,8 @@ OE 产品能力分为两个独立层级：相对、未校准的决策层用于�
 
 真实工艺：hLF 走甘油生长 → 甘油-葡萄糖过渡 → 葡萄糖生产（组成型启动子，不涉甲醇）；OPN 走甲醇（小规模、验证少）。升到 `corrected_reference` 需补齐数据契约（见 ADR-006）：各碳源 μ / 比摄取速率、per-condition 蛋白含量、甲醇 AOX 酶负担、一个验证锚点；绝对容量无论如何恒 unavailable。
 
+**真实工艺 μ 锚点（机制层，opt-in）**：在手发酵罐验证已派生 hLF 两相 μ 锚点——甘油生长相 μ≈0.10、葡萄糖生产相 μ≈0.013（跨温度 20–30℃ / pH 4–7 稳健），见 `pcsec_pichia.process_anchors`。默认分泌仿真仍固定 μ=0.10（`corrected_reference`，回归锁定）；生产相锚点为显式选用操作点（模型中 μ 越低→蛋白预算留给分泌越多，hLF 生产相分泌容量约 1.16× 于 μ=0.10 生长参考点）。原始 OD / 菌株 / 温度·pH 明细为机密，仅本地私有区、不入 git；titer 锚点仍缺。
+
 ## 当前主要缺口
 
   1. 绝对 gene-level OE capacity 缺少可审核 baseline capacity，当前必须保持 unavailable。

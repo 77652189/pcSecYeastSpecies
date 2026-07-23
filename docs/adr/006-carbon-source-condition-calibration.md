@@ -40,3 +40,8 @@
 - **不给数据就直接升 corrected**：否决——不诚实，把未标定当已验证。
 - **其余条件全留 draft**：否决——堵死方向5 与真实工艺对齐。
 - **照搬 MATLAB 甲醇特例脚本当基准**：否决——代码已核实该 artifact 不是可靠同条件基准。
+
+## 实现进展（2026-07-23）
+
+- **A 机械标定 + 三档已落地**：碳源条件化蛋白含量（甲醇 0.40）、蛋白成本/生长约束改认 formulation 选定生长反应（`biomass_reaction_id` 贯穿 4 处求解/装配点）、三档 `formulation_status`（glucose=`corrected_reference`；glycerol/methanol/混合=`internally_calibrated`）+ UI"碳源标定档"标注。glucose 逐字不变（护栏 `test_simulation_entrypoints` 10 passed）。
+- **B5 μ 锚点（机制层）已接线**：`pcsec_pichia.process_anchors` 暴露 hLF 甘油生长相 μ≈0.10 / 葡萄糖生产相 μ≈0.013（opt-in 操作点，默认 μ=0.10 不变）；发酵 μ 数据已核验（全部 μ 从 OD 重算吻合、生物学量级合理）并归档仓库外私有区。**仍缺**：titer 验证锚点、甲醇 AOX 负担、方向1 本地摄入——甲醇/mixed 与 hLF 均停在 `internally_calibrated`，不升 `corrected_reference`。
