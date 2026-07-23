@@ -113,6 +113,9 @@ class CarbonSourceFormulation:
     selected_growth_reaction_id: str
     carbon_objective_weights: dict[str, float]
     formulation_status: str
+    # 条件专属总蛋白含量 (g 蛋白 / gDCW)。默认 0.37（葡萄糖，与 MATLAB glucose 条件一致）；
+    # 甲醇条件 0.40（MATLAB methanol 条件）。见 ADR-006。仅在碳源标定接线后由求解读取。
+    protein_content: float = 0.37
     warnings: tuple[str, ...] = ()
     matlab_alignment_note: str = ""
 
@@ -474,6 +477,7 @@ _CARBON_SOURCE_FORMULATIONS: dict[str, CarbonSourceFormulation] = {
         candidate_growth_reaction_ids=("BIOMASS_meoh",),
         selected_growth_reaction_id="BIOMASS_meoh",
         carbon_objective_weights={"Ex_meoh": 1.0},
+        protein_content=0.40,
         formulation_status="draft_induction_boundary_requires_calibration",
         warnings=(
             "Methanol formulation opens the model boundary but does not by itself calibrate induction, uptake, or promoter regulation.",

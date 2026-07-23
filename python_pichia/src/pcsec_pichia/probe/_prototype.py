@@ -838,6 +838,7 @@ def solve_pcsec_maximize(
     total_protein_content: float = 0.37,
     unmodeled_er_protein_fraction: float = 0.040,
     mitochondrial_protein_fraction: float = 0.05,
+    biomass_reaction_id: str = "BIOMASS",
     write_ribosome_translation_constraint: bool = False,
     write_misfolding_constraints: bool = False,
     time_limit_seconds: float = DEFAULT_SOLVER_TIME_LIMIT_SECONDS,
@@ -860,6 +861,7 @@ def solve_pcsec_maximize(
         total_protein_content=total_protein_content,
         unmodeled_er_protein_fraction=unmodeled_er_protein_fraction,
         mitochondrial_protein_fraction=mitochondrial_protein_fraction,
+        biomass_reaction_id=biomass_reaction_id,
         write_ribosome_translation_constraint=write_ribosome_translation_constraint,
         write_misfolding_constraints=write_misfolding_constraints,
     )
@@ -920,6 +922,7 @@ def build_pcsec_constraint_matrices(
     mitochondrial_protein_fraction: float,
     write_ribosome_translation_constraint: bool,
     write_misfolding_constraints: bool,
+    biomass_reaction_id: str = "BIOMASS",
 ) -> tuple[sparse.csr_matrix, np.ndarray, sparse.csr_matrix, np.ndarray, dict[str, int]]:
     rows_eq: list[sparse.csr_matrix] = [model.s_matrix.tocsr()]
     rhs_eq: list[np.ndarray] = [model.b.astype(float)]
@@ -941,6 +944,7 @@ def build_pcsec_constraint_matrices(
         mu=mu,
         total_protein_content=total_protein_content,
         unmodeled_er_protein_fraction=unmodeled_er_protein_fraction,
+        biomass_reaction_id=biomass_reaction_id,
     )
     append_rows(rows_eq, rhs_eq, protein_rows, protein_rhs)
     counts["protein_mass"] = len(protein_rhs)
@@ -1053,6 +1057,7 @@ def protein_mass_rows(
     mu: float,
     total_protein_content: float,
     unmodeled_er_protein_fraction: float,
+    biomass_reaction_id: str = "BIOMASS",
 ) -> tuple[list[sparse.csr_matrix], list[float]]:
     reaction_index = model.reaction_index
     terms: dict[int, float] = {}
@@ -1068,7 +1073,7 @@ def protein_mass_rows(
         if reaction_id in reaction_index:
             terms[reaction_index[reaction_id]] = terms.get(reaction_index[reaction_id], 0.0) + 40.0
 
-    modeled_fraction = modeled_protein_fraction(model)
+    modeled_fraction = modeled_protein_fraction(model, biomass_reaction_id)
     rows = [sparse_row(model, terms)]
     rhs = [mu * total_protein_content * modeled_fraction]
     if "dilute_dummyER" in reaction_index:
@@ -1194,10 +1199,13 @@ def collect_compartment_reactions(model: CobraModel, compartment_ids: tuple[str,
     ]
 
 
-def modeled_protein_fraction(model: CobraModel) -> float:
+def modeled_protein_fraction(model: CobraModel, biomass_reaction_id: str = "BIOMASS") -> float:
+    # biomass_reaction_id 默认 "BIOMASS"（葡萄糖）→ 现有 glucose 行为逐字不变；
+    # 碳源标定时传 formulation 选定的生长反应（甲醇 BIOMASS_meoh / 甘油 BIOMASS_glyc），
+    # 因为不同碳源的 PROTEIN[c] 系数不同（0.88 / 0.50 / 0.59），用错会算错蛋白预算。
     try:
         met_index = model.mets.index("PROTEIN[c]")
-        rxn_index = model.reaction_index["BIOMASS"]
+        rxn_index = model.reaction_index[biomass_reaction_id]
     except (KeyError, ValueError):
         return 1.0
     return 1.0 + float(model.s_matrix[met_index, rxn_index])
