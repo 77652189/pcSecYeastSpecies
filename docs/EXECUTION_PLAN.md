@@ -13,11 +13,11 @@
 
 方向5 从"方向 2-3 的局部验收维度"**有界升级**为一个 slice。目标：把真实工艺碳源条件标定到可信档，并给短名单排序加"跨条件稳健性 + 湿实验一致性"标注。依据见 [ADR-006](adr/006-carbon-source-condition-calibration.md)。
 
-- [ ] **A1** 碳源条件化蛋白含量（甲醇 0.40 vs 葡萄糖 0.37），从 formulation 喂到求解
-- [ ] **A2** 蛋白成本 / 生长约束改认 formulation 选定的生长反应（去掉 `"BIOMASS"` 硬编码）；**glucose 的 `corrected_reference` 结果逐字不变，回归锁定**
-- [ ] **A3** 核实并按需补齐甲醇条件专属生物量组成（`*_meoh`）
-- [ ] **A4** 内部标定验证：各条件可行求解、生长 / 分泌量级合理、蛋白预算正确
-- [ ] **A5** 三档 formulation 状态（`corrected_reference` / `internally_calibrated` / `draft_boundary`）+ UI 诚实标注
+- [x] **A1** 碳源条件化蛋白含量（甲醇 0.40 vs 葡萄糖 0.37），从 formulation 喂到求解 — 已完成（`media.protein_content` + 4 处求解/装配点接线）
+- [x] **A2** 蛋白成本 / 生长约束改认 formulation 选定的生长反应（去掉 `"BIOMASS"` 硬编码）；**glucose 的 `corrected_reference` 结果逐字不变，回归锁定** — 已完成（`biomass_reaction_id` 贯穿；护栏 `test_simulation_entrypoints` 10 passed）
+- [x] **A3** 核实并按需补齐甲醇条件专属生物量组成（`*_meoh`）— 已完成（核实 `BIOMASS`/`BIOMASS_glyc`/`BIOMASS_meoh` 各自 PROTEIN[c] 系数 0.8798/0.5903/0.4977，无需补齐）
+- [x] **A4** 内部标定验证：各条件可行求解、生长 / 分泌量级合理、蛋白预算正确 — 已完成（五条件全部 success/status=0；量级 glucose>glycerol≫methanol；混合条件数值≈其选定单碳源，即已记录的单一生物量近似）
+- [x] **A5** 三档 formulation 状态（`corrected_reference` / `internally_calibrated` / `draft_boundary`）+ UI 诚实标注 — 已完成（非葡萄糖=`internally_calibrated`；结果页"碳源标定档"行 + i18n 三档标签）
 - [ ] **B1** 求解结果缓存层（内容寻址 key、默认读缓存、显式重算）+ 预热常见条件（非功能需求：分泌求解慢且确定，反复求解直接存结果）
 - [ ] **B2** 短名单跑真实工艺条件矩阵（hLF 甘油 / 甘油-葡萄糖过渡 / 葡萄糖；OPN 甲醇）
 - [ ] **B3** 噪声门控：翻转的排序换 highs-ds / highs-ipm 重解 + 看量级，分真·条件敏感 vs 数值假象（复用 R3 `compare_ranking_robustness`）

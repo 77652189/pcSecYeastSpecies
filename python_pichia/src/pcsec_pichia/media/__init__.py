@@ -464,7 +464,7 @@ _CARBON_SOURCE_FORMULATIONS: dict[str, CarbonSourceFormulation] = {
         candidate_growth_reaction_ids=("BIOMASS_glyc",),
         selected_growth_reaction_id="BIOMASS_glyc",
         carbon_objective_weights={"Ex_glyc": 1.0},
-        formulation_status="draft_carbon_source_boundary",
+        formulation_status="internally_calibrated",
         warnings=(
             "Glycerol formulation is a Python carbon-source boundary; it is not an AOX1 methanol-induction proxy.",
         ),
@@ -478,7 +478,7 @@ _CARBON_SOURCE_FORMULATIONS: dict[str, CarbonSourceFormulation] = {
         selected_growth_reaction_id="BIOMASS_meoh",
         carbon_objective_weights={"Ex_meoh": 1.0},
         protein_content=0.40,
-        formulation_status="draft_induction_boundary_requires_calibration",
+        formulation_status="internally_calibrated",
         warnings=(
             "Methanol formulation opens the model boundary but does not by itself calibrate induction, uptake, or promoter regulation.",
         ),
@@ -491,7 +491,7 @@ _CARBON_SOURCE_FORMULATIONS: dict[str, CarbonSourceFormulation] = {
         candidate_growth_reaction_ids=("BIOMASS", "BIOMASS_glyc"),
         selected_growth_reaction_id="BIOMASS",
         carbon_objective_weights={"Ex_glc_D": 1.0, "Ex_glyc": 1.0},
-        formulation_status="draft_mixed_carbon_boundary",
+        formulation_status="internally_calibrated",
         warnings=(
             "Mixed-carbon objective weights do not impose feed ratios, uptake preference, or promoter repression.",
             "Fixed-growth probes select BIOMASS and close BIOMASS_glyc unless a future calibrated mixed-growth mode is added.",
@@ -505,7 +505,7 @@ _CARBON_SOURCE_FORMULATIONS: dict[str, CarbonSourceFormulation] = {
         candidate_growth_reaction_ids=("BIOMASS_glyc", "BIOMASS_meoh"),
         selected_growth_reaction_id="BIOMASS_glyc",
         carbon_objective_weights={"Ex_glyc": 1.0, "Ex_meoh": 1.0},
-        formulation_status="draft_mixed_carbon_boundary_requires_calibration",
+        formulation_status="internally_calibrated",
         warnings=(
             "Glycerol+methanol is a boundary probe, not a calibrated transition-feed or induction-stage prediction.",
             "Fixed-growth probes select BIOMASS_glyc and close BIOMASS_meoh unless a future calibrated mixed-growth mode is added.",

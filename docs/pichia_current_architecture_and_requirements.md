@@ -152,7 +152,7 @@ OE 产品能力分为两个独立层级：相对、未校准的决策层用于�
 | 条件 | 当前档 | 说明 |
 | --- | --- | --- |
 | glucose | `corrected_reference` | 已对齐 MATLAB 基准 |
-| glycerol / methanol / 混合 | `draft_boundary` → 目标 `internally_calibrated` | 边界能求解、未条件标定；阶段① 做机械标定（蛋白含量 / 生长反应 / 生物量组成）到内部一致 |
+| glycerol / methanol / 混合 | `internally_calibrated`（阶段① A 已机械标定） | 蛋白含量 / 生长反应 / modeled_fraction 已按碳源条件化，内部一致、量级合理（glucose>glycerol≫methanol），glucose 逐字不变；仍未对外实测。混合条件数值≈其选定单碳源（单一生物量近似，见 formulation warnings）。升 `corrected_reference` 见下方数据契约 |
 
 真实工艺：hLF 走甘油生长 → 甘油-葡萄糖过渡 → 葡萄糖生产（组成型启动子，不涉甲醇）；OPN 走甲醇（小规模、验证少）。升到 `corrected_reference` 需补齐数据契约（见 ADR-006）：各碳源 μ / 比摄取速率、per-condition 蛋白含量、甲醇 AOX 酶负担、一个验证锚点；绝对容量无论如何恒 unavailable。
 

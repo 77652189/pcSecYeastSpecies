@@ -217,6 +217,10 @@ SIMULATION_RESULT_VALUE_LABELS = {
     "draft_cost_slope_analysis": "蛋白成本分析（草稿）",
     "draft_matlab_compatible_cost_slope": "MATLAB 兼容成本斜率（草稿）",
     "draft_cost_slope_unavailable": "成本斜率不可用",
+    # 碳源标定档（ADR-006 三档）
+    "corrected_reference": "校正基准（已对齐可信基准）",
+    "internally_calibrated": "内部标定（机制一致·未对外实测）",
+    "draft_boundary": "草稿边界（仅接边界·未标定）",
     # MATLAB 对齐状态
     "aligned": "已对齐",
     "aligned_except_known_matlab_compatibility_differences": "已对齐（除已知 MATLAB 兼容性差异）",

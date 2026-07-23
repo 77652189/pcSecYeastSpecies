@@ -107,6 +107,27 @@ def test_carbon_source_formulation_centralizes_growth_and_objective_selection(
     assert selected_growth in formulation.candidate_growth_reaction_ids
 
 
+def test_carbon_source_formulation_status_uses_adr006_three_tier() -> None:
+    """ADR-006 三档：glucose=corrected_reference（已对齐基准）；其余非葡萄糖经阶段① A
+    机械标定后=internally_calibrated（机制一致、量级合理、未对外实测）。诚实 caveat 仍在 warnings。
+    """
+    tiers = {item.carbon_source_id: item.formulation_status for item in list_carbon_source_formulations()}
+
+    assert tiers == {
+        "glucose": "corrected_reference",
+        "glycerol": "internally_calibrated",
+        "methanol": "internally_calibrated",
+        "glucose_glycerol": "internally_calibrated",
+        "glycerol_methanol": "internally_calibrated",
+    }
+    # 每个档位都必须是 ADR-006 规范三档之一。
+    assert set(tiers.values()) <= {"corrected_reference", "internally_calibrated", "draft_boundary"}
+    # 非葡萄糖不得因升档而丢失诚实 caveat（未对外实测 / 未标定诱导 / 混合共碳源等）。
+    for item in list_carbon_source_formulations():
+        if item.carbon_source_id != "glucose":
+            assert item.warnings, f"{item.carbon_source_id} 升到 internally_calibrated 后仍须保留诚实 caveat"
+
+
 def test_medium_summary_exposes_carbon_source_formulation_for_reports_and_harnesses() -> None:
     summary = summarize_medium_condition("glycerol_methanol_ynb_core_aa_corrected")
     formulation = summary["carbon_source_formulation"]

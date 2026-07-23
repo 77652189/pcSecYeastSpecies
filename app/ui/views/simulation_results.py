@@ -122,6 +122,7 @@ def render_pichia_results() -> None:
                         "碳源": medium_condition.get("carbon_source_id") if isinstance(medium_condition, dict) else None,
                         "培养基状态": medium_condition.get("status") if isinstance(medium_condition, dict) else None,
                         "科学解释状态": medium_condition.get("scientific_status") if isinstance(medium_condition, dict) else None,
+                        "碳源标定档": (medium_condition.get("carbon_source_formulation") or {}).get("formulation_status") if isinstance(medium_condition, dict) else None,
                     }.items()
                     if value
                 ]
