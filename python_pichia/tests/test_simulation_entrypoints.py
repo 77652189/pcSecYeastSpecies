@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from pcsec_pichia.loading import PcSecPichiaInputs, load_pcsec_pichia_inputs
-from pcsec_pichia.probe import TargetSpec
+from pcsec_pichia.probe import TargetSpec, modeled_protein_fraction
 from pcsec_pichia.simulation import (
     GrowthTradeoffResult,
     MATLAB_LEGACY_COST_MEDIUM_EXCHANGES,
@@ -137,6 +137,46 @@ def test_builtin_targets_solve_default_secretion_capacity(
     assert "eq_marginals" not in summary
     assert summary["target_id"] == target_id
     assert summary["objective_value"] == pytest.approx(expected_objective)
+
+
+def test_methanol_secretion_calibrates_biomass_and_protein_content() -> None:
+    """阶段① A 碳源标定：甲醇边界必须驱动 BIOMASS_meoh + 甲醇蛋白含量(0.40)，
+
+    而不是回退到葡萄糖默认(BIOMASS / 0.37)。锁定接线：生长上下文暴露碳源蛋白
+    含量，蛋白质量约束用甲醇生长反应的 modeled fraction。glucose 求解值仍逐字
+    不变见上方 test_builtin_targets_solve_default_secretion_capacity 护栏。
+    """
+    glucose_context = _growth_reaction_context(_inputs().prepared_model)
+    methanol_inputs = _inputs_for_carbon_source("methanol")
+    methanol_context = _growth_reaction_context(methanol_inputs.prepared_model)
+
+    # 生长上下文按碳源暴露生长反应 + 蛋白含量。
+    assert glucose_context["growth_reaction_id"] == "BIOMASS"
+    assert glucose_context["protein_content"] == pytest.approx(0.37)
+    assert methanol_context["growth_reaction_id"] == "BIOMASS_meoh"
+    assert methanol_context["protein_content"] == pytest.approx(0.40)
+
+    # modeled fraction 随生长反应不同（锁定 A3 系数：葡萄糖 vs 甲醇）。
+    model = methanol_inputs.prepared_model
+    assert modeled_protein_fraction(model, "BIOMASS") == pytest.approx(0.879787)
+    assert modeled_protein_fraction(model, "BIOMASS_meoh") == pytest.approx(0.4977)
+
+    # 甲醇分泌求解端到端接线：结果用甲醇生长反应，蛋白约束用甲醇蛋白含量。
+    opn = _builtin_targets()["OPN_ALPHA_FULL_PROJECT"]
+    result = solve_secretion_capacity(
+        methanol_inputs.prepared_model,
+        opn,
+        methanol_inputs.amino_acids,
+        methanol_inputs.metabolic,
+        methanol_inputs.secretory,
+        methanol_inputs.combined,
+    )
+
+    assert isinstance(result, SecretionSimulationResult)
+    assert result.success is True
+    assert result.status == "0"
+    assert result.growth_reaction_id == "BIOMASS_meoh"
+    assert result.objective_value == pytest.approx(9.68352016694058e-05)
 
 
 @pytest.mark.parametrize(

@@ -168,6 +168,8 @@ def solve_secretion_capacity(
         ),
         write_ribosome_translation_constraint=write_ribosome_translation_constraint,
         write_misfolding_constraints=write_misfolding_constraints,
+        biomass_reaction_id=str(growth_context["growth_reaction_id"]),
+        total_protein_content=float(growth_context["protein_content"]),
         solver_method=solver_method,
     )
     return SecretionSimulationResult(
@@ -240,6 +242,8 @@ def run_growth_tradeoff(
             ),
             write_ribosome_translation_constraint=write_ribosome_translation_constraint,
             write_misfolding_constraints=write_misfolding_constraints,
+            biomass_reaction_id=str(growth_context["growth_reaction_id"]),
+            total_protein_content=float(growth_context["protein_content"]),
         )
         secretion = solved.objective_value if solved.success else None
         rows.append(
@@ -354,6 +358,8 @@ def run_protein_cost_slope_compatibility(
                 key_reactions=key_reactions,
                 write_ribosome_translation_constraint=write_ribosome_translation_constraint,
                 write_misfolding_constraints=write_misfolding_constraints,
+                biomass_reaction_id=str(growth_context["growth_reaction_id"]),
+                total_protein_content=float(growth_context["protein_content"]),
             )
             glucose_flux = _optional_flux(solved.fluxes.get("Ex_glc_D"))
             glucose_cost = _uptake_cost(glucose_flux)
@@ -519,6 +525,8 @@ def run_mixed_carbon_objective_probe(
         ),
         write_ribosome_translation_constraint=write_ribosome_translation_constraint,
         write_misfolding_constraints=write_misfolding_constraints,
+        biomass_reaction_id=str(growth_context["growth_reaction_id"]),
+        total_protein_content=float(growth_context["protein_content"]),
     )
     carbon_fluxes = {
         reaction_id: float(solved.fluxes[reaction_id])
@@ -640,6 +648,7 @@ def _growth_reaction_context(model: CobraModel) -> dict[str, object]:
         "growth_reaction_status": status,
         "carbon_source_id": None if formulation is None else formulation.carbon_source_id,
         "carbon_source_formulation_status": None if formulation is None else formulation.formulation_status,
+        "protein_content": 0.37 if formulation is None else float(formulation.protein_content),
         "carbon_objective_weights": {} if formulation is None else formulation.carbon_objective_weights,
         "formulation_warnings": () if formulation is None else formulation.warnings,
     }
@@ -802,6 +811,7 @@ def _solve_weighted_carbon_uptake_minimize(
     mu: float,
     key_reactions: Iterable[str] = (),
     total_protein_content: float = 0.37,
+    biomass_reaction_id: str = "BIOMASS",
     unmodeled_er_protein_fraction: float = 0.040,
     mitochondrial_protein_fraction: float = 0.05,
     write_ribosome_translation_constraint: bool = False,
@@ -821,6 +831,7 @@ def _solve_weighted_carbon_uptake_minimize(
         combined=combined,
         mu=mu,
         total_protein_content=total_protein_content,
+        biomass_reaction_id=biomass_reaction_id,
         unmodeled_er_protein_fraction=unmodeled_er_protein_fraction,
         mitochondrial_protein_fraction=mitochondrial_protein_fraction,
         write_ribosome_translation_constraint=write_ribosome_translation_constraint,
