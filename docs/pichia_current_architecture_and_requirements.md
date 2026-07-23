@@ -158,6 +158,10 @@ OE 产品能力分为两个独立层级：相对、未校准的决策层用于�
 
 **真实工艺 μ 锚点（机制层，opt-in）**：在手发酵罐验证已派生 hLF 两相 μ 锚点——甘油生长相 μ≈0.10、葡萄糖生产相 μ≈0.013（跨温度 20–30℃ / pH 4–7 稳健），见 `pcsec_pichia.process_anchors`。默认分泌仿真仍固定 μ=0.10（`corrected_reference`，回归锁定）；生产相锚点为显式选用操作点（模型中 μ 越低→蛋白预算留给分泌越多，hLF 生产相分泌容量约 1.16× 于 μ=0.10 生长参考点）。原始 OD / 菌株 / 温度·pH 明细为机密，仅本地私有区、不入 git；titer 锚点仍缺。
 
+### 求解结果缓存（NFR）
+
+分泌 LP 求解慢且确定（`highs-ds`），故跨条件稳健性 / 短名单矩阵的重复求解经内容寻址缓存记忆化：`pcsec_pichia.solve_cache`（键含碳源 / μ / flags / solver + KO/OE 模型变体指纹 + schema 版本；默认读缓存、`force` 重算、只缓存 `success`），缓存落 `local_runs/solve_cache/`（gitignored、可删可重建）；`tools/prewarm_secretion_solve_cache.py` 离线预热常见 (目标 × 碳源 × μ) + 工艺锚点。**不改任何求解语义**——只把确定性求解记忆化；求解逻辑 / 模型数据变更时 bump `CACHE_SCHEMA_VERSION`。
+
 ## 当前主要缺口
 
   1. 绝对 gene-level OE capacity 缺少可审核 baseline capacity，当前必须保持 unavailable。
