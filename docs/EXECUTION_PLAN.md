@@ -19,7 +19,7 @@
 - [x] **A4** 内部标定验证：各条件可行求解、生长 / 分泌量级合理、蛋白预算正确 — 已完成（五条件全部 success/status=0；量级 glucose>glycerol≫methanol；混合条件数值≈其选定单碳源，即已记录的单一生物量近似）
 - [x] **A5** 三档 formulation 状态（`corrected_reference` / `internally_calibrated` / `draft_boundary`）+ UI 诚实标注 — 已完成（非葡萄糖=`internally_calibrated`；结果页"碳源标定档"行 + i18n 三档标签）
 - [x] **B1** 求解结果缓存层（内容寻址 key、默认读缓存、显式重算）+ 预热常见条件 — 已完成（`pcsec_pichia.solve_cache`：`SecretionSolveCacheKey` 含碳源/μ/flags/solver + KO/OE 模型变体指纹 + schema 版本，只缓存 success、不改求解语义，缓存存 `local_runs/solve_cache/` gitignored；`tools/prewarm_secretion_solve_cache.py` 预热常见 (目标×碳源×μ)；实测 ~11s 求解 → 二次 0.0s 命中）
-- [ ] **B2** 短名单跑真实工艺条件矩阵（hLF 甘油 / 甘油-葡萄糖过渡 / 葡萄糖；OPN 甲醇）
+- [x] **B2** 短名单跑真实工艺条件矩阵 — 已完成（`tools/run_shortlist_condition_matrix.py`：复用 `_oe_shortlist` + `enable_oe_dose_response`，干净单碳源 hLF{甘油,葡萄糖}/OPN{甲醇}、统一 μ=0.10，缓存 `{target}_condition_matrix.json`：per-条件 baseline + reaction_shapes + 跨条件 per-reaction 视图；**只产矩阵数据**，分类留 B3、面板留 B4；混合/过渡条件因单一生物量近似不进排序比较。验证 hLF×{甘油,葡萄糖} 2/2 成功）
 - [ ] **B3** 噪声门控：翻转的排序换 highs-ds / highs-ipm 重解 + 看量级，分真·条件敏感 vs 数值假象（复用 R3 `compare_ranking_robustness`）
 - [ ] **B4** ① 短名单读出加"跨条件稳健性"+"湿实验一致性"标注（后者读本地发酵数据，输出相对 / 抽象结论）
 - [ ] **B5** 在手发酵数据本地接线：仓库外私有区（`CursorProject/pcSec_wetlab_private/`）+ gitignored 本地路径配置 + 提交护栏；方向1 本地摄入，提 μ + titer 验证锚点 + UPR×折叠一致性交叉验证
