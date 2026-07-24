@@ -221,6 +221,10 @@ SIMULATION_RESULT_VALUE_LABELS = {
     "corrected_reference": "校正基准（已对齐可信基准）",
     "internally_calibrated": "内部标定（机制一致·未对外实测）",
     "draft_boundary": "草稿边界（仅接边界·未标定）",
+    # 跨条件稳健性（B4，读 B2 条件矩阵）
+    "cross_condition_stable": "跨条件稳健",
+    "cross_condition_sensitive": "条件敏感",
+    "cross_condition_single": "仅单条件",
     # MATLAB 对齐状态
     "aligned": "已对齐",
     "aligned_except_known_matlab_compatibility_differences": "已对齐（除已知 MATLAB 兼容性差异）",

@@ -22,6 +22,8 @@
 - [x] **B2** 短名单跑真实工艺条件矩阵 — 已完成（`tools/run_shortlist_condition_matrix.py`：复用 `_oe_shortlist` + `enable_oe_dose_response`，干净单碳源 hLF{甘油,葡萄糖}/OPN{甲醇}、统一 μ=0.10，缓存 `{target}_condition_matrix.json`：per-条件 baseline + reaction_shapes + 跨条件 per-reaction 视图；**只产矩阵数据**，分类留 B3、面板留 B4；混合/过渡条件因单一生物量近似不进排序比较。验证 hLF×{甘油,葡萄糖} 2/2 成功）
 - [ ] **B3** 噪声门控：翻转的排序换 highs-ds / highs-ipm 重解 + 看量级，分真·条件敏感 vs 数值假象（复用 R3 `compare_ranking_robustness`）
 - [ ] **B4** ① 短名单读出加"跨条件稳健性"+"湿实验一致性"标注（后者读本地发酵数据，输出相对 / 抽象结论）
+  - [x] 跨条件稳健性：服务读 B2 条件矩阵缓存、按 reaction 附稳健性判定（`cross_condition_stable`/`_sensitive`/`_single`）；面板"跨条件稳健性"列 + note（未扫描优雅降级；真敏感 vs 数值假象留 B3）
+  - [ ] 湿实验一致性：待 B5 私有数据读取护栏 + validated titer
 - [ ] **B5** 在手发酵数据本地接线：仓库外私有区（`CursorProject/pcSec_wetlab_private/`）+ gitignored 本地路径配置 + 提交护栏；方向1 本地摄入，提 μ + titer 验证锚点 + UPR×折叠一致性交叉验证
   - [x] hLF 发酵 μ 数据已核验（14 个 μ 从 OD 重算吻合、量级合理）：**模型默认 μ=0.10 与 hLF 甘油生长相实测一致**（跨温度/pH 稳健），确认默认合理；葡萄糖生产相实测慢（限量补料工艺操作点）但按决定模型仍用生长相 μ、不单独锚生产相 μ。原始数据归档私有区
   - [ ] 余：titer 验证锚点、gitignored 私有路径配置 + 运行时读取护栏、方向1 本地摄入、UPR×折叠交叉验证

@@ -75,6 +75,31 @@ def _load_dose_response(dose_response_dir: Path | None, target_id: str) -> dict[
     return data if isinstance(data, dict) else {}
 
 
+def _load_condition_matrix(condition_matrix_dir: Path | None, target_id: str) -> dict[str, object]:
+    """读离线 B2 条件矩阵缓存 `{target}_condition_matrix.json`（reaction→各碳源条件形状）。缺失/损坏返回空。
+
+    生成见 python_pichia/tools/run_shortlist_condition_matrix.py（离线/后台跑；干净单碳源、μ=0.10）。
+    """
+    if condition_matrix_dir is None:
+        return {}
+    path = Path(condition_matrix_dir) / f"{target_id}_condition_matrix.json"
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _cross_condition_robustness(condition_shapes: dict[str, object]) -> str:
+    """按各碳源条件下的剂量响应形状判跨条件稳健性（B4 展示；真·敏感 vs 数值假象留 B3 噪声门）。"""
+    present = [str(shape) for shape in condition_shapes.values() if shape]
+    if len(present) < 2:
+        return "cross_condition_single"
+    return "cross_condition_stable" if len(set(present)) == 1 else "cross_condition_sensitive"
+
+
 def _oe_shortlist(frame: pd.DataFrame, target_id: str, top_n: int) -> list[dict[str, object]]:
     """target 的 OE 提升候选（ratio>1），按相对提升降序，取 top_n。
 
@@ -109,6 +134,7 @@ def build_shortlist_readout(
     top_n: int = 8,
     r1_readout_dir: Path | None = None,
     dose_response_dir: Path | None = None,
+    condition_matrix_dir: Path | None = None,
 ) -> dict[str, object]:
     """合成一个 target 的短名单读出 dict（本模块零新增求解，只读缓存）。
 
@@ -128,6 +154,21 @@ def build_shortlist_readout(
             row["shape"] = shape.get("shape")
             row["shape_max_gain"] = shape.get("max_relative_gain")
             row["shape_half_gain_factor"] = shape.get("half_gain_factor")
+
+    # B2/B4 跨条件稳健性——只读离线条件矩阵缓存并按 reaction_id 附到候选，本模块零求解。
+    condition_matrix = _load_condition_matrix(condition_matrix_dir, target_id)
+    per_reaction_conditions = condition_matrix.get("per_reaction_across_conditions") or {}
+    for row in shortlist:
+        by_condition = (
+            per_reaction_conditions.get(str(row["reaction"])) if isinstance(per_reaction_conditions, dict) else None
+        )
+        if isinstance(by_condition, dict) and by_condition:
+            shapes = {
+                str(cond): (shp.get("shape") if isinstance(shp, dict) else None)
+                for cond, shp in by_condition.items()
+            }
+            row["condition_shapes"] = shapes
+            row["cross_condition_robustness"] = _cross_condition_robustness(shapes)
 
     # R4 价值-of-information：对 OE 短名单排序（分数=相对提升）检近似并列 → 该测什么。零求解。
     # top_k 设为短名单长度，让它扫遍整个短名单的相邻近似并列（不只 top-3）。
@@ -162,6 +203,13 @@ def build_shortlist_readout(
             "warnings": dose_response.get("warnings"),
         }
         if dose_response
+        else {},
+        "condition_matrix_available": bool(per_reaction_conditions),
+        "condition_matrix": {
+            "conditions": [str(c) for c in (condition_matrix.get("conditions") or [])],
+            "mu": condition_matrix.get("mu"),
+        }
+        if condition_matrix
         else {},
     }
 

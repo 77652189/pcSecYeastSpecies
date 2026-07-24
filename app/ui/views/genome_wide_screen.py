@@ -291,12 +291,18 @@ def _render_results_section(paths, runs: list[RunInfo]) -> None:
     r1_readout_dir = paths.local_runs_dir / "r1_readout"
     # R2 剂量响应形状也是离线/后台单独扫描并缓存的（有界额外求解），面板只读缓存；缺失显示“未扫描”。
     dose_response_dir = paths.local_runs_dir / "candidate_shortlist_readout"
+    # B4 跨条件稳健性同样是离线/后台扫描并缓存的（B2 条件矩阵，同目录），面板只读缓存；缺失显示“未扫描”。
+    condition_matrix_dir = paths.local_runs_dir / "candidate_shortlist_readout"
     tabs = st.tabs([f"靶点：{target_id}" for target_id in target_ids] + (["靶点间差异"] if len(target_ids) >= 2 else []))
     for tab, target_id in zip(tabs, target_ids):
         with tab:
             try:
                 readout = shortlist_service.build_shortlist_readout(
-                    frame, target_id, r1_readout_dir=r1_readout_dir, dose_response_dir=dose_response_dir
+                    frame,
+                    target_id,
+                    r1_readout_dir=r1_readout_dir,
+                    dose_response_dir=dose_response_dir,
+                    condition_matrix_dir=condition_matrix_dir,
                 )
                 _render_shortlist_readout(readout, target_id=target_id)
                 st.divider()
@@ -368,6 +374,7 @@ def _render_shortlist_readout(readout: dict, *, target_id: str) -> None:
         st.markdown(f"**OE 提升候选短名单（按相对提升排序，top-{len(shortlist)}）**")
         if shortlist:
             dose_available = bool(readout.get("dose_response_available"))
+            condition_matrix_available = bool(readout.get("condition_matrix_available"))
             table_rows = []
             for row in shortlist:
                 entry = {
@@ -385,6 +392,13 @@ def _render_shortlist_readout(readout: dict, *, target_id: str) -> None:
                     half = row.get("shape_half_gain_factor")
                     # 半增益倍数：达到最大增益一半所需的 OE 倍数，越小说明越早到顶（饱和越快）
                     entry["半增益倍数"] = f"{float(half):.2g}×" if isinstance(half, (int, float)) else "—"
+                if condition_matrix_available:
+                    # 该候选的 OE 剂量响应形状在各真实工艺碳源条件下是否一致（B2 条件矩阵；相对信号）
+                    entry["跨条件稳健性"] = (
+                        sim_result_value_label(row.get("cross_condition_robustness"))
+                        if row.get("cross_condition_robustness")
+                        else "—"
+                    )
                 table_rows.append(entry)
             shortlist_frame = pd.DataFrame(table_rows)
             figure = px.bar(
@@ -412,6 +426,7 @@ def _render_shortlist_readout(readout: dict, *, target_id: str) -> None:
             _render_dose_response_note(readout, dose_available)
             if dose_available:
                 _render_dose_response_curve(readout, shortlist)
+            _render_condition_matrix_note(readout, condition_matrix_available)
         else:
             st.caption("本次筛查在当前 OE 倍数下没有 ratio>1 的 OE 提升候选（不代表无解，可能是单基因、当前倍数强度不足以突破瓶颈）。")
 
@@ -465,6 +480,33 @@ def _render_dose_response_note(readout: dict, dose_available: bool) -> None:
     )
     for warning in dose.get("warnings") or []:
         st.caption(sim_result_warning_label(warning))
+
+
+_CONDITION_CARBON_LABELS = {
+    "glucose": "葡萄糖",
+    "glycerol": "甘油",
+    "methanol": "甲醇",
+    "glucose_glycerol": "葡萄糖+甘油",
+    "glycerol_methanol": "甘油+甲醇",
+}
+
+
+def _render_condition_matrix_note(readout: dict, condition_matrix_available: bool) -> None:
+    if not condition_matrix_available:
+        st.caption(
+            "跨条件稳健性：本靶点短名单尚未跑条件矩阵——这一步把候选在真实工艺各碳源条件下各重解一遍"
+            "（离线/后台用 `run_shortlist_condition_matrix.py` 生成，干净单碳源、μ=0.10）。生成后上表会多出"
+            "“跨条件稳健性”一列。"
+        )
+        return
+    matrix = readout.get("condition_matrix") or {}
+    conditions = matrix.get("conditions") or []
+    conditions_txt = "、".join(_CONDITION_CARBON_LABELS.get(str(c), str(c)) for c in conditions) or "—"
+    st.caption(
+        f"跨条件稳健性（覆盖条件 {conditions_txt}；相对形状信号、非绝对产量）：跨条件稳健＝各条件下 OE 剂量响应"
+        "形状一致（换碳源仍成立）；条件敏感＝形状随条件变（该候选依赖工艺条件）。**真·条件敏感 vs 数值假象的"
+        "甄别留 B3 噪声门（换求解器重解）**，本列只呈现原始形状是否一致。"
+    )
 
 
 # 曲线只画能看出趋势的杠杆（最大增益≥此值），近乎平的小候选会糊在 x 轴附近、只添乱。

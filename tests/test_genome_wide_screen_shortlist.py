@@ -207,3 +207,50 @@ def test_dose_response_shapes_attached_from_cache_by_reaction_id(tmp_path) -> No
     assert by_name["AP-1"]["shape"] == "linear"
     assert by_name["OCH1"].get("shape") is None  # reaction absent from cache stays unshaped
     assert readout["dose_response"]["tested_factors"] == [1.25, 1.5, 2.0, 3.0, 5.0, 8.0]
+
+
+def test_condition_matrix_absent_degrades_gracefully() -> None:
+    frame = pd.DataFrame([_oe("R_A", 1.08, common_name="PDI1/ERO1")])
+    readout = build_shortlist_readout(frame, "hLF", condition_matrix_dir=None)
+    assert readout["condition_matrix_available"] is False
+    assert readout["condition_matrix"] == {}
+    assert "cross_condition_robustness" not in readout["oe_shortlist"][0]
+
+
+def test_condition_matrix_robustness_attached_from_cache_by_reaction_id(tmp_path) -> None:
+    (tmp_path / "hLF_condition_matrix.json").write_text(
+        json.dumps(
+            {
+                "target_id": "hLF",
+                "mu": 0.1,
+                "conditions": ["glycerol", "glucose"],
+                "per_reaction_across_conditions": {
+                    # 两条件形状一致 -> 跨条件稳健
+                    "R_A": {"glycerol": {"reaction_id": "R_A", "shape": "saturating"}, "glucose": {"shape": "saturating"}},
+                    # 两条件形状不同 -> 条件敏感
+                    "R_B": {"glycerol": {"shape": "saturating"}, "glucose": {"shape": "linear"}},
+                    # 只有一个条件有数据 -> 仅单条件
+                    "R_C": {"glucose": {"shape": "saturating"}},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    frame = pd.DataFrame(
+        [
+            _oe("R_A", 1.08, common_name="PDI1/ERO1"),
+            _oe("R_B", 1.05, common_name="AP-1"),
+            _oe("R_C", 1.03, common_name="OCH1"),
+            _oe("R_D", 1.02, common_name="NOTINMATRIX"),  # 不在矩阵里 -> 不附标注
+        ]
+    )
+
+    readout = build_shortlist_readout(frame, "hLF", condition_matrix_dir=tmp_path)
+
+    assert readout["condition_matrix_available"] is True
+    assert readout["condition_matrix"]["conditions"] == ["glycerol", "glucose"]
+    by_name = {row["candidate"]: row for row in readout["oe_shortlist"]}
+    assert by_name["PDI1/ERO1"]["cross_condition_robustness"] == "cross_condition_stable"
+    assert by_name["AP-1"]["cross_condition_robustness"] == "cross_condition_sensitive"
+    assert by_name["OCH1"]["cross_condition_robustness"] == "cross_condition_single"
+    assert "cross_condition_robustness" not in by_name["NOTINMATRIX"]
