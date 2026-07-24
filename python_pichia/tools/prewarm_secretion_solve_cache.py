@@ -4,8 +4,8 @@
 `solve_cache`（默认 `local_runs/solve_cache/`，gitignored）；之后跨条件稳健性 / 面板等
 读穿缓存即可零重复求解（见 `pcsec_pichia.solve_cache`）。
 
-默认条件集 = {hLF, OPN} × {glucose, glycerol, methanol} × {μ=0.10} ∪ hLF 生产相锚点
-（glucose, μ=0.013，见 `pcsec_pichia.process_anchors`）。不改任何求解语义；只记忆化确定性结果。
+默认条件集 = {hLF, OPN} × {glucose, glycerol, methanol} × {μ=0.10}。μ 统一用默认 0.10
+（= hLF 甘油生长相实测值，已验证；生产相虽慢但按工艺决定不作模型 μ）。不改任何求解语义。
 
 用法（从 python_pichia/，src/ 在 PYTHONPATH）:
     python tools/prewarm_secretion_solve_cache.py
@@ -27,7 +27,6 @@ for _p in (str(_SRC_DIR), str(_TOOLS_DIR)):
         sys.path.insert(0, _p)
 
 from pcsec_pichia.loading import load_pcsec_pichia_inputs  # noqa: E402
-from pcsec_pichia.process_anchors import list_process_growth_anchors  # noqa: E402
 from pcsec_pichia.simulation import DEFAULT_SOLVER_METHOD, solve_secretion_capacity  # noqa: E402
 from pcsec_pichia.solve_cache import (  # noqa: E402
     DEFAULT_SOLVE_CACHE_DIR,
@@ -44,8 +43,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--mu", nargs="+", type=float, default=[0.10], help="生长速率网格")
     parser.add_argument("--media-type", type=int, default=4)
     parser.add_argument("--cache-dir", type=Path, default=None, help=f"默认 {DEFAULT_SOLVE_CACHE_DIR}")
-    parser.add_argument("--include-anchors", action="store_true", default=True, help="附加 process_anchors 工艺操作点（默认开）")
-    parser.add_argument("--no-anchors", dest="include_anchors", action="store_false")
     parser.add_argument("--force", action="store_true", help="忽略已有缓存、强制重算覆盖")
     return parser.parse_args()
 
@@ -57,10 +54,6 @@ def _conditions(args: argparse.Namespace) -> list[tuple[str, str, float]]:
         for carbon_source_id in args.carbon_sources:
             for mu in args.mu:
                 conditions.append((target_id, carbon_source_id, float(mu)))
-    if args.include_anchors:
-        for anchor in list_process_growth_anchors():
-            if anchor.target_family in args.targets:
-                conditions.append((anchor.target_family, anchor.carbon_source_id, float(anchor.growth_rate)))
     # 去重、保序
     seen: set[tuple[str, str, float]] = set()
     unique: list[tuple[str, str, float]] = []

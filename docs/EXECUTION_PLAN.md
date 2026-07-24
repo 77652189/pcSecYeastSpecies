@@ -18,12 +18,12 @@
 - [x] **A3** 核实并按需补齐甲醇条件专属生物量组成（`*_meoh`）— 已完成（核实 `BIOMASS`/`BIOMASS_glyc`/`BIOMASS_meoh` 各自 PROTEIN[c] 系数 0.8798/0.5903/0.4977，无需补齐）
 - [x] **A4** 内部标定验证：各条件可行求解、生长 / 分泌量级合理、蛋白预算正确 — 已完成（五条件全部 success/status=0；量级 glucose>glycerol≫methanol；混合条件数值≈其选定单碳源，即已记录的单一生物量近似）
 - [x] **A5** 三档 formulation 状态（`corrected_reference` / `internally_calibrated` / `draft_boundary`）+ UI 诚实标注 — 已完成（非葡萄糖=`internally_calibrated`；结果页"碳源标定档"行 + i18n 三档标签）
-- [x] **B1** 求解结果缓存层（内容寻址 key、默认读缓存、显式重算）+ 预热常见条件 — 已完成（`pcsec_pichia.solve_cache`：`SecretionSolveCacheKey` 含碳源/μ/flags/solver + KO/OE 模型变体指纹 + schema 版本，只缓存 success、不改求解语义，缓存存 `local_runs/solve_cache/` gitignored；`tools/prewarm_secretion_solve_cache.py` 预热常见 (目标×碳源×μ) + 工艺锚点；实测 ~11s 求解 → 二次 0.0s 命中）
+- [x] **B1** 求解结果缓存层（内容寻址 key、默认读缓存、显式重算）+ 预热常见条件 — 已完成（`pcsec_pichia.solve_cache`：`SecretionSolveCacheKey` 含碳源/μ/flags/solver + KO/OE 模型变体指纹 + schema 版本，只缓存 success、不改求解语义，缓存存 `local_runs/solve_cache/` gitignored；`tools/prewarm_secretion_solve_cache.py` 预热常见 (目标×碳源×μ)；实测 ~11s 求解 → 二次 0.0s 命中）
 - [ ] **B2** 短名单跑真实工艺条件矩阵（hLF 甘油 / 甘油-葡萄糖过渡 / 葡萄糖；OPN 甲醇）
 - [ ] **B3** 噪声门控：翻转的排序换 highs-ds / highs-ipm 重解 + 看量级，分真·条件敏感 vs 数值假象（复用 R3 `compare_ranking_robustness`）
 - [ ] **B4** ① 短名单读出加"跨条件稳健性"+"湿实验一致性"标注（后者读本地发酵数据，输出相对 / 抽象结论）
 - [ ] **B5** 在手发酵数据本地接线：仓库外私有区（`CursorProject/pcSec_wetlab_private/`）+ gitignored 本地路径配置 + 提交护栏；方向1 本地摄入，提 μ + titer 验证锚点 + UPR×折叠一致性交叉验证
-  - [x] hLF μ 锚点（机制层）已接线：`process_anchors` 模块（甘油生长相 0.10 / 葡萄糖生产相 0.013，opt-in；默认 μ=0.10 不变）；发酵 μ 数据已核验并归档私有区
+  - [x] hLF 发酵 μ 数据已核验（14 个 μ 从 OD 重算吻合、量级合理）：**模型默认 μ=0.10 与 hLF 甘油生长相实测一致**（跨温度/pH 稳健），确认默认合理；葡萄糖生产相实测慢（限量补料工艺操作点）但按决定模型仍用生长相 μ、不单独锚生产相 μ。原始数据归档私有区
   - [ ] 余：titer 验证锚点、gitignored 私有路径配置 + 运行时读取护栏、方向1 本地摄入、UPR×折叠交叉验证
 - [ ] 测试 + 重跑文档锚点 / 契约回归
 
