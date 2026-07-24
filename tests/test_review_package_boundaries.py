@@ -153,6 +153,13 @@ def test_direct_probe_imports_in_formal_engine_are_explicit_migration_debt() -> 
         # same dataset the base model's constraint layer already loads elsewhere.
         "python_pichia/src/pcsec_pichia/secretory_resources/catalog.py",
         "python_pichia/src/pcsec_pichia/simulation/__init__.py",
+        # strain_modifications.py imports CobraModel/SecretoryEnzymeData/CombinedEnzymeData from
+        # probe for type hints only. It is a pure, duck-typed transformer (KO -> (0,0) reaction
+        # bounds; OE -> complex/enzyme kcat multiplier, mirroring run_pcsec_oe_screen) reused by the
+        # two already-sanctioned probe-backed engine modules (simulation, screens) to build the
+        # modified-strain re-solve (ADR-004 #1 迭代候选). No new LP-kernel call, no new independent
+        # probe reliance -- same layer as the simulation package above.
+        "python_pichia/src/pcsec_pichia/strain_modifications.py",
         "python_pichia/src/pcsec_pichia/targets/__init__.py",
         # Audited 2026-07-17, all pre-existing (not introduced by recent work):
         # comparison.py imports probe names for type hints only, zero calls.

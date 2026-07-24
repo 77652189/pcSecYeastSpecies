@@ -35,14 +35,14 @@
 
 ## 阶段② 迭代候选：改造后 per-strain 瓶颈 → 下一步 OE 候选（当前 · 进行中）
 
-短名单绑在全基因筛查（野生型基线）；已改造的菌株（KO/OE 过）要"再找瓶颈、排下一候选"，需在**仿真验证**里复用 per-solve 瓶颈归因（R1 `oe_actionable_bottlenecks`）+ 有界剂量响应（R2），**不重扫全基因组、不动求解核心**。相对信号深化，见 [ADR-004](adr/004-relative-signal-deepening-under-permanent-data-gap.md)。
+短名单绑在全基因筛查（野生型基线）；已改造的菌株（KO/OE 过）要"再找瓶颈、排下一候选"。**关键更正**：`run_pichia_secretion_simulation` 的基础 solve（因此 R1 `oe_actionable_bottlenecks`）是**野生型**——请求里的 KO/OE 只驱动逐候选筛查、不叠进基础 solve。所以"直接复用 R1"只会永远返回同一个野生型 #1，答不了"改造后"。经确认走**真·改造后重解**（Option 1）：把 KO/OE 叠进模型再 solve，瓶颈随改造转移。相对信号深化，见 [ADR-004](adr/004-relative-signal-deepening-under-permanent-data-gap.md)。
 
-- [ ] **C1** service（纯逻辑 + 单测）：从 solve 结果 `oe_actionable_bottlenecks`（top-N binding 复合体、按影子价格）派生候选 → 对其跑有界 OE 剂量响应（复用 R2）→ 按真实效应 + 形状排序输出
-- [ ] **C2** 编排：两趟现有 pipeline（第一趟 solve 拿瓶颈 → 第二趟对瓶颈复合体 dose-response），opt-in 触发
-- [ ] **C3** UI：仿真验证页"下一步 OE 候选（针对当前改造菌株）"section，复合体级 + 分泌层标注 + 诚实 caveat（瓶颈会转移、只给相对方向、非绝对产量）
-- [ ] **C4** 测试 + app 验证
+- [x] **C1** service（纯逻辑 + 单测）：从 solve 结果 `oe_actionable_bottlenecks`（top-N binding 复合体、按影子价格）派生候选 → 有界 OE 剂量响应（复用 R2）→ 按真实效应 + 形状排序（`app/services/per_strain_oe_candidates.py`，f0356fc）
+- [x] **C2** 编排：①核心——新增 `strain_modifications`（叠 KO/OE）+ `solve_secretion_capacity` / `run_oe_dose_response_sweep` 各加 **opt-in `strain_modifications` 参数**（默认 None → glucose 逐字不变）；②引擎编排 `next_oe_candidates.analyze_next_oe_candidates`（两趟：改造后重解拿瓶颈 → 对 top-N 瓶颈复合体在改造后菌株上跑有界剂量响应）；③服务 `per_strain_oe_candidate_run`（喂 C1、优雅兜错）
+- [x] **C3** UI：仿真验证结果页"下一步 OE 候选（针对当前改造菌株）"section——暂存本次 KO/OE 改造参数、按钮 opt-in 触发、复合体级 + 分泌层标注 + 排序依据 + 诚实 caveat（瓶颈会转移、只给相对方向、非绝对产量）
+- [ ] **C4** 测试（helper/引擎/服务单测 + guardrail 全绿）完成；**全量回归 + app 验证进行中**
 
-范围：复合体级候选（`reaction_id` 即 OE 目标），暂不强行映射基因名（二期）；opt-in（分泌求解慢，B1 缓存兜底）；仍相对信号、glucose 基准不动、不换默认 solver。
+范围：复合体级候选（`reaction_id` 即 OE 目标），暂不强行映射基因名/基因级 KO（二期）；opt-in（分泌求解慢，B1 缓存兜底）；**加了 opt-in 带改造求解路径**（默认关闭、非 core 默认行为变更、glucose 基准逐字不变）；仍相对信号、不换默认 solver。改造后瓶颈的生物学意义随约束档而变：折叠层瓶颈（PDI 等）需在开启折叠/翻译约束的构建下才浮现；默认档常是代谢 slack 反应（诚实呈现、不美化）。
 
 ## 阶段③ RNA-seq 表达约束建模（待启动 · 数据门控）
 

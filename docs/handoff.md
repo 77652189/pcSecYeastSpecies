@@ -22,10 +22,12 @@ direction_4_combination_status: strategically_deferred
 
 ## 下一步
 
-当前 slice（#1 迭代候选，清单见执行计划阶段②）：
-- **C1 service**（纯逻辑 + 单测）：从 solve 结果 `oe_actionable_bottlenecks`（top-N binding 复合体）派生候选 → 有界 OE 剂量响应（复用 R2）→ 按效应 + 形状排序。
-- **C2 编排 + C3 UI**：两趟 pipeline（solve 拿瓶颈 → 对瓶颈复合体 dose-response），opt-in；仿真验证页"下一步 OE 候选（针对当前改造菌株）"section（复合体级 + 分泌层 + 诚实 caveat）。
-- **C4**：测试 + app 验证。
+当前 slice（#1 迭代候选，清单见执行计划阶段②）——**更正**：基础 solve 是野生型，直接复用 R1 只会返回同一个野生型 #1，已确认走**真·改造后重解**（Option 1）：
+- **C1 service**（done, f0356fc）：`oe_actionable_bottlenecks` → 有界 OE 剂量响应 → 按真实效应 + 形状排序（纯装配）。
+- **C2 编排**（done）：核心 `strain_modifications` 叠 KO/OE + `solve_secretion_capacity`/`run_oe_dose_response_sweep` 各加 opt-in 参数（默认 None → glucose 逐字不变）；引擎 `next_oe_candidates`（两趟：改造后重解 → top-N 瓶颈复合体在改造后菌株上跑剂量响应）；服务 `per_strain_oe_candidate_run`（喂 C1）。
+- **C3 UI**（done）：仿真验证结果页"下一步 OE 候选"section（暂存改造参数 + 按钮 opt-in 触发 + 排名表 + caveat）。
+- **C4**：helper/引擎/服务单测 + guardrail 全绿；**全量回归 + app 验证进行中**。
+- 已核实机制：改造后重解 → 瓶颈随改造转移（OE 掉 #1 后 #2 顶上）。折叠层瓶颈需折叠/翻译约束开启档才浮现，默认档多为代谢 slack（诚实呈现）。
 
 方向5 收尾（数据门控、暂缓）：B5 titer 锚点（待验证数据）+ 方向1 本地摄入（经护栏读私有区）、B4 湿实验一致性标注。B3 噪声门控暂不建（0 翻转、无表观敏感可甄别）。
 

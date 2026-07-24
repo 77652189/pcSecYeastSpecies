@@ -25,6 +25,7 @@ from pcsec_pichia.probe import (
     target_secretion_smoke,
 )
 from pcsec_pichia.media import CarbonSourceFormulation, MATLAB_LEGACY_COST_MEDIUM_EXCHANGES, list_carbon_source_formulations
+from pcsec_pichia.strain_modifications import StrainModifications, apply_strain_modifications
 
 
 @dataclass(frozen=True)
@@ -119,6 +120,7 @@ def solve_secretion_capacity(
     write_ribosome_translation_constraint: bool = False,
     write_misfolding_constraints: bool = False,
     solver_method: str = DEFAULT_SOLVER_METHOD,
+    strain_modifications: StrainModifications | None = None,
 ) -> SecretionSimulationResult:
     """Solve fixed-growth pcSec secretion capacity for one target.
 
@@ -126,6 +128,11 @@ def solve_secretion_capacity(
     solver-robustness check re-solves with the other methods ("highs"/"highs-ipm") to test
     whether the LP-attribution bottleneck is stable across solver algorithms (dual solutions
     are non-unique at a degenerate optimum).
+
+    `strain_modifications` is an opt-in "already-modified strain" spec (stacked KO/OE): when set,
+    the KO/OE are applied to the prepared model + enzyme data before solving, so the LP attribution
+    reflects the *modified* strain's bottleneck (ADR-004 #1 迭代候选). `None`/empty leaves the solve
+    byte-identical to the wildtype path (glucose corrected_reference regression stays locked).
     """
 
     prepared = _prepare_target_pcsec_inputs(model, target, amino_acids, secretory, combined)
@@ -150,12 +157,18 @@ def solve_secretion_capacity(
 
     growth_context = _growth_reaction_context(prepared["model"])
     fixed_model = prepared["model"].with_bounds(_fixed_growth_bounds(growth_context, growth_rate))
+    secretory_effective = prepared["secretory"]
+    combined_effective = prepared["combined"]
+    if strain_modifications is not None and not strain_modifications.is_empty():
+        fixed_model, secretory_effective, combined_effective, _, _ = apply_strain_modifications(
+            fixed_model, secretory_effective, combined_effective, strain_modifications
+        )
     solved, counts = solve_pcsec_maximize(
         fixed_model,
         prepared["exchange_reaction_id"],
         metabolic=metabolic,
-        secretory=prepared["secretory"],
-        combined=prepared["combined"],
+        secretory=secretory_effective,
+        combined=combined_effective,
         mu=growth_rate,
         key_reactions=(
             growth_context["growth_reaction_id"],

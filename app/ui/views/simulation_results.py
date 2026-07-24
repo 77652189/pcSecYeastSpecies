@@ -14,6 +14,7 @@ from app.services.pichia_background_tasks import (
     save_last_result,
 )
 from app.core.i18n import sim_result_column_label, sim_result_value_label, sim_result_warning_label
+from app.services.per_strain_oe_candidate_run import run_next_oe_candidate_analysis
 from app.ui.common import PATHS
 from app.ui.views.candidate_path_graph import render_secretion_path_graph
 from app.ui.views.simulation_display import (
@@ -158,6 +159,7 @@ def render_pichia_results() -> None:
     protein_cost = _protein_cost_payload(data)
     if protein_cost:
         _render_protein_cost_analysis(protein_cost)
+    _render_next_oe_candidates(data)
     target_growth = _target_growth_payload(data)
     if target_growth:
         _render_target_growth_analysis(target_growth)
@@ -348,6 +350,104 @@ def _render_value_of_information(payload: dict[str, object]) -> None:
             st.dataframe(pd.DataFrame(rows), width='stretch', hide_index=True)
         for warning in payload.get("warnings") or []:
             st.caption(sim_result_warning_label(warning))
+
+
+def _render_next_oe_candidates(data: dict[str, object]) -> None:
+    """针对当前改造菌株的"下一步 OE 候选"：opt-in 重解 + 有界剂量响应（ADR-004 #1 迭代候选）。
+
+    读上次运行时暂存的 KO/OE 改造参数（`pichia_last_run_modifications`），用户点按钮后才触发
+    额外求解（改造后重解 → 瓶颈复合体 → 有界 OE 剂量响应 → 排序），结果缓存在 session。
+    """
+    mods = st.session_state.get("pichia_last_run_modifications")
+    with st.expander("下一步 OE 候选（针对当前改造菌株）", expanded=False):
+        st.caption(
+            "把本次构建里设定的 KO/OE 应用到模型后重新求解，找改造后这一株当前 binding 的产能瓶颈复合体，"
+            "再对它们扫有界过表达剂量响应，按真实相对效应排出下一步该 OE 谁。瓶颈会随改造转移——每改一轮都应重跑。"
+            "相对信号、复合体级、非绝对产量。"
+        )
+        if not isinstance(mods, dict) or not mods.get("target_id"):
+            st.info("先在「仿真构建」页运行一次仿真，这里就能基于同一株算下一步 OE 候选。")
+            return
+        if not mods.get("target_is_builtin"):
+            st.info("下一步 OE 候选目前仅支持内置目标（如 hLF / OPN）；自定义序列目标暂不支持。")
+            return
+
+        oe_rx = [str(r) for r in (mods.get("oe_reaction_ids") or [])]
+        ko_rx = [str(r) for r in (mods.get("ko_reaction_ids") or [])]
+        gene_mods = [str(g) for g in (mods.get("oe_gene_ids") or [])] + [str(g) for g in (mods.get("ko_gene_ids") or [])]
+        st.markdown(
+            f"**改造后菌株**（将被重解）：OE 反应 `{len(oe_rx)}` 个、KO 反应 `{len(ko_rx)}` 个；过表达按 2× 产能建模。"
+        )
+        if not oe_rx and not ko_rx:
+            st.caption("本次没有反应级 KO/OE —— 将按无额外改造分析，得到的是野生型当前瓶颈。")
+        if gene_mods:
+            st.caption(f"注意：{len(gene_mods)} 个基因级改造暂不纳入重解（只应用反应/复合体级）。")
+
+        if st.button("计算下一步 OE 候选（会额外求解，约数十秒）", key="pichia_next_oe_candidates_run_button"):
+            with st.spinner("重解改造后菌株并扫描瓶颈复合体剂量响应…"):
+                st.session_state["pichia_next_oe_candidates_result"] = run_next_oe_candidate_analysis(
+                    target_id=str(mods.get("target_id")),
+                    ko_reaction_ids=tuple(ko_rx),
+                    oe_reaction_ids=tuple(oe_rx),
+                    mu=float(mods.get("mu") or 0.10),
+                    media_type=int(mods.get("media_type") or 4),
+                    carbon_source_id=str(mods.get("carbon_source_id") or "glucose"),
+                    enable_ribosome_translation_constraint=bool(mods.get("enable_ribosome")),
+                    enable_misfolding_constraint=bool(mods.get("enable_misfolding")),
+                )
+
+        readout = st.session_state.get("pichia_next_oe_candidates_result")
+        if not isinstance(readout, dict):
+            return
+        if readout.get("error"):
+            st.error(f"计算失败：{readout.get('error')}")
+            return
+        if not readout.get("modified_solve_success"):
+            st.warning("改造后菌株在当前约束下无可行解（或无 LP 灵敏度），无法给出瓶颈候选。")
+        _render_next_oe_candidates_result(readout)
+
+
+def _render_next_oe_candidates_result(readout: dict[str, object]) -> None:
+    c1, c2, c3 = st.columns([1, 1, 1])
+    with c1:
+        st.metric("改造后分泌目标", _fmt_num(readout.get("modified_objective_value")))
+    with c2:
+        st.metric("排序依据", "真实剂量效应" if readout.get("dose_response_available") else "影子价格")
+    with c3:
+        st.metric("碳源", sim_result_value_label(readout.get("carbon_source_id")))
+
+    candidates = [c for c in (readout.get("candidates") or []) if isinstance(c, dict)]
+    if candidates:
+        dose_available = bool(readout.get("dose_response_available"))
+        rows: list[dict[str, object]] = []
+        for rank, candidate in enumerate(candidates, 1):
+            row: dict[str, object] = {
+                "排名": rank,
+                "OE 目标(复合体)": _short_reaction_label(str(candidate.get("reaction", "—"))),
+                "分泌资源层": _resource_layer_label(candidate.get("layer")),
+                "影子价格(绝对)": _fmt_num(candidate.get("shadow_price")),
+            }
+            if dose_available:
+                effect = candidate.get("effect")
+                row["剂量响应形状"] = sim_result_value_label(candidate.get("shape")) if candidate.get("shape") else "—"
+                row["最大相对增益"] = f"{effect * 100:.2f}%" if isinstance(effect, (int, float)) else "—"
+                row["半增益倍数(拐点)"] = (
+                    f"{float(candidate['half_gain_factor']):g}×" if candidate.get("half_gain_factor") is not None else "—"
+                )
+            rows.append(row)
+        st.dataframe(pd.DataFrame(rows), width='stretch', hide_index=True)
+        if not dose_available:
+            st.caption("未取得剂量响应（瓶颈复合体无有界 sweep 结果）——暂按影子价格排序，只表示谁在 binding，不表示松开涨得多。")
+    else:
+        st.caption("（改造后未发现 OE 可缓解的 binding 上限瓶颈复合体。）")
+
+    for caveat in readout.get("caveats") or []:
+        st.caption(f"• {caveat}")
+    floors = readout.get("floor_constraints_not_oe_addressable") or []
+    if floors:
+        st.caption(f"另有 {len(floors)} 个 binding 下限 floor（如折叠/翻译最低需求）——OE 松不动，不列为候选。")
+    for warning in readout.get("modification_warnings") or []:
+        st.warning(str(warning))
 
 
 def _render_protein_cost_analysis(protein_cost: dict[str, object]) -> None:

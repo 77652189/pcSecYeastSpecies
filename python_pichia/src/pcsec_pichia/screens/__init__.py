@@ -47,6 +47,7 @@ from pcsec_pichia.screens.gene_interventions import (
     plan_gene_overexpression,
 )
 from pcsec_pichia.screens.planning import ScreenPlanResult, build_screen_plan
+from pcsec_pichia.strain_modifications import StrainModifications, apply_strain_modifications
 
 
 @dataclass(frozen=True)
@@ -269,12 +270,18 @@ def run_oe_dose_response_sweep(
     growth_rate: float = 0.10,
     write_ribosome_translation_constraint: bool = False,
     write_misfolding_constraints: bool = False,
+    strain_modifications: StrainModifications | None = None,
 ) -> OeDoseResponseSweepResult:
     """R2 (ADR-004): sweep the OE capacity multiplier over a factor grid for each reaction.
 
     Prepares the target LP once (shared baseline) and re-solves each reaction at every factor
     via run_pcsec_oe_screen. Returns the raw (factor, objective) points per reaction anchored at
     the no-OE baseline (factor 1.0); it does not classify the shape (see analysis layer).
+
+    `strain_modifications` (opt-in, ADR-004 #1 迭代候选): when set, the stacked KO/OE are applied to
+    the prepared strain and the factor-1.0 anchor is re-solved on the *modified* strain, so each
+    swept reaction's dose-response is measured on top of the already-modified strain (谁松开能再涨、
+    涨到哪饱和). `None`/empty leaves the wildtype-baseline sweep byte-identical.
     """
 
     warnings = (
@@ -324,20 +331,41 @@ def run_oe_dose_response_sweep(
             warnings=(*warnings, "Baseline secretion solve did not succeed; cannot build a dose-response."),
         )
 
-    baseline_objective = prepared["baseline"].objective_value
+    fixed_model = prepared["fixed_model"]
+    secretory_effective = prepared["secretory"]
+    combined_effective = prepared["combined"]
+    baseline = prepared["baseline"]
+    if strain_modifications is not None and not strain_modifications.is_empty():
+        # Apply the stacked KO/OE and re-anchor factor 1.0 on the modified strain, so the
+        # dose-response of each swept reaction is measured on top of the already-modified strain.
+        fixed_model, secretory_effective, combined_effective, _, _ = apply_strain_modifications(
+            fixed_model, secretory_effective, combined_effective, strain_modifications
+        )
+        baseline, _ = solve_pcsec_maximize(
+            fixed_model,
+            prepared["exchange_reaction_id"],
+            metabolic=metabolic,
+            secretory=secretory_effective,
+            combined=combined_effective,
+            mu=growth_rate,
+            key_reactions=("BIOMASS", "Ex_glc_D", prepared["exchange_reaction_id"]),
+            write_ribosome_translation_constraint=write_ribosome_translation_constraint,
+            write_misfolding_constraints=write_misfolding_constraints,
+        )
+    baseline_objective = baseline.objective_value
     points_by_reaction: dict[str, list[tuple[float, float | None]]] = {
         reaction_id: [(1.0, baseline_objective)] for reaction_id in unique_reactions
     }
     sweep_rows: list[dict[str, Any]] = []
     for factor in sweep_factors:
         raw_rows = run_pcsec_oe_screen(
-            prepared["fixed_model"],
-            prepared["baseline"],
+            fixed_model,
+            baseline,
             list(unique_reactions),
             prepared["exchange_reaction_id"],
             metabolic=metabolic,
-            secretory=prepared["secretory"],
-            combined=prepared["combined"],
+            secretory=secretory_effective,
+            combined=combined_effective,
             mu=growth_rate,
             factor=factor,
             write_ribosome_translation_constraint=write_ribosome_translation_constraint,

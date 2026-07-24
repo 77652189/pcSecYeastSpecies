@@ -123,6 +123,23 @@ def _render_pichia_builder() -> None:
         else:
             req = SecretionRunRequest(target_source="custom_json", target_id=build_state.target_id, target_name=build_state.target_name,
                 custom_json_path=build_state.custom_json_path, **common)
+        # Stash the strain-defining modifications so the results page can offer "下一步 OE 候选"
+        # (a modified-strain re-solve). Reaction/complex-level KO/OE are what the re-solve applies;
+        # gene-level entries are recorded so the results page can flag they are not yet re-solved.
+        st.session_state["pichia_last_run_modifications"] = {
+            "target_id": build_state.target_id,
+            "target_is_builtin": build_state.build_mode == "快速选择（内置模板）",
+            "carbon_source_id": build_state.carbon_source_id,
+            "media_type": build_state.media_type,
+            "mu": build_state.mu,
+            "enable_ribosome": bool(build_state.enable_ribosome),
+            "enable_misfolding": bool(build_state.enable_misfolding),
+            "ko_reaction_ids": list(gene_state.ko_reaction_ids),
+            "oe_reaction_ids": list(gene_state.oe_reaction_ids),
+            "ko_gene_ids": list(gene_state.ko_gene_ids),
+            "oe_gene_ids": list(gene_state.oe_gene_ids),
+        }
+        st.session_state.pop("pichia_next_oe_candidates_result", None)  # invalidate stale readout
         tid, tsp = submit_background_simulation(req, PATHS)
         st.session_state["pichia_draft_task_id"] = tid
         st.session_state["pichia_draft_task_status_path"] = tsp
