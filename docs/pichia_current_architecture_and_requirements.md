@@ -251,7 +251,7 @@ app/ui
 湿实验专有数据（发酵结果、菌株基因型 / 构建、ELISA 产量等）为保密内容，处理规则：
 
 - 只存 **pcSec 仓库之外**的本地私有区（`CursorProject/pcSec_wetlab_private/`），物理上无法被本仓库提交；不上传云端 / GitHub / 任何外部服务。
-- pcSec 代码通过 gitignored 的本地路径配置在运行时读取；提交进仓库的产物（代码、抽象结论、文档）只含机制层抽象，**绝不含基因型 / 位点 / 启动子 / 产量数值**。
+- pcSec 代码通过 gitignored 的本地路径配置在运行时读取（`pcsec_pichia.wetlab_private` 护栏：env `PCSEC_WETLAB_PRIVATE_DIR` / 约定同级回退，**拒绝仓库树内路径 + 越界穿越**、未配置优雅降级；`.env.example` 文档化）；提交进仓库的产物（代码、抽象结论、文档）只含机制层抽象，**绝不含基因型 / 位点 / 启动子 / 产量数值**。
 - 提交护栏：私有区路径或含保密数值的文件被 staged 时应由检查拦截。
 
 ### LLM 数据边界
