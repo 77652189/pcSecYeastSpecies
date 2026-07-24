@@ -5,14 +5,14 @@
 
 ## 当前目标
 
-当前 slice：**碳源条件标定 + 跨条件稳健性**（方向5 有界升级）。详见 [项目级执行计划](EXECUTION_PLAN.md) 阶段① 与 [ADR-006](adr/006-carbon-source-condition-calibration.md)。
+当前 slice：**改造后 per-strain 瓶颈 → 下一步 OE 候选**——复用 per-solve 瓶颈归因（R1）+ 有界剂量响应（R2）接进仿真验证，让已改造的菌株也能"再找瓶颈、排下一候选"。详见 [执行计划](EXECUTION_PLAN.md) 阶段② + [ADR-004](adr/004-relative-signal-deepening-under-permanent-data-gap.md)。方向5（**碳源条件标定 + 跨条件稳健性**）主体已完成（阶段①：A 全 + B1/B2/B4/B5-μ/私有护栏，短名单跨碳源稳健 0 翻转），剩 titer 锚点 / 方向1 摄入等数据门控尾巴。
 
 ```yaml
-current_slice: direction_5_carbon_source_calibration_and_condition_robustness
+current_slice: per_strain_next_oe_candidate_readout
 slice_status: in_progress
 current_program: mvp_directions_plus_relative_signal_deepening
 absolute_capacity_status: unavailable_waiting_for_qualified_evidence
-carbon_source_calibration_status: glucose_corrected_others_draft_pending_internal_calibration
+carbon_source_calibration_status: glucose_corrected_others_internally_calibrated
 wetlab_fermentation_data_status: in_hand_local_private_store_out_of_repo
 rnaseq_expression_constraint_status: contract_ready_adr005_waiting_for_data
 direction_4_combination_status: strategically_deferred
@@ -22,10 +22,12 @@ direction_4_combination_status: strategically_deferred
 
 ## 下一步
 
-阶段① 任务（清单见执行计划）：
-- **A 碳源标定 — 已完成**：蛋白含量条件化（甲醇 0.40）、蛋白成本/生长约束认 formulation 选定的生长反应、核实 `*_meoh` 生物量组成、五条件内部验证、三档 formulation 状态（非葡萄糖=`internally_calibrated`）+ UI 标注；glucose 逐字不变（护栏 10 passed）。
-- **B 跨条件稳健性 + 数据接线 — 进行中**：已完成 B1 求解缓存 / B2 条件矩阵 / B4 跨条件稳健性面板 / B5 μ 验证（默认 μ=0.10 = hLF 甘油生长相实测）。**B3 噪声门控暂不建**（真实工艺矩阵 0 翻转、hLF 短名单跨碳源全稳健、无表观敏感可甄别，未来出现敏感再建）。
-- **剩余（下一步）**：B5 在手发酵数据本地接线（gitignored 私有路径 + 提交护栏 + titer 锚点 + UPR×折叠）、B4 湿实验一致性标注（依赖前者）。
+当前 slice（#1 迭代候选，清单见执行计划阶段②）：
+- **C1 service**（纯逻辑 + 单测）：从 solve 结果 `oe_actionable_bottlenecks`（top-N binding 复合体）派生候选 → 有界 OE 剂量响应（复用 R2）→ 按效应 + 形状排序。
+- **C2 编排 + C3 UI**：两趟 pipeline（solve 拿瓶颈 → 对瓶颈复合体 dose-response），opt-in；仿真验证页"下一步 OE 候选（针对当前改造菌株）"section（复合体级 + 分泌层 + 诚实 caveat）。
+- **C4**：测试 + app 验证。
+
+方向5 收尾（数据门控、暂缓）：B5 titer 锚点（待验证数据）+ 方向1 本地摄入（经护栏读私有区）、B4 湿实验一致性标注。B3 噪声门控暂不建（0 翻转、无表观敏感可甄别）。
 
 ## 范围边界（硬约束）
 

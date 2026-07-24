@@ -33,7 +33,18 @@
 
 **范围边界**：无界完整跨条件排名产品**仍不做**；只产相对信号、不产绝对容量；不动 glucose 的 `corrected_reference` 基准；不换默认 solver；保密湿实验数据只存仓库外本地私有区、提交产物只含机制层抽象。
 
-## 阶段② RNA-seq 表达约束建模（待启动 · 数据门控）
+## 阶段② 迭代候选：改造后 per-strain 瓶颈 → 下一步 OE 候选（当前 · 进行中）
+
+短名单绑在全基因筛查（野生型基线）；已改造的菌株（KO/OE 过）要"再找瓶颈、排下一候选"，需在**仿真验证**里复用 per-solve 瓶颈归因（R1 `oe_actionable_bottlenecks`）+ 有界剂量响应（R2），**不重扫全基因组、不动求解核心**。相对信号深化，见 [ADR-004](adr/004-relative-signal-deepening-under-permanent-data-gap.md)。
+
+- [ ] **C1** service（纯逻辑 + 单测）：从 solve 结果 `oe_actionable_bottlenecks`（top-N binding 复合体、按影子价格）派生候选 → 对其跑有界 OE 剂量响应（复用 R2）→ 按真实效应 + 形状排序输出
+- [ ] **C2** 编排：两趟现有 pipeline（第一趟 solve 拿瓶颈 → 第二趟对瓶颈复合体 dose-response），opt-in 触发
+- [ ] **C3** UI：仿真验证页"下一步 OE 候选（针对当前改造菌株）"section，复合体级 + 分泌层标注 + 诚实 caveat（瓶颈会转移、只给相对方向、非绝对产量）
+- [ ] **C4** 测试 + app 验证
+
+范围：复合体级候选（`reaction_id` 即 OE 目标），暂不强行映射基因名（二期）；opt-in（分泌求解慢，B1 缓存兜底）；仍相对信号、glucose 基准不动、不换默认 solver。
+
+## 阶段③ RNA-seq 表达约束建模（待启动 · 数据门控）
 
 触发：拿到生产菌株 RNA-seq。契约与方法已定，见 [ADR-005](adr/005-rnaseq-expression-constrained-enzyme-capacity.md)。数据到位后：transcript→酶丰度上界 → 经 curated 基因→复合体映射触达分泌 binding 层 → 相对 / opt-in → 验证。绝对容量恒 `unavailable`，**不**解锁降解层建模。
 

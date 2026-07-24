@@ -88,7 +88,7 @@ def test_handoff_points_to_current_slice() -> None:
     # （从 direction_3_erad 推进到 direction_5 碳源标定 + 跨条件稳健性）。
     text = (REPO_ROOT / "docs" / "handoff.md").read_text(encoding="utf-8")
 
-    assert "current_slice: direction_5_carbon_source_calibration_and_condition_robustness" in text
+    assert "current_slice: per_strain_next_oe_candidate_readout" in text
     assert "slice_status: in_progress" in text
     assert "absolute_capacity_status: unavailable_waiting_for_qualified_evidence" in text
     assert "碳源条件标定 + 跨条件稳健性" in text
