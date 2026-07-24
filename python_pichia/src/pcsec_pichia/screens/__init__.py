@@ -92,6 +92,43 @@ class OeDoseResponseSweepResult:
     matlab_alignment_status: str = "pending"
 
 
+def _apply_modifications_and_rebaseline(
+    prepared: dict[str, Any],
+    modifications: StrainModifications,
+    metabolic: MetabolicEnzymeData,
+    growth_rate: float,
+    write_ribosome_translation_constraint: bool,
+    write_misfolding_constraints: bool,
+) -> dict[str, Any]:
+    """把改造（stacked KO/OE）应用到已 prepare 的野生型基线上，并重解**改造后基线**。
+
+    返回覆盖了 fixed_model/secretory/combined/baseline/baseline_success 的 prepared 副本，供 KO
+    筛查、OE 剂量响应等在**改造后菌株**上叠加单扰动（ADR-004 #1 迭代2 分层复用）。改造后不可行则
+    baseline_success=False。空改造时调用方不应进入此函数（默认 None → 野生型路径 byte-identical）。
+    """
+    fixed_model, secretory_eff, combined_eff, _applied, _warnings = apply_strain_modifications(
+        prepared["fixed_model"], prepared["secretory"], prepared["combined"], modifications
+    )
+    baseline, _counts = solve_pcsec_maximize(
+        fixed_model,
+        prepared["exchange_reaction_id"],
+        metabolic=metabolic,
+        secretory=secretory_eff,
+        combined=combined_eff,
+        mu=growth_rate,
+        key_reactions=("BIOMASS", "Ex_glc_D", prepared["exchange_reaction_id"]),
+        write_ribosome_translation_constraint=write_ribosome_translation_constraint,
+        write_misfolding_constraints=write_misfolding_constraints,
+    )
+    updated = dict(prepared)
+    updated["fixed_model"] = fixed_model
+    updated["secretory"] = secretory_eff
+    updated["combined"] = combined_eff
+    updated["baseline"] = baseline
+    updated["baseline_success"] = bool(getattr(baseline, "success", False))
+    return updated
+
+
 def run_knockout_screen(
     model: CobraModel,
     target: TargetSpec,
@@ -103,6 +140,7 @@ def run_knockout_screen(
     growth_rate: float = 0.10,
     write_ribosome_translation_constraint: bool = False,
     write_misfolding_constraints: bool = False,
+    strain_modifications: StrainModifications | None = None,
 ) -> ScreenResult:
     if not genes:
         return _empty_unsolved_screen_result(target.target_id, "knockout")
@@ -120,6 +158,16 @@ def run_knockout_screen(
     )
     if not prepared["baseline_success"]:
         return _empty_screen_result(target.target_id, "knockout", prepared)
+
+    # ADR-004 #1 迭代2：改造后 KO 候选——把 stacked KO/OE 叠进基线再逐个测 KO，delta 相对**改造后**
+    # 菌株（不是野生型）。默认 None → 野生型路径 byte-identical。改造后不可行则优雅返回空。
+    if strain_modifications is not None and not strain_modifications.is_empty():
+        prepared = _apply_modifications_and_rebaseline(
+            prepared, strain_modifications, metabolic, growth_rate,
+            write_ribosome_translation_constraint, write_misfolding_constraints,
+        )
+        if not prepared["baseline_success"]:
+            return _empty_screen_result(target.target_id, "knockout", prepared)
 
     plans = {gene_id: plan_gene_knockout(prepared["fixed_model"], gene_id) for gene_id in genes}
     raw_by_gene = {
@@ -331,27 +379,16 @@ def run_oe_dose_response_sweep(
             warnings=(*warnings, "Baseline secretion solve did not succeed; cannot build a dose-response."),
         )
 
+    if strain_modifications is not None and not strain_modifications.is_empty():
+        # 在改造后菌株上重锚 factor 1.0，使每个候选的剂量响应都测在已改造菌株之上（与 KO 筛查同款 helper）。
+        prepared = _apply_modifications_and_rebaseline(
+            prepared, strain_modifications, metabolic, growth_rate,
+            write_ribosome_translation_constraint, write_misfolding_constraints,
+        )
     fixed_model = prepared["fixed_model"]
     secretory_effective = prepared["secretory"]
     combined_effective = prepared["combined"]
     baseline = prepared["baseline"]
-    if strain_modifications is not None and not strain_modifications.is_empty():
-        # Apply the stacked KO/OE and re-anchor factor 1.0 on the modified strain, so the
-        # dose-response of each swept reaction is measured on top of the already-modified strain.
-        fixed_model, secretory_effective, combined_effective, _, _ = apply_strain_modifications(
-            fixed_model, secretory_effective, combined_effective, strain_modifications
-        )
-        baseline, _ = solve_pcsec_maximize(
-            fixed_model,
-            prepared["exchange_reaction_id"],
-            metabolic=metabolic,
-            secretory=secretory_effective,
-            combined=combined_effective,
-            mu=growth_rate,
-            key_reactions=("BIOMASS", "Ex_glc_D", prepared["exchange_reaction_id"]),
-            write_ribosome_translation_constraint=write_ribosome_translation_constraint,
-            write_misfolding_constraints=write_misfolding_constraints,
-        )
     baseline_objective = baseline.objective_value
     points_by_reaction: dict[str, list[tuple[float, float | None]]] = {
         reaction_id: [(1.0, baseline_objective)] for reaction_id in unique_reactions

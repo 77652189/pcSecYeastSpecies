@@ -33,16 +33,33 @@
 
 **范围边界**：无界完整跨条件排名产品**仍不做**；只产相对信号、不产绝对容量；不动 glucose 的 `corrected_reference` 基准；不换默认 solver；保密湿实验数据只存仓库外本地私有区、提交产物只含机制层抽象。
 
-## 阶段② 迭代候选：改造后 per-strain 瓶颈 → 下一步 OE 候选（当前 · 进行中）
+## 阶段② 迭代候选：改造后 per-strain 瓶颈 → 下一步候选（当前）
 
 短名单绑在全基因筛查（野生型基线）；已改造的菌株（KO/OE 过）要"再找瓶颈、排下一候选"。**关键更正**：`run_pichia_secretion_simulation` 的基础 solve（因此 R1 `oe_actionable_bottlenecks`）是**野生型**——请求里的 KO/OE 只驱动逐候选筛查、不叠进基础 solve。所以"直接复用 R1"只会永远返回同一个野生型 #1，答不了"改造后"。经确认走**真·改造后重解**（Option 1）：把 KO/OE 叠进模型再 solve，瓶颈随改造转移。相对信号深化，见 [ADR-004](adr/004-relative-signal-deepening-under-permanent-data-gap.md)。
+
+### 迭代1：下一步 OE 候选（✅ 已完成，本地 `d2b4cd0` 未 push）
 
 - [x] **C1** service（纯逻辑 + 单测）：从 solve 结果 `oe_actionable_bottlenecks`（top-N binding 复合体、按影子价格）派生候选 → 有界 OE 剂量响应（复用 R2）→ 按真实效应 + 形状排序（`app/services/per_strain_oe_candidates.py`，f0356fc）
 - [x] **C2** 编排：①核心——新增 `strain_modifications`（叠 KO/OE）+ `solve_secretion_capacity` / `run_oe_dose_response_sweep` 各加 **opt-in `strain_modifications` 参数**（默认 None → glucose 逐字不变）；②引擎编排 `next_oe_candidates.analyze_next_oe_candidates`（两趟：改造后重解拿瓶颈 → 对 top-N 瓶颈复合体在改造后菌株上跑有界剂量响应）；③服务 `per_strain_oe_candidate_run`（喂 C1、优雅兜错）
 - [x] **C3** UI：仿真验证结果页"下一步 OE 候选（针对当前改造菌株）"section——暂存本次 KO/OE 改造参数、按钮 opt-in 触发、复合体级 + 分泌层标注 + 排序依据 + 诚实 caveat（瓶颈会转移、只给相对方向、非绝对产量）
-- [ ] **C4** 测试（helper/引擎/服务单测 + guardrail 全绿）完成；**全量回归 + app 验证进行中**
+- [x] **C4** helper(8)/引擎(5)/服务(3) 单测 + guardrail 19 passed；全量 python_pichia 586 passed、根 342 passed；app 实跑 OPN → section+表格+按钮全渲染、排序依据=真实剂量效应
 
-范围：复合体级候选（`reaction_id` 即 OE 目标），暂不强行映射基因名/基因级 KO（二期）；opt-in（分泌求解慢，B1 缓存兜底）；**加了 opt-in 带改造求解路径**（默认关闭、非 core 默认行为变更、glucose 基准逐字不变）；仍相对信号、不换默认 solver。改造后瓶颈的生物学意义随约束档而变：折叠层瓶颈（PDI 等）需在开启折叠/翻译约束的构建下才浮现；默认档常是代谢 slack 反应（诚实呈现、不美化）。
+范围：复合体级候选（`reaction_id` 即 OE 目标）；opt-in（分泌求解慢，B1 缓存兜底）；**加了 opt-in 带改造求解路径**（默认关闭、非 core 默认行为变更、glucose 基准逐字不变）；仍相对信号、不换默认 solver。改造后瓶颈的生物学意义随约束档而变：折叠层瓶颈（PDI 等）需在开启折叠/翻译约束的构建下才浮现；默认档常是代谢 slack 反应（诚实呈现、不美化）。**发现**：OE 可动的是 binding 上限 ceiling，PDI 折叠是下限 floor（不可 OE）——所以此读出不把 PDI 类推为候选。
+
+### 迭代2：改造后候选系统（OE + KO · 分层复用 · 全基因组后台）（进行中）
+
+动机：菌株是迭代改造的（整合/敲除后继续改），不能只对野生型出短名单；每轮改造后全量重跑筛查太慢。用户定 **分层复用**（改造只显著影响耦合层：受影响层重算、其余复用野生型缓存）+ **全基因组 · 后台**（全量层离线跑、读缓存）。KO 候选也要，但 **KO 无免费派生、必须扰动求解**（OE 有影子价格捷径、KO 没有）。最终整合进仿真验证页。
+
+科学前提（诚实）：候选 c 改造后 delta 变不变 = c 与改造是否在同层/紧邻瓶颈耦合（同层→重算，不相干→复用）。判定"受影响层"用改造后重解（C2 已产瓶颈）对比野生型 R1 缓存的层差异。复用是**近似**（LP 全局耦合、退化最优有风险），须**显式标注复用/失效边界**，不隐藏误差。
+
+- [ ] **D1 KO 候选引擎**：`run_knockout_screen` 加 opt-in `strain_modifications`（改造后基线上跑 KO 扰动，与 sweep 同款 additive、默认 None 逐字不变）；引擎产改造后 KO 候选（delta 排序）。
+- [ ] **D2 受影响层判定 + 打标（L1，零求解）**：改造后瓶颈（C2）对比野生型 R1 缓存 → 受影响分泌层集；给野生型短名单（OE+KO）打标"可复用 / 已失效"。纯装配。
+- [ ] **D3 分层短名单编排（L1/L2）**：L1 即时——复用野生型短名单 + D2 标注；L2 按需——受影响层候选（OE 复用 R2、KO 复用 D1）以改造后为基线重算、与复用值合并重排。
+- [ ] **D4 全量后台层（L3）**：改造后为基线全基因组 KO/OE 离线工具 + 缓存（菌株指纹做 key，复用 B1 `model_variant_fingerprint` 思路）；面板读缓存。
+- [ ] **D5 UI 整合**：仿真验证结果页——改造后候选面板（OE+KO 短名单 + 复用/失效标注 + L1/L2/L3 触发 + caveat）。
+- [ ] **D6 测试 + 验证 + 文档**。
+
+交付顺序（增量可用）：D1 + D2/D3 的 L1（KO 引擎 + 打标 + 即时复用）先给日常快速价值 → D4 L3 后台全量 → D5 UI 收口。边界：复用近似须标注失效范围（不隐藏）；KO 必求解；全量层后台+缓存；相对信号、glucose 基准不动、不换默认 solver、绝对容量恒 `unavailable`。
 
 ## 阶段③ RNA-seq 表达约束建模（待启动 · 数据门控）
 

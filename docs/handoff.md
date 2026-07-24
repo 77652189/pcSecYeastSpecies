@@ -5,10 +5,10 @@
 
 ## 当前目标
 
-当前 slice：**改造后 per-strain 瓶颈 → 下一步 OE 候选**——复用 per-solve 瓶颈归因（R1）+ 有界剂量响应（R2）接进仿真验证，让已改造的菌株也能"再找瓶颈、排下一候选"。详见 [执行计划](EXECUTION_PLAN.md) 阶段② + [ADR-004](adr/004-relative-signal-deepening-under-permanent-data-gap.md)。方向5（**碳源条件标定 + 跨条件稳健性**）主体已完成（阶段①：A 全 + B1/B2/B4/B5-μ/私有护栏，短名单跨碳源稳健 0 翻转），剩 titer 锚点 / 方向1 摄入等数据门控尾巴。
+当前 slice：**改造后候选系统（OE + KO · 分层复用）**——迭代1（下一步 OE 候选：R1 瓶颈 + R2 剂量响应接进仿真验证）已完成（本地 `d2b4cd0` 未 push）；迭代2 把它扩成 OE+KO 完整短名单 + **分层复用**（改造只重算受影响层、其余复用野生型缓存）+ **全基因组后台层**，整合进仿真验证页。详见 [执行计划](EXECUTION_PLAN.md) 阶段② 迭代2 + [ADR-004](adr/004-relative-signal-deepening-under-permanent-data-gap.md)。方向5（碳源条件标定 + 跨条件稳健性）主体已完成，剩 titer 锚点 / 方向1 摄入等数据门控尾巴。
 
 ```yaml
-current_slice: per_strain_next_oe_candidate_readout
+current_slice: modified_strain_ko_oe_layered_shortlist
 slice_status: in_progress
 current_program: mvp_directions_plus_relative_signal_deepening
 absolute_capacity_status: unavailable_waiting_for_qualified_evidence
@@ -22,12 +22,14 @@ direction_4_combination_status: strategically_deferred
 
 ## 下一步
 
-当前 slice（#1 迭代候选，清单见执行计划阶段②）——**更正**：基础 solve 是野生型，直接复用 R1 只会返回同一个野生型 #1，已确认走**真·改造后重解**（Option 1）：
-- **C1 service**（done, f0356fc）：`oe_actionable_bottlenecks` → 有界 OE 剂量响应 → 按真实效应 + 形状排序（纯装配）。
-- **C2 编排**（done）：核心 `strain_modifications` 叠 KO/OE + `solve_secretion_capacity`/`run_oe_dose_response_sweep` 各加 opt-in 参数（默认 None → glucose 逐字不变）；引擎 `next_oe_candidates`（两趟：改造后重解 → top-N 瓶颈复合体在改造后菌株上跑剂量响应）；服务 `per_strain_oe_candidate_run`（喂 C1）。
-- **C3 UI**（done）：仿真验证结果页"下一步 OE 候选"section（暂存改造参数 + 按钮 opt-in 触发 + 排名表 + caveat）。
-- **C4**：helper/引擎/服务单测 + guardrail 全绿；**全量回归 + app 验证进行中**。
-- 已核实机制：改造后重解 → 瓶颈随改造转移（OE 掉 #1 后 #2 顶上）。折叠层瓶颈需折叠/翻译约束开启档才浮现，默认档多为代谢 slack（诚实呈现）。
+阶段② 迭代1（C1–C4，下一步 OE 候选）✅ **已完成**（本地 `d2b4cd0` 未 push）：`strain_modifications` 叠 KO/OE + `solve_secretion_capacity`/`run_oe_dose_response_sweep` opt-in 参数（默认 None → glucose 逐字不变）；引擎 `next_oe_candidates` + 服务 `per_strain_oe_candidate_run` + 仿真验证页 UI；586/342 全绿、app 实跑通过。
+
+迭代2（改造后候选系统 · 分层复用 + 全基因组后台，用户 2026-07-24 拍板；清单见执行计划阶段② 迭代2）：
+- **D1 KO 候选引擎**（当前起点）：`run_knockout_screen` 加 opt-in `strain_modifications`（改造后基线跑 KO 扰动，与 sweep 同款 additive）→ 引擎产改造后 KO 候选。
+- **D2/D3 L1**：改造后瓶颈（C2）对比野生型 R1 缓存 → 受影响层判定 + 给野生型短名单打标（复用/失效）；即时复用 + 按需重算受影响层。
+- **D4 L3**：改造后全基因组 KO/OE 离线工具 + 缓存（菌株指纹 key，复用 B1 fingerprint 思路）。
+- **D5 UI** 整合进仿真验证页；**D6** 测试/验证/文档。
+- 核心前提（诚实）：复用是**近似**（同层/紧邻才需重算），须显式标注失效范围；**KO 无免费派生、必求解**（OE 有影子价格捷径）。
 
 方向5 收尾（数据门控、暂缓）：B5 titer 锚点（待验证数据）+ 方向1 本地摄入（经护栏读私有区）、B4 湿实验一致性标注。B3 噪声门控暂不建（0 翻转、无表观敏感可甄别）。
 
