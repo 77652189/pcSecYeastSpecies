@@ -141,7 +141,7 @@ OE 产品能力分为两个独立层级：相对、未校准的决策层用于�
 2. **gene-level OE capacity**：产品分层已验收关闭。reaction proxy / 相对未校准 / 绝对 unavailable / not-executable 由核心层统一判定；绝对层缺 reviewed baseline capacity 保持 unavailable。
 3. **分泌通路机制约束**：Round 0 完成，七类资源架构与可执行契约冻结；ERAD 约束验证完成、决定保持可选（不改默认值）。不做完整机制求解 / 组合搜索。
 4. **组合改造设计**：**战略性暂缓**——真实组合在模型范围外，模型内搜遗传组合（GA/SA/MILP）低价值；留到有稳定性标注的可信单基因排序后，仅在 top 短名单做有界两两上位性。
-5. **条件鲁棒性筛查**：从局部验收维度**有界升级**为当前 slice（碳源条件标定 + 短名单跨条件稳健性标注，见执行计划阶段① / [ADR-006](adr/006-carbon-source-condition-calibration.md)）。无界完整跨条件排名产品仍不做。
+5. **条件鲁棒性筛查**：从局部验收维度**有界升级**为当前 slice（碳源条件标定 + 短名单跨条件稳健性标注，见执行计划阶段① / [ADR-006](adr/006-carbon-source-condition-calibration.md)）。无界完整跨条件排名产品仍不做。**当前结论**：hLF OE 短名单跨碳源（甘油/葡萄糖）稳健——top-15 候选均 `saturating`、排序逐字不变（分泌机器瓶颈杠杆与碳源无关，合 R1 folding-limited）；真实工艺条件集 0 表观敏感，噪声门控（B3）在未来出现敏感时再建。
 
 **横切层**（不属于单个方向，叠在相对决策层上）：相对信号深化 R1–R4（[ADR-004](adr/004-relative-signal-deepening-under-permanent-data-gap.md)：瓶颈归因 / 剂量响应形状 / 排序稳健性 / 价值-of-information，均已落地）；RNA-seq 表达约束（[ADR-005](adr/005-rnaseq-expression-constrained-enzyme-capacity.md)，待数据）；碳源条件标定（[ADR-006](adr/006-carbon-source-condition-calibration.md)，进行中）。绝对容量层恒 unavailable；目标蛋白降解层明确不建。
 

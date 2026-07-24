@@ -20,7 +20,7 @@
 - [x] **A5** 三档 formulation 状态（`corrected_reference` / `internally_calibrated` / `draft_boundary`）+ UI 诚实标注 — 已完成（非葡萄糖=`internally_calibrated`；结果页"碳源标定档"行 + i18n 三档标签）
 - [x] **B1** 求解结果缓存层（内容寻址 key、默认读缓存、显式重算）+ 预热常见条件 — 已完成（`pcsec_pichia.solve_cache`：`SecretionSolveCacheKey` 含碳源/μ/flags/solver + KO/OE 模型变体指纹 + schema 版本，只缓存 success、不改求解语义，缓存存 `local_runs/solve_cache/` gitignored；`tools/prewarm_secretion_solve_cache.py` 预热常见 (目标×碳源×μ)；实测 ~11s 求解 → 二次 0.0s 命中）
 - [x] **B2** 短名单跑真实工艺条件矩阵 — 已完成（`tools/run_shortlist_condition_matrix.py`：复用 `_oe_shortlist` + `enable_oe_dose_response`，干净单碳源 hLF{甘油,葡萄糖}/OPN{甲醇}、统一 μ=0.10，缓存 `{target}_condition_matrix.json`：per-条件 baseline + reaction_shapes + 跨条件 per-reaction 视图；**只产矩阵数据**，分类留 B3、面板留 B4；混合/过渡条件因单一生物量近似不进排序比较。验证 hLF×{甘油,葡萄糖} 2/2 成功）
-- [ ] **B3** 噪声门控：翻转的排序换 highs-ds / highs-ipm 重解 + 看量级，分真·条件敏感 vs 数值假象（复用 R3 `compare_ranking_robustness`）
+- [ ] **B3** 噪声门控（**当前条件集 0 翻转、暂不建**）：真实工艺矩阵（hLF 甘油/葡萄糖 top-15、OPN 甲醇）跑出 **0 个条件敏感候选**——hLF 短名单 15/15 两碳源均 `saturating`、排序逐字不变（分泌机器瓶颈杠杆与碳源无关，合 R1 folding-limited），无表观敏感可甄别。换 highs-ds/highs-ipm 分真敏感 vs 数值假象（复用 R3 `compare_ranking_robustness`）门控在未来出现表观敏感（更多靶点/条件）时再建。
 - [ ] **B4** ① 短名单读出加"跨条件稳健性"+"湿实验一致性"标注（后者读本地发酵数据，输出相对 / 抽象结论）
   - [x] 跨条件稳健性：服务读 B2 条件矩阵缓存、按 reaction 附稳健性判定（`cross_condition_stable`/`_sensitive`/`_single`）；面板"跨条件稳健性"列 + note（未扫描优雅降级；真敏感 vs 数值假象留 B3）
   - [ ] 湿实验一致性：待 B5 私有数据读取护栏 + validated titer
