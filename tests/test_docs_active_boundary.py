@@ -89,7 +89,8 @@ def test_handoff_points_to_current_slice() -> None:
     text = (REPO_ROOT / "docs" / "handoff.md").read_text(encoding="utf-8")
 
     assert "current_slice: modified_strain_ko_oe_layered_shortlist" in text
-    assert "slice_status: in_progress" in text
+    # 迭代2 D1–D6 全落地全 push；#2 验证诊断为数据门控 → slice 收在"生成侧完成、等数据"。
+    assert "slice_status: done" in text
     assert "absolute_capacity_status: unavailable_waiting_for_qualified_evidence" in text
     assert "碳源条件标定 + 跨条件稳健性" in text
     # 硬边界必须在场
