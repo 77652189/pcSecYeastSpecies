@@ -72,7 +72,12 @@ def _analyze_bottlenecks(
     enable_misfolding_constraint: bool,
     root: Path | None,
 ) -> dict[str, Any]:
-    """薄壳：调 C2 引擎拿一次瓶颈归因（懒 import，方便单测 monkeypatch）。"""
+    """薄壳：调 C2 引擎拿一次瓶颈归因（懒 import，方便单测 monkeypatch）。
+
+    L1 只需瓶颈**层**（`oe_actionable_bottlenecks` / `floor_constraints`）做 D2 打标，用不到剂量响应形状，
+    故传 `top_n=0` **跳过 top-N 有界 sweep**——L1 于是只花 1 次求解 + 归因（而非几十次 sweep 求解），
+    面板"构建短名单"才快。剂量响应留给 L2 只对已失效候选重算。
+    """
     from pcsec_pichia.next_oe_candidates import analyze_next_oe_candidates
 
     return analyze_next_oe_candidates(
@@ -86,6 +91,7 @@ def _analyze_bottlenecks(
         compatibility_mode=compatibility_mode,
         enable_ribosome_translation_constraint=enable_ribosome_translation_constraint,
         enable_misfolding_constraint=enable_misfolding_constraint,
+        top_n=0,  # 跳过 L1 用不到的 top-N 剂量响应 sweep（只要瓶颈层）
         root=root,
     )
 

@@ -562,7 +562,8 @@ def _render_modified_shortlist_result(readout: dict[str, object]) -> None:
                     "候选": candidate.get("candidate") or candidate.get("gene_id") or "—",
                     "分泌层": _reuse_module_label(candidate.get("reuse_module")),
                     "复用状态": _reuse_status_label(candidate.get("reuse_status"), candidate.get("recompute_status")),
-                    "相对效应": f"{float(effect) * 100:.2f}%" if isinstance(effect, (int, float)) else "—",
+                    # 本模型的相对效应常是亚百分比（0.0x%）——用有效数字而非固定 2 位小数，否则全显示 0.00%、看不出排序。
+                    "相对效应": f"{float(effect) * 100:.3g}%" if isinstance(effect, (int, float)) else "—",
                 }
             )
         st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
