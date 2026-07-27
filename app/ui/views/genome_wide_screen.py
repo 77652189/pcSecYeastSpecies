@@ -335,9 +335,14 @@ def _render_shortlist_readout(readout: dict, *, target_id: str) -> None:
             headline = f"OE 提升候选里 **{top['candidate']}**（{top['layer']}）最强（+{float(top['effect']) * 100:.2f}%）"
         else:
             headline = "**没有强 OE 提升杠杆**（最高相对提升 < 1%）——这个靶点大概率不受限于可 OE 的分泌机器上限"
-        top_floor = floors[0]["reaction_id"] if floors else None
-        if top_floor:
-            st.markdown(f"> 一句话：**{target_id}** 的分泌最强约束在 `{top_floor}`（下界/最低要求，OE 动不了）；{headline}。")
+        if floors:
+            top = floors[0]
+            layer = (
+                sim_result_value_label(top.get("secretory_process"))
+                if top.get("secretory_process")
+                else _short_reaction(str(top.get("reaction_id")))
+            )
+            st.markdown(f"> 一句话：**{target_id}** 的分泌最强约束在 **{layer}**（下界/最低需求，过表达松不动）；{headline}。")
         else:
             st.markdown(f"> 一句话：**{target_id}** — {headline}。")
         st.caption("相对信号，非绝对产量 / mg·L⁻¹；复用本次筛查在固定倍数 OE、corrected 培养基下的模型解，零新增求解。")
@@ -419,6 +424,17 @@ def _render_shortlist_readout(readout: dict, *, target_id: str) -> None:
             )
             st.plotly_chart(figure, width='stretch')
             st.dataframe(shortlist_frame, width="stretch", hide_index=True)
+            st.caption(
+                "「相对提升(%)」是模型内部相对量、不是 titer 预测——**同一列内看名次比看绝对数值更靠谱**；"
+                "亚百分比差异（如 0.0x%）勿当噪声直接否掉，它仍是模型给的方向排序。"
+            )
+            st.download_button(
+                "⬇️ 导出候选短名单（CSV，Excel 可直接打开）",
+                data=shortlist_frame.to_csv(index=False).encode("utf-8-sig"),
+                file_name=f"{target_id}_OE候选短名单.csv",
+                mime="text/csv",
+                key="genome_wide_shortlist_download",
+            )
             risky = readout.get("growth_risky_candidates") or []
             if risky:
                 st.caption("⚠️ 生长有代价（保持率 < 0.9）：" + "、".join(str(c) for c in risky))

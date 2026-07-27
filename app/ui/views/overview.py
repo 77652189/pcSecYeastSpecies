@@ -29,8 +29,8 @@ def render_overview() -> None:
         request_navigation("全基因组KO/OE筛查")
         st.rerun()
     note_col.caption(
-        "第一次用建议从「全基因组KO/OE筛查」开始：先看看哪些基因值得关注，"
-        "再逐步走到候选核实、证据复核这些页面——不用自己先记那一串页面顺序。"
+        "想知道某个目标蛋白（如 hLF）该**敲除 / 过表达哪些基因**来提升分泌？从「全基因组KO/OE筛查」开始——"
+        "那里出一份按相对提升排好序的候选短名单、可导出 CSV；再走到候选核实、证据复核确认。"
     )
 
     col1, col2, col3, col4 = st.columns(4)
@@ -50,14 +50,13 @@ def render_overview() -> None:
             """
         )
 
-    st.subheader("部署状态")
-    if not items.empty:
-        items["status_label"] = items["status"].map(status_label)
-        status_order = {"ok": 0, "warning": 1, "missing": 2, "error": 3}
-        items["sort"] = items["status"].map(status_order).fillna(9)
-        display = items.sort_values(["sort", "name"])[["name", "status_label", "detail"]]
-        st.dataframe(rename_columns(display, HEALTH_COLUMN_LABELS), width='stretch', hide_index=True)
-    with st.expander("怎么看部署状态"):
+    with st.expander("部署状态（依赖 / 环境自检 · 研究员一般不用看）", expanded=False):
+        if not items.empty:
+            items["status_label"] = items["status"].map(status_label)
+            status_order = {"ok": 0, "warning": 1, "missing": 2, "error": 3}
+            items["sort"] = items["status"].map(status_order).fillna(9)
+            display = items.sort_values(["sort", "name"])[["name", "status_label", "detail"]]
+            st.dataframe(rename_columns(display, HEALTH_COLUMN_LABELS), width='stretch', hide_index=True)
         st.markdown(
             """
             - **正常：** 依赖、模型文件或结果目录已找到。

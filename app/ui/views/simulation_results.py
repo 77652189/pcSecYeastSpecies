@@ -291,7 +291,7 @@ def _render_value_of_information(payload: dict[str, object]) -> None:
     ranked = [row for row in (payload.get("ranked_candidates") or []) if isinstance(row, dict)]
     if not items and not ranked:
         return
-    with st.expander("排序可信度 & 该测什么（价值-of-information）", expanded=True):
+    with st.expander("排序可信度 & 该测什么", expanded=True):
         st.caption(
             "模型给的是相对排序、不是绝对产量。这里标出顶部名次里模型分不清的候选（排序不可信），"
             "并给出最能消解歧义的最小湿实验——只排测量优先级，不预测结果、不自动认定谁更好。"
@@ -363,7 +363,7 @@ def _render_next_oe_candidates(data: dict[str, object]) -> None:
     mods = st.session_state.get("pichia_last_run_modifications")
     with st.expander("下一步 OE 候选（针对当前改造菌株）", expanded=False):
         st.caption(
-            "把本次构建里设定的 KO/OE 应用到模型后重新求解，找改造后这一株当前 binding 的产能瓶颈复合体，"
+            "把本次构建里设定的 KO/OE 应用到模型后重新求解，找改造后这一株当前卡在上限的产能瓶颈复合体，"
             "再对它们扫有界过表达剂量响应，按真实相对效应排出下一步该 OE 谁。瓶颈会随改造转移——每改一轮都应重跑。"
             "相对信号、复合体级、非绝对产量。"
         )
@@ -414,7 +414,7 @@ def _render_next_oe_candidates_result(readout: dict[str, object]) -> None:
     with c1:
         st.metric("改造后分泌目标", _fmt_num(readout.get("modified_objective_value")))
     with c2:
-        st.metric("排序依据", "真实剂量效应" if readout.get("dose_response_available") else "影子价格")
+        st.metric("排序依据", "真实剂量效应" if readout.get("dose_response_available") else "限制强度")
     with c3:
         st.metric("碳源", sim_result_value_label(readout.get("carbon_source_id")))
 
@@ -427,7 +427,7 @@ def _render_next_oe_candidates_result(readout: dict[str, object]) -> None:
                 "排名": rank,
                 "OE 目标(复合体)": _short_reaction_label(str(candidate.get("reaction", "—"))),
                 "分泌资源层": _resource_layer_label(candidate.get("layer")),
-                "影子价格(绝对)": _fmt_num(candidate.get("shadow_price")),
+                "限制强度": _fmt_num(candidate.get("shadow_price")),
             }
             if dose_available:
                 effect = candidate.get("effect")
@@ -439,15 +439,15 @@ def _render_next_oe_candidates_result(readout: dict[str, object]) -> None:
             rows.append(row)
         st.dataframe(pd.DataFrame(rows), width='stretch', hide_index=True)
         if not dose_available:
-            st.caption("未取得剂量响应（瓶颈复合体无有界 sweep 结果）——暂按影子价格排序，只表示谁在 binding，不表示松开涨得多。")
+            st.caption("未取得剂量响应（瓶颈复合体无有界扫描结果）——暂按限制强度排序，只表示谁在卡着（生效约束），不表示松开后能涨多少。")
     else:
-        st.caption("（改造后未发现 OE 可缓解的 binding 上限瓶颈复合体。）")
+        st.caption("（改造后未发现过表达可缓解的、卡在上限的瓶颈复合体。）")
 
     for caveat in readout.get("caveats") or []:
         st.caption(f"• {caveat}")
     floors = readout.get("floor_constraints_not_oe_addressable") or []
     if floors:
-        st.caption(f"另有 {len(floors)} 个 binding 下限 floor（如折叠/翻译最低需求）——OE 松不动，不列为候选。")
+        st.caption(f"另有 {len(floors)} 个下界约束（最低需求，如折叠/翻译）——过表达松不动，不列为候选。")
     for warning in readout.get("modification_warnings") or []:
         st.warning(str(warning))
 
@@ -797,8 +797,8 @@ def _lp_floor_bottleneck_frame(lp_attribution: dict[str, object]) -> pd.DataFram
 
 
 def _render_lp_attribution(lp_attribution: dict[str, object]) -> None:
-    st.markdown("**LP 级归因证据**")
-    st.caption("Python 草稿版 LP 灵敏度（基于 SciPy HiGHS 影子价格）；不是 MATLAB/SoPlex 完全对齐的影子价格。")
+    st.markdown("**约束归因证据（进阶：模型为什么这么排）**")
+    st.caption("进阶证据：Python 草稿版约束灵敏度（“限制强度”即影子价格，基于 SciPy HiGHS）；数值未与 MATLAB/SoPlex 完全对齐，看相对大小即可。")
     objective = lp_attribution.get("objective_evidence") if isinstance(lp_attribution.get("objective_evidence"), dict) else {}
     c1, c2, c3 = st.columns([1, 1, 1])
     with c1:
@@ -810,10 +810,10 @@ def _render_lp_attribution(lp_attribution: dict[str, object]) -> None:
 
     oe_actionable = lp_attribution.get("oe_actionable_bottlenecks") or []
     floor_only = lp_attribution.get("floor_constraints_not_oe_addressable") or []
-    st.write("**OE 可缓解瓶颈（binding 上限，按复合体）**")
+    st.write("**过表达可缓解的瓶颈（卡在上限，按复合体）**")
     st.caption(
-        "只列当前解处 binding 的上限产能约束——这是 OE（放宽产能上限）真能缓解的瓶颈线索，按复合体给出。"
-        "注意这只是线索不是保证：耦合结构下放宽一个上限会让瓶颈转移，需与真实 reaction_oe_tradeoff 交叉验证。"
+        "只列当前解里卡在上限的产能约束（生效约束）——这是过表达（放宽产能上限）真能缓解的瓶颈线索，按复合体给出。"
+        "注意只是线索不是保证：耦合结构下放宽一个上限会让瓶颈转移，需与真实逐候选权衡交叉验证。"
     )
     if oe_actionable:
         bottleneck_frame = _lp_oe_bottleneck_frame(lp_attribution)
@@ -826,11 +826,11 @@ def _render_lp_attribution(lp_attribution: dict[str, object]) -> None:
                 orientation="h",
                 text="影子价格(绝对值)",
                 color_discrete_sequence=px.colors.qualitative.Set2,
-                title="OE 可缓解瓶颈：哪一层最限制分泌（影子价格绝对值越大越紧）",
+                title="过表达可缓解的瓶颈：哪一层最卡分泌（限制强度越大越紧）",
             )
             figure.update_traces(texttemplate="%{text:.2g}", textposition="outside", cliponaxis=False)
             figure.update_layout(
-                xaxis_title="影子价格绝对值（越大越限制分泌）",
+                xaxis_title="限制强度（越大越卡分泌）",
                 yaxis_title="",
                 legend_title_text="分泌资源层",
                 yaxis={"categoryorder": "total ascending"},
@@ -842,12 +842,12 @@ def _render_lp_attribution(lp_attribution: dict[str, object]) -> None:
             hide_index=True,
         )
     else:
-        st.caption("（当前解没有 binding 的上限产能约束）")
+        st.caption("（当前解没有卡在上限的产能约束）")
     if floor_only:
-        st.write("**为什么受限：最强约束层（下界/最低要求，OE 动不了）**")
+        st.write("**为什么受限：最强约束层（下界/最低需求，过表达松不动）**")
         st.caption(
-            "这些下界（折叠 / 翻译 / ERAD 等最低要求）承载最大的影子价格，是本靶点「为什么受限、卡在哪一层」的答案；"
-            "但 OE 放宽的是上限、对它们无效，绝不能当 OE 靶点（PDI1 单体、核糖体装配就是这里的经典假阳性）。"
+            "这些下界（折叠 / 翻译 / ERAD 等最低需求）承载最大的限制强度，是本靶点「为什么受限、卡在哪一层」的答案；"
+            "但过表达松的是上限、对它们无效，绝不能当过表达靶点（PDI1 单体、核糖体装配就是这里的经典假阳性）。"
         )
         floor_frame = _lp_floor_bottleneck_frame(lp_attribution)
         if not floor_frame.empty:
@@ -859,11 +859,11 @@ def _render_lp_attribution(lp_attribution: dict[str, object]) -> None:
                 orientation="h",
                 text="影子价格(绝对值)",
                 color_discrete_sequence=px.colors.qualitative.Set2,
-                title="为什么受限：最强约束层（影子价格越大越限制；OE 动不了）",
+                title="为什么受限：最强约束层（限制强度越大越卡；过表达松不动）",
             )
             figure.update_traces(texttemplate="%{text:.0f}", textposition="outside", cliponaxis=False)
             figure.update_layout(
-                xaxis_title="影子价格绝对值（越大越限制分泌）",
+                xaxis_title="限制强度（越大越卡分泌）",
                 yaxis_title="",
                 legend_title_text="分泌资源层",
                 yaxis={"categoryorder": "total ascending"},
@@ -877,8 +877,8 @@ def _render_lp_attribution(lp_attribution: dict[str, object]) -> None:
 
     sections = (
         ("主导约束块（按资源层汇总）", "dominant_constraint_blocks"),
-        ("约束级影子价格 Top", "top_constraint_marginals"),
-        ("边界级影子价格 Top（未按边界类型分离的原始表）", "top_bound_marginals"),
+        ("约束级限制强度 Top", "top_constraint_marginals"),
+        ("边界级限制强度 Top（未按边界类型分离的原始表）", "top_bound_marginals"),
         ("目标相关通量", "target_related_fluxes"),
     )
     for title, key in sections:
@@ -892,7 +892,7 @@ def _render_lp_attribution(lp_attribution: dict[str, object]) -> None:
             )
     counts = lp_attribution.get("active_bound_counts")
     if isinstance(counts, dict) and counts:
-        st.write("**生效边界影子价格计数**")
+        st.write("**生效边界限制强度计数**")
         st.dataframe(
             pd.DataFrame([{"项目": sim_result_column_label(key), "数量": value} for key, value in counts.items()]),
             width='stretch',

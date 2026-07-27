@@ -498,9 +498,10 @@ def test_streamlit_solver_robustness_option_and_result_panel_are_localized() -> 
     assert "启用求解器稳健性检查（换 highs-ds/highs-ipm 重解，判断瓶颈归因是否为数值假象，较慢）" in builder_source
     assert "对偶解在退化最优解处并不唯一" in builder_source
     # result panel surfaces the OE-actionable vs floor split and the solver-robustness verdict
-    assert "OE 可缓解瓶颈（binding 上限，按复合体）" in results_source
+    # （易用性走查后去术语：OE→过表达、binding→卡在上限、影子价格→限制强度，面向湿实验研究员）
+    assert "过表达可缓解的瓶颈（卡在上限，按复合体）" in results_source
     # the floor block was reframed as the 'why is it limited' answer (largest shadow prices, OE cannot relax)
-    assert "为什么受限：最强约束层（下界/最低要求，OE 动不了）" in results_source
+    assert "为什么受限：最强约束层（下界/最低需求，过表达松不动）" in results_source
     assert "求解器稳健性（瓶颈归因是否跨求解器稳定）" in results_source
     assert "ranking-sensitive-to-solver" in results_source
     # service facade threads the flag through to the engine request
@@ -635,7 +636,8 @@ def test_streamlit_value_of_information_panel_is_localized_and_chart_backed() ->
     # R4 (ADR-004): the value-of-information panel is a ranking-confidence + what-to-measure product,
     # framed as relative (never absolute yield), and reads the pipeline's value_of_information payload.
     results_source = (REPO_ROOT / "app" / "ui" / "views" / "simulation_results.py").read_text(encoding="utf-8")
-    assert "排序可信度 & 该测什么（价值-of-information）" in results_source
+    # 易用性走查后去掉开发术语"价值-of-information"（面向研究员的白话标题）
+    assert "排序可信度 & 该测什么" in results_source
     assert "只排测量优先级，不预测结果、不自动认定谁更好" in results_source
     assert "候选排序：分数越接近越难区分" in results_source
 

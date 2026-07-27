@@ -49,7 +49,12 @@ def _load_r1_floors(r1_dir: Path | None, target_id: str, top: int = 5) -> list[d
         return []
     floors = data.get("floor_constraints_not_oe_addressable") or []
     rows = [
-        {"reaction_id": str(f.get("reaction_id")), "abs_marginal": float(f.get("abs_marginal") or 0.0)}
+        {
+            "reaction_id": str(f.get("reaction_id")),
+            "abs_marginal": float(f.get("abs_marginal") or 0.0),
+            # 分泌层（如 disulfide_folding）——面板拿它显示研究员看得懂的"卡在哪一层"，而非原始反应 id。
+            "secretory_process": str(f.get("secretory_process") or ""),
+        }
         for f in floors
         if isinstance(f, dict)
     ]
