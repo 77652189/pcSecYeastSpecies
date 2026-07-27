@@ -1,11 +1,11 @@
 # pcSecPichia Handoff
 
 状态：active
-最后更新：2026-07-24
+最后更新：2026-07-27
 
 ## 当前目标
 
-当前 slice：**改造后候选系统（OE + KO · 分层复用）**——迭代1（下一步 OE 候选）+ 迭代2 D1（改造后 KO 引擎）已在 `8e502e7`（已 push）；迭代2 **D4 复用地基**（野生型口径指纹基线缓存 + 后台构建接线 + 读服务）已完成（本地，待 push）。余 D2/D3（分层复用打标 + 编排）、D5（UI）、D6（测试/文档）、D4b（改造后全量 L3 兜底、后置）。详见 [执行计划](EXECUTION_PLAN.md) 阶段② 迭代2 + [ADR-004](adr/004-relative-signal-deepening-under-permanent-data-gap.md)。方向5（碳源条件标定 + 跨条件稳健性）主体已完成，剩 titer 锚点 / 方向1 摄入等数据门控尾巴。
+当前 slice：**改造后候选系统（OE + KO · 分层复用）**——迭代1 + 迭代2 D1 在 `8e502e7`（已 push）；**D4 复用地基 + D2 受影响层打标 + D3（L1/L2）编排 + D5 面板**已全部完成，**2 本地提交未 push**（`00b6f70` D4+D2+D3 L1、`3d236ac` D3 L2+D5）。**唯一剩项 D6**（baseline 门控）：真 baseline 下 app 端 L1→L2 全渲染验证 + 全量回归复跑 + 收口。D4b（改造后全量 L3 兜底）后置。详见 [执行计划](EXECUTION_PLAN.md) 阶段② 迭代2 + [ADR-004](adr/004-relative-signal-deepening-under-permanent-data-gap.md)。方向5（碳源条件标定 + 跨条件稳健性）主体已完成，剩 titer 锚点 / 方向1 摄入等数据门控尾巴。
 
 ```yaml
 current_slice: modified_strain_ko_oe_layered_shortlist
@@ -27,9 +27,9 @@ direction_4_combination_status: strategically_deferred
 迭代2（改造后候选系统 · 分层复用 + 全基因组后台，用户 2026-07-24 拍板；清单见执行计划阶段② 迭代2）：
 - **D1 KO 候选引擎** ✅（`8e502e7`）：`run_knockout_screen` opt-in `strain_modifications` → 改造后基线跑 KO 扰动。
 - **D4 复用地基** ✅（本地，待 push）：野生型**口径指纹**基线缓存——引擎 `strain_baseline_cache`（口径+菌株指纹、复用 `solve_cache`/`model_variant_fingerprint`；schema post-`87f99ac`、旧 unknown 分类永不命中）+ 服务 `strain_baseline_service`（跟随 run 口径读/报未构建/CSV ingest）+ 并行筛查工具加口径参数&完成后蒸馏进缓存。8+4 单测、2 基因真跑闭环、2050 行真 CSV 蒸馏都验过。
-- **D2/D3**（当前起点）：改造后瓶颈（C2）对比**同口径**野生型基线（D4）→ 受影响层判定 + 打标（复用/失效）→ L1 即时复用 + L2 按需重算受影响层。
-- **D5 UI** 整合进仿真验证页；**D6** 测试/验证/文档；**D4b** 改造后全量 L3（兜底、后置）。
-- 核心前提（诚实）：复用是**近似**（同层/紧邻才需重算），须显式标注失效范围；**KO 无免费派生、必求解**（OE 有影子价格捷径）。
+- **D2/D3/D5** ✅（`00b6f70`+`3d236ac`）：D2 打标（`per_strain_layer_reuse`）+ D3 L1 编排 + L2 重算（`per_strain_shortlist_run` + 引擎 `recompute_modified_strain_candidate_effects`）+ D5 面板（`simulation_results._render_modified_strain_shortlist`，复用 C3 stash）。L2 引擎真跑 smoke 验过。
+- **D6（当前起点、唯一剩项）**：真 baseline 下 app 端 L1→L2 全渲染验证。**前置**：先跑一次 hour-scale 野生型全基因组后台基线（`tools/run_genome_wide_ko_oe_screen_parallel.py --targets hLF --run-name <名>`，跑完自动落口径指纹缓存），或临时 ingest 既有 `overnight_hLF_full/overnight_OPN_full` CSV（2026-07-03、pre-current-code、有新鲜度 caveat）做 demo；+ 全量回归复跑。**D4b** 改造后全量 L3（兜底、后置）。
+- 核心前提（诚实）：复用是**近似**（同层/紧邻才需重算），须显式标注失效范围；**KO 无免费派生、必求解**（OE 有影子价格捷径）；层复用只对**分泌专属层**干净、代谢桶保守（分类两套词表经 `PROCESS_LABELS` 桥归并粗模块）。
 - **D2 起点须知（D4 时坐实的两处更正）**：① 分类**两套词表不同**——LP 瓶颈用 `classify_secretory_process`（英文键）、筛查短名单用 `gene_perturbation_map`（中文展示标签），**不能直接比对**；D2 要把候选的 `affected_reactions` 经 `classify_secretory_process` 重分类成同词表再比（基线已保留 `affected_reactions`）。② 分类只有 5 个粗桶、绝大多数落 `metabolic_or_other`——层级复用对**分泌专属层**（折叠/糖基化/ER 转运/ERAD/Golgi）才干净有效，代谢桶要保守。
 
 方向5 收尾（数据门控、暂缓）：B5 titer 锚点（待验证数据）+ 方向1 本地摄入（经护栏读私有区）、B4 湿实验一致性标注。B3 噪声门控暂不建（0 翻转、无表观敏感可甄别）。
