@@ -342,32 +342,31 @@ def _render_shortlist_readout(readout: dict, *, target_id: str) -> None:
             st.markdown(f"> 一句话：**{target_id}** — {headline}。")
         st.caption("相对信号，非绝对产量 / mg·L⁻¹；复用本次筛查在固定倍数 OE、corrected 培养基下的模型解，零新增求解。")
 
-        # 1. 为什么受限（R1）
-        st.markdown("**为什么受限（R1 LP 影子价格 · 最强约束层）**")
+        # 1. 为什么受限（最强约束层）
+        st.markdown("**为什么受限：最强约束层**")
         if floors:
             st.caption(
-                "下界=最低要求类约束，承载最大影子价格，是“卡在哪一层”的答案；但 OE 放宽的是上限、对它们无效"
-                "（floor≠可 OE 杠杆）。此 R1 读出对该靶点单独计算、单独缓存，不是本次筛查的产物。"
+                "这些是最低需求类约束（下界），限制强度最大，回答“卡在哪一层”；但过表达松的是上限、"
+                "对这些下界无效（松不动）。此读出对该靶点单独计算并缓存。"
             )
             floor_frame = pd.DataFrame(
-                [{"反应": _short_reaction(f["reaction_id"]), "影子价格(绝对值)": float(f["abs_marginal"])} for f in floors]
+                [{"反应": _short_reaction(f["reaction_id"]), "限制强度": float(f["abs_marginal"])} for f in floors]
             )
             figure = px.bar(
-                floor_frame.sort_values("影子价格(绝对值)"),
-                x="影子价格(绝对值)",
+                floor_frame.sort_values("限制强度"),
+                x="限制强度",
                 y="反应",
                 orientation="h",
-                text="影子价格(绝对值)",
+                text="限制强度",
                 color_discrete_sequence=["#0F766E"],
-                title="最强约束层：影子价格绝对值越大越限制分泌（下界，OE 动不了）",
+                title="最强约束层：限制强度越大越卡分泌（下界，过表达松不动）",
             )
             figure.update_traces(texttemplate="%{text:.3g}", textposition="outside", cliponaxis=False)
-            figure.update_layout(xaxis_title="影子价格绝对值（越大越限制分泌）", yaxis_title="", yaxis={"categoryorder": "total ascending"})
+            figure.update_layout(xaxis_title="限制强度（越大越卡分泌）", yaxis_title="", yaxis={"categoryorder": "total ascending"})
             st.plotly_chart(figure, width='stretch')
         else:
             st.caption(
-                "未找到该靶点的 R1 瓶颈读出（local_runs/r1_readout/）。"
-                "可先用 python_pichia/tools/run_target_bottleneck_lp_attribution_check.py 生成，再回来看“为什么受限”。"
+                "暂无该靶点的“为什么受限”读出——需建模同事离线生成后再回看（本页不触发额外求解）。"
             )
 
         # 2. OE 提升候选短名单
@@ -430,8 +429,8 @@ def _render_shortlist_readout(readout: dict, *, target_id: str) -> None:
         else:
             st.caption("本次筛查在当前 OE 倍数下没有 ratio>1 的 OE 提升候选（不代表无解，可能是单基因、当前倍数强度不足以突破瓶颈）。")
 
-        # 3. 该测什么（R4 价值-of-information）
-        st.markdown("**该测什么（R4 价值-of-information）**")
+        # 3. 该测什么（哪个实验最值得先做）
+        st.markdown("**该测什么：哪个实验最值得先做**")
         st.caption("模型给的是相对排序、不是绝对产量。这里标出顶部名次里模型分不清的候选，并给出最能消解歧义的最小湿实验——只排测量优先级，不预测结果。")
         _render_shortlist_voi(voi)
 
