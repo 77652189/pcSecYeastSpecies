@@ -50,16 +50,19 @@
 
 动机：菌株是迭代改造的（整合/敲除后继续改），不能只对野生型出短名单；每轮改造后全量重跑筛查太慢。用户定 **分层复用**（改造只显著影响耦合层：受影响层重算、其余复用野生型缓存）+ **全基因组 · 后台**（全量层离线跑、读缓存）。KO 候选也要，但 **KO 无免费派生、必须扰动求解**（OE 有影子价格捷径、KO 没有）。最终整合进仿真验证页。
 
-科学前提（诚实）：候选 c 改造后 delta 变不变 = c 与改造是否在同层/紧邻瓶颈耦合（同层→重算，不相干→复用）。判定"受影响层"用改造后重解（C2 已产瓶颈）对比野生型 R1 缓存的层差异。复用是**近似**（LP 全局耦合、退化最优有风险），须**显式标注复用/失效边界**，不隐藏误差。
+科学前提（诚实）：候选 c 改造后 delta 变不变 = c 与改造是否在同层/紧邻瓶颈耦合（同层→重算，不相干→复用）。判定"受影响层"用改造后重解（C2 已产瓶颈）对比**同口径**野生型基线的层差异。复用是**近似**（LP 全局耦合、退化最优有风险），须**显式标注复用/失效边界**，不隐藏误差。
 
-- [ ] **D1 KO 候选引擎**：`run_knockout_screen` 加 opt-in `strain_modifications`（改造后基线上跑 KO 扰动，与 sweep 同款 additive、默认 None 逐字不变）；引擎产改造后 KO 候选（delta 排序）。
-- [ ] **D2 受影响层判定 + 打标（L1，零求解）**：改造后瓶颈（C2）对比野生型 R1 缓存 → 受影响分泌层集；给野生型短名单（OE+KO）打标"可复用 / 已失效"。纯装配。
-- [ ] **D3 分层短名单编排（L1/L2）**：L1 即时——复用野生型短名单 + D2 标注；L2 按需——受影响层候选（OE 复用 R2、KO 复用 D1）以改造后为基线重算、与复用值合并重排。
-- [ ] **D4 全量后台层（L3）**：改造后为基线全基因组 KO/OE 离线工具 + 缓存（菌株指纹做 key，复用 B1 `model_variant_fingerprint` 思路）；面板读缓存。
-- [ ] **D5 UI 整合**：仿真验证结果页——改造后候选面板（OE+KO 短名单 + 复用/失效标注 + L1/L2/L3 触发 + caveat）。
+> **复用地基先行（口径 + 分类词表两处更正，D4 时坐实）**：① 原计划让 D2/D3 直接复用旧 R1 缓存，但旧缓存 `secretory_process=unknown`（`87f99ac` 分类修复前）、且不带 run 口径——**不可比**。故先做 D4 复用地基：**同 run 口径**的野生型全基因组基线，按口径指纹缓存（用户定"跟随 run 口径"），D2/D3 只吃这份新基线。② 分类词表有**两套且不同**：LP 瓶颈归因用 `classify_secretory_process`（英文键 `disulfide_folding`/`metabolic_or_other`…），筛查短名单用 `gene_perturbation_map` 中文展示标签（`错误折叠 / ERAD`…）——**不能直接字符串比对**。D2 必须把候选的 `affected_reactions` 经 `classify_secretory_process` **重分类**成与瓶颈同词表的层再比（基线已保留反应级信息）。③ 分类只有 5 个粗桶、且绝大多数候选落在 `metabolic_or_other`——层级复用对**分泌专属层**（折叠/糖基化/ER 转运/ERAD/Golgi）才干净有效；对代谢桶要保守（目标改造多在分泌层，代谢候选多为 slack，价值本就低）。这条决定 D2/D3 的诚实边界，见下 D2。
+
+- [x] **D1 KO 候选引擎**（本地 `8e502e7`）：`run_knockout_screen` 加 opt-in `strain_modifications`（经 `_apply_modifications_and_rebaseline` 在改造后基线上跑 KO 扰动，与 sweep 同款 additive、默认 None 逐字不变）；引擎产改造后 KO 候选（delta 排序）。
+- [x] **D4 复用地基（野生型口径指纹基线缓存）**（本地，待 push）：① 引擎 `strain_baseline_cache`（口径+菌株指纹、内容寻址缓存、复用 `solve_cache`/`model_variant_fingerprint` 模式；schema 版本 post-`87f99ac`，旧 unknown 分类基线永不命中）+ 从 tradeoff CSV 蒸馏候选行（含 `affected_reactions` 供 D2 重分类）的纯函数；② 服务 `strain_baseline_service`（按 run 口径算指纹读缓存 / 诚实报未构建 / CSV 蒸馏 ingest）；③ 后台构建接线：并行筛查工具加口径参数（`--carbon-source/--media-type/--misfolding/--ribosome`，默认逐字不变）+ 完成后写 `caliber.json` 并蒸馏进指纹缓存。测试 8（引擎）+4（服务）绿；2 基因 hLF 真跑闭环（口径 threading→CSV→缓存→服务读回）验过；真实 2050 行筛查 CSV 蒸馏验过。**原 D4"改造后为基线全量 L3"**改列 D4b（见下，复用不可信时的兜底、后置）。
+- [x] **D2 受影响层判定 + 打标（L1，零求解）**（本地，待 push）：`app/services/per_strain_layer_reuse.py`——把 LP 瓶颈（classify 英文键）与筛查候选（gene_perturbation_map 展示标签）都经 `PROCESS_LABELS` 桥归并到**粗分泌模块**（folding/glycosylation/transport/…）同粒度比；受影响模块 = 野生型∪改造后瓶颈模块 ∪ 保守模块（metabolic/unknown 恒纳入）；分泌专属且两态都不 binding 的层 → 可复用，其余 → 已失效。5 单测绿。
+- [~] **D3 分层短名单编排**：**L1 已做**（本地，待 push）`app/services/per_strain_shortlist_run.py::build_modified_strain_shortlist`——读 D4 基线短名单（OE+KO 各取 ratio>1 top-N）+ 一次野生型 + 一次改造后瓶颈（C2）+ D2 打标；未命中基线 → 诚实报 `needs_baseline_build`。3 单测绿（真 D4 读 + 真 D2 打标、仅 mock C2 solve）。**L2 待做**：只对已失效候选按改造后重算（OE 复用 R2 sweep、KO 复用 D1 `run_knockout_screen`，都带 `strain_modifications`）、与复用值合并重排。
+- [ ] **D5 UI 整合**：仿真验证结果页——改造后候选面板（OE+KO 短名单 + 复用/失效标注 + L1/L2/L3 触发 + caveat + `needs_baseline_build` 指引）。
 - [ ] **D6 测试 + 验证 + 文档**。
+- [ ] **D4b 改造后全量 L3（兜底、后置）**：复用不可信时，以改造后为基线全基因组重跑 + 按菌株指纹缓存（需把 `strain_modifications` 接进 `genome_wide_tradeoff` 路径，hour-scale）。仅作 escape hatch，L1/L2 复用是默认。
 
-交付顺序（增量可用）：D1 + D2/D3 的 L1（KO 引擎 + 打标 + 即时复用）先给日常快速价值 → D4 L3 后台全量 → D5 UI 收口。边界：复用近似须标注失效范围（不隐藏）；KO 必求解；全量层后台+缓存；相对信号、glucose 基准不动、不换默认 solver、绝对容量恒 `unavailable`。
+交付顺序（更正后）：**D4 复用地基先行**（已完成）→ D2/D3 的 L1（打标 + 即时复用）给日常快速价值 → L2 按需重算 → D5 UI 收口 → D4b L3 兜底后置。边界：复用近似须标注失效范围（不隐藏）；KO 必求解；全量层后台+缓存；相对信号、glucose 基准不动、不换默认 solver、绝对容量恒 `unavailable`。
 
 ## 阶段③ RNA-seq 表达约束建模（待启动 · 数据门控）
 

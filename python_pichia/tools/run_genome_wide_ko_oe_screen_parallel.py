@@ -53,6 +53,12 @@ from pcsec_pichia.screens.genome_wide_tradeoff import (  # noqa: E402
 )
 from pcsec_pichia.screens.gene_interventions import plan_gene_knockout, plan_gene_overexpression  # noqa: E402
 from pcsec_pichia.screens._prototype_adapter import build_supported_target_model, build_target_enzymedata  # noqa: E402
+from pcsec_pichia.strain_baseline_cache import (  # noqa: E402
+    StrainBaselineCacheKey,
+    cache_key_digest,
+    distill_tradeoff_rows,
+    store_baseline,
+)
 from pcsec_pichia.targets import load_builtin_targets  # noqa: E402
 
 CSV_FIELDS = [
@@ -88,12 +94,23 @@ CSV_FIELDS = [
 _WORKER: dict[str, Any] = {}
 
 
-def _worker_init(repo_root_str: str) -> None:
-    """Runs once per worker process: load the model a single time."""
+def _worker_init(repo_root_str: str, caliber: dict[str, Any]) -> None:
+    """Runs once per worker process: load the model (at the run caliber) a single time.
+
+    ``caliber`` carries the碳源/培养基/兼容口径 (for `load_pcsec_pichia_inputs`) plus the折叠/翻译
+    约束档 flags (threaded into every tradeoff solve so wildtype baseline and perturbed rows share the
+    same regime). Defaults reproduce the prior wildtype/glucose/constraints-off behavior byte-for-byte.
+    """
     root = Path(repo_root_str)
-    inputs = load_pcsec_pichia_inputs(root)
+    inputs = load_pcsec_pichia_inputs(
+        root,
+        media_type=int(caliber["media_type"]),
+        compatibility_mode=caliber["compatibility_mode"],
+        carbon_source_id=caliber["carbon_source_id"],
+    )
     _WORKER["root"] = root
     _WORKER["inputs"] = inputs
+    _WORKER["caliber"] = caliber
     _WORKER["targets_by_id"] = {target.target_id: target for target in load_builtin_targets(root)}
     _WORKER["target_cache"] = {}
 
@@ -116,8 +133,11 @@ def _prepare_target(target_id: str, mode: str, reference_growth_rate: float) -> 
     target_combined = inputs.combined.with_target(target_enzymedata)
     complex_subunits = getattr(inputs.secretory, "complex_subunits", None)
     mu_points = mu_points_for_mode(reference_growth_rate, mode)
+    caliber = _WORKER["caliber"]
     baseline_by_mu = wildtype_secretion_by_mu(
-        build.model, build.exchange_reaction_id, inputs.metabolic, target_secretory, target_combined, mu_points
+        build.model, build.exchange_reaction_id, inputs.metabolic, target_secretory, target_combined, mu_points,
+        write_ribosome_translation_constraint=caliber["write_ribosome_translation_constraint"],
+        write_misfolding_constraints=caliber["write_misfolding_constraints"],
     )
     wt_feasible = [
         {"mu": mu, "success": entry["success"], "secretion_flux": entry["objective_value"]}
@@ -205,17 +225,24 @@ def _run_one_gene(target_id: str, gene_id: str, mode: str, reference_growth_rate
     """Task function executed in a worker process for one (target, gene) pair."""
     prepared = _prepare_target(target_id, mode, reference_growth_rate)
     model = prepared["model"]
+    caliber = _WORKER["caliber"]
+    constraint_kwargs = {
+        "write_ribosome_translation_constraint": caliber["write_ribosome_translation_constraint"],
+        "write_misfolding_constraints": caliber["write_misfolding_constraints"],
+    }
     ko_plan = plan_gene_knockout(model, gene_id)
     oe_plan = plan_gene_overexpression(model, gene_id, complex_subunits=prepared["complex_subunits"])
 
     ko_row = gene_ko_tradeoff(
         model, gene_id, ko_plan, prepared["exchange_reaction_id"], prepared["metabolic"],
         prepared["target_secretory"], prepared["target_combined"], prepared["mu_points"], prepared["complex_subunits"],
+        **constraint_kwargs,
     )
     oe_row = gene_oe_tradeoff(
         model, gene_id, oe_plan, prepared["exchange_reaction_id"], prepared["metabolic"],
         prepared["target_secretory"], prepared["target_combined"], prepared["mu_points"], prepared["baseline_by_mu"],
         prepared["complex_subunits"],
+        **constraint_kwargs,
     )
     rows = []
     for row in (ko_row, oe_row):
@@ -236,15 +263,22 @@ def _run_one_catalog_reaction(target_id: str, candidate: dict[str, Any], mode: s
     """
     prepared = _prepare_target(target_id, mode, reference_growth_rate)
     model = prepared["model"]
+    caliber = _WORKER["caliber"]
+    constraint_kwargs = {
+        "write_ribosome_translation_constraint": caliber["write_ribosome_translation_constraint"],
+        "write_misfolding_constraints": caliber["write_misfolding_constraints"],
+    }
     common_args = (
         candidate["reaction_id"], candidate["common_name"], candidate["category"],
         prepared["exchange_reaction_id"], prepared["metabolic"], prepared["target_secretory"],
         prepared["target_combined"], prepared["mu_points"],
     )
     if candidate["intervention_type"] == "KO":
-        row = reaction_ko_tradeoff(model, *common_args, prepared["complex_subunits"])
+        row = reaction_ko_tradeoff(model, *common_args, prepared["complex_subunits"], **constraint_kwargs)
     else:
-        row = reaction_oe_tradeoff(model, *common_args, prepared["baseline_by_mu"], prepared["complex_subunits"])
+        row = reaction_oe_tradeoff(
+            model, *common_args, prepared["baseline_by_mu"], prepared["complex_subunits"], **constraint_kwargs
+        )
     row["target_id"] = target_id
     _attach_wildtype(row, prepared["wildtype_best"])
     return [row]
@@ -263,6 +297,7 @@ def _run_one_complex_hypothesis_target(target_id: str, gene_ids: list[str], mode
     """
     prepared = _prepare_target(target_id, mode, reference_growth_rate)
     model = prepared["model"]
+    caliber = _WORKER["caliber"]
     candidates = resolve_complex_subunit_oe_hypothesis_candidates(model, gene_ids, prepared["complex_subunits"])
     rows = []
     for candidate in candidates:
@@ -270,6 +305,8 @@ def _run_one_complex_hypothesis_target(target_id: str, gene_ids: list[str], mode
             model, candidate["reaction_id"], candidate["common_name"], candidate["category"],
             prepared["exchange_reaction_id"], prepared["metabolic"], prepared["target_secretory"],
             prepared["target_combined"], prepared["mu_points"], prepared["baseline_by_mu"], prepared["complex_subunits"],
+            write_ribosome_translation_constraint=caliber["write_ribosome_translation_constraint"],
+            write_misfolding_constraints=caliber["write_misfolding_constraints"],
             candidate_kind="complex_oe_hypothesis", hypothesis_note=COMPLEX_OE_HYPOTHESIS_ASSUMPTION,
         )
         row["target_id"] = target_id
@@ -318,6 +355,48 @@ def _load_standard_name_lookup(root: Path, gene_ids: list[str] | tuple[str, ...]
     return build_standard_name_lookup(rows)
 
 
+def _finalize_baseline_cache(
+    csv_path: Path,
+    target_ids: list[str],
+    caliber: dict[str, Any],
+    reference_growth_rate: float,
+    mode: str,
+    run_name: str,
+    root: Path,
+) -> list[dict[str, Any]]:
+    """把 gene 全量 scope 的结果蒸馏进口径指纹基线缓存（每 target 一份）。
+
+    只对野生型全量基线做（scope=gene）；口径指纹涵盖 target·碳源·培养基·μ·mode·折叠/翻译约束档·兼容口径，
+    供"改造后候选面板 / 分层复用"按同一口径读取（见 strain_baseline_cache / strain_baseline_service）。
+    """
+    cache_dir = root / "local_runs" / "strain_baseline_cache"
+    with csv_path.open("r", newline="", encoding="utf-8") as handle:
+        records = list(csv.DictReader(handle))
+    summaries: list[dict[str, Any]] = []
+    for target_id in target_ids:
+        key = StrainBaselineCacheKey(
+            target_id=target_id,
+            carbon_source_id=caliber["carbon_source_id"],
+            media_type=int(caliber["media_type"]),
+            growth_rate=float(reference_growth_rate),
+            write_ribosome_translation_constraint=caliber["write_ribosome_translation_constraint"],
+            write_misfolding_constraints=caliber["write_misfolding_constraints"],
+            mode=mode,
+            compatibility_mode=caliber["compatibility_mode"],
+        )
+        rows = distill_tradeoff_rows(records, target_id=target_id)
+        stored = store_baseline(key, rows, cache_dir, source_run=run_name)
+        summaries.append(
+            {
+                "target_id": target_id,
+                "candidate_count": len(rows),
+                "cache_key_digest": cache_key_digest(key),
+                "path": str(stored),
+            }
+        )
+    return summaries
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--targets", default="hLF,OPN_ALPHA_FULL_PROJECT")
@@ -327,6 +406,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--genes", default=None)
     parser.add_argument("--workers", type=int, default=6)
     parser.add_argument("--run-name", required=True)
+    # 口径参数（D4 复用地基）：默认复现既往野生型 / glucose / 约束档关的行为，逐字不变。
+    parser.add_argument("--carbon-source", default="glucose", help="碳源 id（口径的一部分；默认 glucose）。")
+    parser.add_argument("--media-type", type=int, default=4, help="培养基类型（口径的一部分；默认 4）。")
+    parser.add_argument("--compatibility-mode", default="corrected", help="兼容口径（默认 corrected）。")
+    parser.add_argument("--misfolding", action="store_true", help="开启错误折叠约束档（口径的一部分）。")
+    parser.add_argument("--ribosome", action="store_true", help="开启核糖体翻译约束档（口径的一部分）。")
+    parser.add_argument(
+        "--no-baseline-cache",
+        action="store_true",
+        help="跳过完成后把结果蒸馏进口径指纹基线缓存（默认 gene 全量 scope 会写，供改造后候选面板 / 分层复用读取）。",
+    )
     parser.add_argument(
         "--scope",
         choices=["gene", "catalog", "complex_hypothesis"],
@@ -358,6 +448,13 @@ def main(args: argparse.Namespace | None = None) -> None:
 
     _write_status(status_path, status="starting", pid=os.getpid(), done=0, total=0, message="loading model...")
     target_ids = [target_id.strip() for target_id in args.targets.split(",") if target_id.strip()]
+    caliber = {
+        "carbon_source_id": args.carbon_source,
+        "media_type": args.media_type,
+        "compatibility_mode": args.compatibility_mode,
+        "write_ribosome_translation_constraint": bool(args.ribosome),
+        "write_misfolding_constraints": bool(args.misfolding),
+    }
 
     if args.scope == "catalog":
         print(f"[{time.strftime('%H:%M:%S')}] loading model and curated catalog candidates...")
@@ -434,7 +531,7 @@ def main(args: argparse.Namespace | None = None) -> None:
     task_fns = {"catalog": _run_one_catalog_reaction, "complex_hypothesis": _run_one_complex_hypothesis_target}
     task_fn = task_fns.get(args.scope, _run_one_gene)
     with csv_path.open("w", newline="", encoding="utf-8") as csv_file, ProcessPoolExecutor(
-        max_workers=args.workers, initializer=_worker_init, initargs=(str(root),)
+        max_workers=args.workers, initializer=_worker_init, initargs=(str(root), caliber)
     ) as pool:
         writer = csv.DictWriter(csv_file, fieldnames=CSV_FIELDS)
         writer.writeheader()
@@ -478,10 +575,34 @@ def main(args: argparse.Namespace | None = None) -> None:
 
     total_elapsed = time.time() - t0
     print(f"[{time.strftime('%H:%M:%S')}] all done in {total_elapsed/60:.1f} minutes. wrote {csv_path}")
+
+    # 口径 provenance + 基线缓存收尾（D4）：只对野生型 gene 全量 scope，蒸馏进口径指纹缓存供面板/分层复用读。
+    baseline_cache_summaries: list[dict[str, Any]] = []
+    caliber_record = {
+        **caliber,
+        "reference_growth_rate": args.reference_growth_rate,
+        "mode": args.mode,
+        "targets": target_ids,
+        "scope": args.scope,
+    }
+    (out_dir / "caliber.json").write_text(
+        json.dumps(caliber_record, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    if args.scope == "gene" and not args.no_baseline_cache:
+        try:  # 缓存收尾失败不该让 hour-scale 的筛查结果白跑——CSV 已安全落盘。
+            baseline_cache_summaries = _finalize_baseline_cache(
+                csv_path, target_ids, caliber, args.reference_growth_rate, args.mode, args.run_name, root
+            )
+            print(f"[{time.strftime('%H:%M:%S')}] baseline cache written: {baseline_cache_summaries}")
+        except Exception as exc:  # noqa: BLE001 - surface but do not fail the completed screen
+            print(f"[WARN] baseline cache finalize failed: {exc!r}")
+            errors.append(f"baseline_cache_finalize: {exc!r}")
+
     _write_status(
         status_path, status="done", pid=os.getpid(), done=total, total=total,
         elapsed_minutes=round(total_elapsed / 60, 1), csv_path=str(csv_path), error_count=len(errors),
         errors=errors[:50], targets=target_ids, mode=args.mode, scope=args.scope,
+        baseline_cache=baseline_cache_summaries,
     )
 
 
