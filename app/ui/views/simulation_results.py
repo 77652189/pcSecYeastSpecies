@@ -15,6 +15,7 @@ from app.services.pichia_background_tasks import (
 )
 from app.core.i18n import sim_result_column_label, sim_result_value_label, sim_result_warning_label
 from app.services.per_strain_oe_candidate_run import run_next_oe_candidate_analysis
+from app.services.per_strain_shortlist_run import build_modified_strain_shortlist, recompute_stale_candidates
 from app.ui.common import PATHS
 from app.ui.views.candidate_path_graph import render_secretion_path_graph
 from app.ui.views.simulation_display import (
@@ -160,6 +161,7 @@ def render_pichia_results() -> None:
     if protein_cost:
         _render_protein_cost_analysis(protein_cost)
     _render_next_oe_candidates(data)
+    _render_modified_strain_shortlist(data)
     target_growth = _target_growth_payload(data)
     if target_growth:
         _render_target_growth_analysis(target_growth)
@@ -447,6 +449,127 @@ def _render_next_oe_candidates_result(readout: dict[str, object]) -> None:
     if floors:
         st.caption(f"另有 {len(floors)} 个 binding 下限 floor（如折叠/翻译最低需求）——OE 松不动，不列为候选。")
     for warning in readout.get("modification_warnings") or []:
+        st.warning(str(warning))
+
+
+_REUSE_MODULE_LABELS = {
+    "folding": "折叠", "glycosylation": "糖基化", "transport": "转运", "translation": "翻译",
+    "degradation": "降解", "secretory_capacity": "分泌容量", "metabolic": "代谢/其它", "unknown": "未解析",
+}
+
+
+def _reuse_module_label(module: object) -> str:
+    return _REUSE_MODULE_LABELS.get(str(module or ""), str(module or "—"))
+
+
+def _reuse_status_label(reuse_status: object, recompute_status: object) -> str:
+    if recompute_status == "recomputed":
+        return "🔄 已重算"
+    if recompute_status == "recompute_failed":
+        return "⚠ 重算失败(回退野生型)"
+    if reuse_status == "reusable":
+        return "✅ 可复用"
+    if reuse_status == "stale":
+        return "⚠ 已失效(待重算)"
+    return "—"
+
+
+def _render_modified_strain_shortlist(data: dict[str, object]) -> None:
+    """改造后候选短名单（OE+KO · 分层复用 · ADR-004 #1 迭代2 D5）。
+
+    复用同口径**野生型全基因组基线**的短名单，只对受改造影响的分泌层重算、其余复用（L1 打标 → L2 重算）。
+    复用 `pichia_last_run_modifications` 暂存；未命中该口径的后台基线 → 诚实指引先跑后台构建。
+    """
+    mods = st.session_state.get("pichia_last_run_modifications")
+    with st.expander("改造后候选短名单（OE + KO · 分层复用）", expanded=False):
+        st.caption(
+            "复用同口径**野生型全基因组基线**的 OE+KO 短名单，只对受改造影响的分泌层重算、其余直接复用——"
+            "给改造后菌株一份带「可复用 / 已失效」标注的下一步候选。复用是近似：只对与瓶颈无关的**分泌专属层**"
+            "（折叠/糖基化/转运等）干净有效，**代谢层保守重算**。相对信号、非绝对产量。"
+        )
+        if not isinstance(mods, dict) or not mods.get("target_id"):
+            st.info("先在「仿真构建」页运行一次仿真，这里就能基于同一株算改造后候选短名单。")
+            return
+        if not mods.get("target_is_builtin"):
+            st.info("改造后候选短名单目前仅支持内置目标（hLF / OPN）。")
+            return
+
+        oe_rx = [str(r) for r in (mods.get("oe_reaction_ids") or [])]
+        ko_rx = [str(r) for r in (mods.get("ko_reaction_ids") or [])]
+        if st.button("构建改造后候选短名单（复用地基 + 打标，约数十秒）", key="pichia_modified_shortlist_build_button"):
+            with st.spinner("读野生型基线 + 解野生型/改造后瓶颈 + 受影响层打标…"):
+                st.session_state["pichia_modified_shortlist_result"] = build_modified_strain_shortlist(
+                    target_id=str(mods.get("target_id")),
+                    ko_reaction_ids=tuple(ko_rx),
+                    oe_reaction_ids=tuple(oe_rx),
+                    mu=float(mods.get("mu") or 0.10),
+                    media_type=int(mods.get("media_type") or 4),
+                    carbon_source_id=str(mods.get("carbon_source_id") or "glucose"),
+                    enable_ribosome_translation_constraint=bool(mods.get("enable_ribosome")),
+                    enable_misfolding_constraint=bool(mods.get("enable_misfolding")),
+                )
+                st.session_state.pop("pichia_modified_shortlist_l2", None)  # 新 L1 → 清掉旧 L2
+
+        readout = st.session_state.get("pichia_modified_shortlist_result")
+        if not isinstance(readout, dict):
+            return
+        if not readout.get("available"):
+            st.warning(
+                "该口径下还没有**野生型全基因组后台基线**，无法复用。请先在此口径跑一次后台构建"
+                "（`tools/run_genome_wide_ko_oe_screen_parallel.py`，hour-scale、跑完自动落口径指纹缓存），再回来构建短名单。"
+            )
+            return
+
+        l2 = st.session_state.get("pichia_modified_shortlist_l2")
+        shown = l2 if isinstance(l2, dict) else readout
+        _render_modified_shortlist_result(shown)
+
+        stale_total = int(readout.get("oe_stale_count", 0)) + int(readout.get("ko_stale_count", 0))
+        if not isinstance(l2, dict) and stale_total:
+            if st.button(
+                f"重算已失效候选（{stale_total} 个，会额外求解）", key="pichia_modified_shortlist_l2_button"
+            ):
+                with st.spinner("在改造后菌株上重算已失效候选（OE 剂量响应 + KO 扰动）…"):
+                    st.session_state["pichia_modified_shortlist_l2"] = recompute_stale_candidates(readout)
+                st.rerun()
+
+
+def _render_modified_shortlist_result(readout: dict[str, object]) -> None:
+    layer = str(readout.get("layer") or "L1")
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.metric("层级", "L2（已重算失效项）" if layer == "L2" else "L1（即时复用）")
+    with c2:
+        st.metric("改造后瓶颈层", "、".join(_reuse_module_label(m) for m in (readout.get("modified_bottleneck_modules") or [])) or "—")
+    with c3:
+        st.metric("受影响层", "、".join(_reuse_module_label(m) for m in (readout.get("affected_modules") or [])) or "—")
+
+    for title, key, reusable_key, stale_key in (
+        ("OE 候选", "oe_candidates", "oe_reusable_count", "oe_stale_count"),
+        ("KO 候选", "ko_candidates", "ko_reusable_count", "ko_stale_count"),
+    ):
+        candidates = [c for c in (readout.get(key) or []) if isinstance(c, dict)]
+        st.markdown(f"**{title}**（可复用 {readout.get(reusable_key, 0)} · 已失效 {readout.get(stale_key, 0)}）")
+        if not candidates:
+            st.caption("（无有实质提升的候选。）")
+            continue
+        rows: list[dict[str, object]] = []
+        for rank, candidate in enumerate(candidates, 1):
+            effect = candidate.get("effective_effect", candidate.get("wildtype_effect"))
+            rows.append(
+                {
+                    "排名": rank,
+                    "候选": candidate.get("candidate") or candidate.get("gene_id") or "—",
+                    "分泌层": _reuse_module_label(candidate.get("reuse_module")),
+                    "复用状态": _reuse_status_label(candidate.get("reuse_status"), candidate.get("recompute_status")),
+                    "相对效应": f"{float(effect) * 100:.2f}%" if isinstance(effect, (int, float)) else "—",
+                }
+            )
+        st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+
+    if readout.get("caveat"):
+        st.caption(f"• {readout['caveat']}")
+    for warning in readout.get("recompute_warnings") or []:
         st.warning(str(warning))
 
 

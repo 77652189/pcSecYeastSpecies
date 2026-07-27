@@ -176,7 +176,114 @@ def build_modified_strain_shortlist(
     }
 
 
+def _split_reactions(affected_reactions: object) -> list[str]:
+    if not affected_reactions:
+        return []
+    return [r.strip() for r in str(affected_reactions).split(";") if r.strip()]
+
+
+def _recompute_effects(**kwargs: Any) -> dict[str, Any]:
+    """薄壳：调 C2/L2 引擎重算（懒 import，方便单测 monkeypatch）。"""
+    from pcsec_pichia.next_oe_candidates import recompute_modified_strain_candidate_effects
+
+    return recompute_modified_strain_candidate_effects(**kwargs)
+
+
+def _apply_recomputed(
+    candidates: Sequence[dict[str, Any]],
+    effects: dict[str, float],
+    *,
+    by: str,
+) -> list[dict[str, Any]]:
+    """把改造后重算效应并回候选并按有效效应重排（纯装配）。
+
+    已失效且拿到重算值 → `effective_effect` = 改造后效应、`recompute_status="recomputed"`；已失效但无值
+    （改造后不可行 / 缺）→ 回退野生型值 + `recompute_status="recompute_failed"`（显式标，不假装重算过）；
+    可复用 → `effective_effect` = 野生型值、`recompute_status="reused"`。
+    """
+    merged: list[dict[str, Any]] = []
+    for candidate in candidates:
+        row = dict(candidate)
+        wildtype_effect = float(row.get("wildtype_effect") or 0.0)
+        if row.get("reuse_status") == "stale":
+            keys = _split_reactions(row.get("affected_reactions")) if by == "reactions" else [row.get("gene_id")]
+            recomputed = [effects[k] for k in keys if k and k in effects]
+            if recomputed:
+                effect = max(recomputed) if by == "reactions" else recomputed[0]
+                row["modified_effect"] = effect
+                row["effective_effect"] = effect
+                row["recompute_status"] = "recomputed"
+            else:
+                row["effective_effect"] = wildtype_effect
+                row["recompute_status"] = "recompute_failed"
+        else:
+            row["effective_effect"] = wildtype_effect
+            row["recompute_status"] = "reused"
+        merged.append(row)
+    merged.sort(key=lambda r: r.get("effective_effect") or 0.0, reverse=True)
+    return merged
+
+
+def recompute_stale_candidates(
+    l1_readout: dict[str, Any],
+    *,
+    dose_response_factors: Sequence[float] = (),
+    root: Path | None = None,
+    _recompute: Callable[..., dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """L2：对 L1 里已失效候选在改造后菌株上重算（OE 复用 R2、KO 复用 D1），与复用值合并重排。
+
+    未命中基线（L1 已诚实报缺）→ 原样透传。`_recompute` 仅供测试注入。
+    """
+    if not l1_readout.get("available"):
+        return dict(l1_readout)
+    caliber = l1_readout.get("caliber") or {}
+    mods = l1_readout.get("applied_modifications") or {}
+    oe_candidates = l1_readout.get("oe_candidates") or []
+    ko_candidates = l1_readout.get("ko_candidates") or []
+
+    stale_oe_reactions = [
+        reaction
+        for candidate in oe_candidates
+        if candidate.get("reuse_status") == "stale"
+        for reaction in _split_reactions(candidate.get("affected_reactions"))
+    ]
+    stale_ko_genes = [
+        candidate["gene_id"]
+        for candidate in ko_candidates
+        if candidate.get("reuse_status") == "stale" and candidate.get("gene_id")
+    ]
+
+    recompute = _recompute or _recompute_effects
+    effects = recompute(
+        target_id=l1_readout.get("target_id"),
+        ko_reaction_ids=tuple(mods.get("ko_reaction_ids") or ()),
+        oe_reaction_ids=tuple(mods.get("oe_reaction_ids") or ()),
+        oe_factor=float(mods.get("oe_factor") or 2.0),
+        stale_oe_reactions=stale_oe_reactions,
+        stale_ko_genes=stale_ko_genes,
+        mu=float(caliber.get("growth_rate", 0.10)),
+        media_type=int(caliber.get("media_type", 4)),
+        carbon_source_id=str(caliber.get("carbon_source_id", "glucose")),
+        compatibility_mode=str(caliber.get("compatibility_mode", "corrected")),
+        enable_ribosome_translation_constraint=bool(caliber.get("write_ribosome_translation_constraint", False)),
+        enable_misfolding_constraint=bool(caliber.get("write_misfolding_constraints", False)),
+        dose_response_factors=tuple(dose_response_factors),
+        root=root,
+    )
+    return {
+        **l1_readout,
+        "layer": "L2",
+        "oe_candidates": _apply_recomputed(oe_candidates, effects.get("oe_effects") or {}, by="reactions"),
+        "ko_candidates": _apply_recomputed(ko_candidates, effects.get("ko_effects") or {}, by="gene"),
+        "recomputed_oe_count": effects.get("recomputed_oe_count", 0),
+        "recomputed_ko_count": effects.get("recomputed_ko_count", 0),
+        "recompute_warnings": list(effects.get("warnings") or []),
+    }
+
+
 __all__ = [
     "DEFAULT_SHORTLIST_TOP_N",
     "build_modified_strain_shortlist",
+    "recompute_stale_candidates",
 ]

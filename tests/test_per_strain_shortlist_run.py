@@ -3,7 +3,11 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 
-from app.services.per_strain_shortlist_run import build_modified_strain_shortlist
+from app.services.per_strain_shortlist_run import (
+    _apply_recomputed,
+    build_modified_strain_shortlist,
+    recompute_stale_candidates,
+)
 from app.services.strain_baseline_service import ingest_tradeoff_csv_into_baseline_cache
 
 from pcsec_pichia.screens.gene_perturbation_map import PROCESS_LABELS
@@ -112,3 +116,72 @@ def test_shortlist_drops_non_improving_and_respects_top_n(tmp_path) -> None:
     assert len(out["oe_candidates"]) == 1
     assert out["oe_candidates"][0]["gene_id"] == "G_oe_fold"  # 效应最大（1.30-1）
     assert all(c["gene_id"] != "G_oe_flat" for c in out["oe_candidates"])  # ratio<=1 剔除
+
+
+def _l1(tmp_path) -> dict:
+    _ingest_baseline(tmp_path)
+    return build_modified_strain_shortlist(
+        oe_reaction_ids=("sec_Pdi1p_complex_formation",), cache_dir=tmp_path, _analyze=_fake_analyze, **_CALIBER
+    )
+
+
+def test_l2_recompute_merges_modified_effects_and_reranks(tmp_path) -> None:
+    l1 = _l1(tmp_path)
+
+    def fake_recompute(*, stale_oe_reactions, stale_ko_genes, **kwargs) -> dict:
+        # 只有已失效候选的反应/基因被送来重算（可复用的 transport 不在其中）。
+        assert "r_pdi" in stale_oe_reactions and "r_pgk" in stale_oe_reactions
+        assert "r_sec4" not in stale_oe_reactions  # transport 可复用、不重算
+        assert stale_ko_genes == ["G_ko_fold"]
+        return {
+            "oe_effects": {"r_pdi": 0.50, "r_pgk": 0.05},  # 改造后：folding 更强、metabolic 很弱
+            "ko_effects": {"G_ko_fold": 0.30},
+            "recomputed_oe_count": 2, "recomputed_ko_count": 1, "warnings": [],
+        }
+
+    out = recompute_stale_candidates(l1, _recompute=fake_recompute)
+    assert out["layer"] == "L2"
+    assert out["recomputed_oe_count"] == 2 and out["recomputed_ko_count"] == 1
+
+    oe = {c["gene_id"]: c for c in out["oe_candidates"]}
+    assert oe["G_oe_fold"]["recompute_status"] == "recomputed" and oe["G_oe_fold"]["effective_effect"] == 0.50
+    assert oe["G_oe_metab"]["recompute_status"] == "recomputed" and oe["G_oe_metab"]["effective_effect"] == 0.05
+    assert oe["G_oe_trans"]["recompute_status"] == "reused"  # 复用野生型效应
+    assert abs(oe["G_oe_trans"]["effective_effect"] - 0.20) < 1e-9
+    # 重排：改造后 folding(0.50) > transport 复用(0.20) > metabolic 重算(0.05)
+    assert [c["gene_id"] for c in out["oe_candidates"]] == ["G_oe_fold", "G_oe_trans", "G_oe_metab"]
+
+    ko = {c["gene_id"]: c for c in out["ko_candidates"]}
+    assert ko["G_ko_fold"]["recompute_status"] == "recomputed" and ko["G_ko_fold"]["effective_effect"] == 0.30
+    assert ko["G_ko_trans"]["recompute_status"] == "reused"
+
+
+def test_l2_marks_recompute_failed_when_effect_missing(tmp_path) -> None:
+    l1 = _l1(tmp_path)
+    # 改造后不可行 → 引擎返回空效应；已失效候选应标 recompute_failed 并回退野生型值（不假装重算过）。
+    out = recompute_stale_candidates(
+        l1,
+        _recompute=lambda **k: {"oe_effects": {}, "ko_effects": {}, "recomputed_oe_count": 0, "recomputed_ko_count": 0, "warnings": ["改造后不可行"]},
+    )
+    oe = {c["gene_id"]: c for c in out["oe_candidates"]}
+    assert oe["G_oe_fold"]["recompute_status"] == "recompute_failed"
+    assert abs(oe["G_oe_fold"]["effective_effect"] - 0.30) < 1e-9  # 回退野生型 (1.30-1)
+    assert oe["G_oe_trans"]["recompute_status"] == "reused"
+    assert out["recompute_warnings"] == ["改造后不可行"]
+
+
+def test_l2_passes_through_when_no_baseline() -> None:
+    out = recompute_stale_candidates({"available": False, "needs_baseline_build": True, "oe_candidates": []})
+    assert out["available"] is False and out.get("layer") != "L2"
+
+
+def test_apply_recomputed_pure_reuse_and_rerank() -> None:
+    candidates = [
+        {"gene_id": "S", "affected_reactions": "rS", "reuse_status": "stale", "wildtype_effect": 0.1},
+        {"gene_id": "R", "affected_reactions": "rR", "reuse_status": "reusable", "wildtype_effect": 0.4},
+    ]
+    merged = _apply_recomputed(candidates, {"rS": 0.9}, by="reactions")
+    by_gene = {c["gene_id"]: c for c in merged}
+    assert by_gene["S"]["effective_effect"] == 0.9 and by_gene["S"]["recompute_status"] == "recomputed"
+    assert by_gene["R"]["effective_effect"] == 0.4 and by_gene["R"]["recompute_status"] == "reused"
+    assert [c["gene_id"] for c in merged] == ["S", "R"]  # 重算后 S(0.9) 超过复用的 R(0.4)
