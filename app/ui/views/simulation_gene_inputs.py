@@ -61,52 +61,90 @@ class GenePerturbationFormState:
         return parse_candidate_text(self.oe_reaction_text)
 
 
+def _has_text(session_key: str) -> bool:
+    return bool(str(st.session_state.get(session_key) or "").strip())
+
+
 def render_gene_perturbation_form(target_id: str) -> GenePerturbationFormState:
+    """基因扰动输入。
+
+    分层原则（2026-07-28 重排）：主输入（KO/OE **基因**）紧跟在页面顶部，反应级扰动降为"高级"、
+    找基因的帮手收进一行折叠入口。此前是三个展开的辅助面板 + 长说明挡在输入框前面、四个框平权
+    并列，研究员看不出该填哪个。
+
+    **帮手面板必须留在输入框之前**（只是折叠起来）：它的"加入 KO/OE 输入"按钮会写
+    `st.session_state["pichia_draft_ko_genes"]`，而 Streamlit 不允许在同名 key 的控件实例化之后
+    再改它的 session_state。把它挪到输入框下面会让那个按钮报错——`test_hlf_opn_candidate_panel_
+    is_embedded_before_gene_textareas` 锁的就是这条，别"顺手"调换顺序。
+
+    session_state 的 key 一律不变——`apply_simulation_prefill` 靠它们从筛查页填入候选。
+    """
     with st.expander("基因扰动", expanded=True):
-        st.caption("可以从基因库选择，也可以手动输入。多个条目用逗号、分号或换行分隔；单次最多 20 个候选。")
-        render_hlf_opn_candidate_panel(target_id)
-        render_gene_lookup_panel()
-        with st.expander("输入说明", expanded=False):
-            st.markdown(
-                "- 敲除基因：正式基因级 KO，填写模型基因 ID，例如 `PAS_chr2-2_0107`；系统按 GPR 规则关闭会失活的反应。\n"
-                "- 敲除反应：用于没有明确基因 ID 的复合体级扰动，例如 `sec_Och1p_complex_formation`。\n"
-                "- 过表达基因：先做 GPR-aware 规划，只有单基因/同工酶等可解释场景才运行 reaction-level OE proxy。\n"
-                "- 过表达反应：高级诊断入口，直接填写模型反应 ID，不代表完整基因表达调控模型。"
-            )
+        # 反应级候选（策展库 / 复合体假设）会被预填进下面的高级区；若真被填了就必须自动展开，
+        # 否则用户从筛查页点"在仿真验证中核实"跳来只看到两个空的基因框，会以为跳转没生效。
+        reaction_prefilled = _has_text("pichia_draft_ko_reactions") or _has_text("pichia_draft_oe_reactions")
+
+        # 折叠成一行入口，展开才出内容——此前这两个面板默认展开、把输入框挤到屏幕外。
+        # 位置必须在下面的输入框之前，原因见本函数 docstring（"加入 KO/OE 输入"要写 session_state）。
+        with st.expander("不知道基因 ID？在这里查找 / 从候选库挑", expanded=False):
+            render_hlf_opn_candidate_panel(target_id)
+            render_gene_lookup_panel()
+
+        st.caption(
+            "最常用：填要敲除或过表达的**模型基因 ID**。从「全基因组KO/OE筛查」点“在仿真验证中核实”"
+            "会自动填好这里，不用手抄。多个条目用逗号、分号或换行分隔；单次最多 20 个候选。"
+        )
         ko_text = st.text_area(
             "敲除基因（KO gene）",
             height=60,
             key="pichia_draft_ko_genes",
             placeholder="例如：PAS_chr2-2_0107",
-        )
-        ko_rxn = st.text_area(
-            "敲除反应（复合体级 KO）",
-            height=60,
-            key="pichia_draft_ko_reactions",
-            placeholder="例如：sec_Och1p_complex_formation",
+            help="正式基因级 KO：系统按 GPR 规则关闭会失活的反应。",
         )
         oe_text = st.text_area(
             "过表达基因（OE gene proxy）",
             height=60,
             key="pichia_draft_oe_genes",
             placeholder="例如：PAS_chr1-4_0586；会解析为反应级过表达代理",
-        )
-        oe_rxn = st.text_area(
-            "过表达反应（高级 / OE reaction）",
-            height=60,
-            key="pichia_draft_oe_reactions",
-            placeholder="例如：sec_Kar2p_complex_formation",
-        )
-        enable_overlay = st.checkbox(
-            "使用外部证据补充 GPR（实验性，默认关闭）",
-            value=False,
-            key="pichia_enable_gene_rule_overlay",
             help=(
-                "只在 KO/OE 预检和显式运行中使用 Python 侧证据 overlay；"
-                "不会写回原始模型，也不是 MATLAB 原始 GPR。"
+                "先做 GPR-aware 规划，只有单基因 / 同工酶等可解释场景才运行 reaction-level OE proxy；"
+                "复合体亚基默认不做单基因 OE（没有亚基化学计量证据时不虚构容量提升）。"
             ),
         )
-        limit = int(st.number_input("候选数上限", 1, 20, 20, 1, key="pichia_limit"))
+
+        with st.expander(
+            "复合体 / 反应级扰动（高级）" + ("　←　已从筛查页填入，展开可见" if reaction_prefilled else ""),
+            expanded=reaction_prefilled,
+        ):
+            st.caption(
+                "分泌机器（chaperone、糖基化、COPII 等复合体）在模型里**没有 GPR**，只能在反应层面扰动，"
+                "所以这类候选填的是反应 ID 而不是基因 ID。筛查页的复合体级候选会自动填到这里。"
+            )
+            ko_rxn = st.text_area(
+                "敲除反应（复合体级 KO）",
+                height=60,
+                key="pichia_draft_ko_reactions",
+                placeholder="例如：sec_Och1p_complex_formation",
+                help="用于没有明确基因 ID 的复合体级扰动：直接把该复合体形成反应的流量压到 0。",
+            )
+            oe_rxn = st.text_area(
+                "过表达反应（高级 / OE reaction）",
+                height=60,
+                key="pichia_draft_oe_reactions",
+                placeholder="例如：sec_Kar2p_complex_formation",
+                help="高级诊断入口：直接填模型反应 ID，把其 kcat 乘以倍数；不代表完整基因表达调控模型。",
+            )
+            enable_overlay = st.checkbox(
+                "使用外部证据补充 GPR（实验性，默认关闭）",
+                value=False,
+                key="pichia_enable_gene_rule_overlay",
+                help=(
+                    "只在 KO/OE 预检和显式运行中使用 Python 侧证据 overlay；"
+                    "不会写回原始模型，也不是 MATLAB 原始 GPR。"
+                ),
+            )
+            limit = int(st.number_input("候选数上限", 1, 20, 20, 1, key="pichia_limit"))
+
         state = GenePerturbationFormState(
             ko_gene_text=ko_text,
             ko_reaction_text=ko_rxn,
@@ -115,6 +153,7 @@ def render_gene_perturbation_form(target_id: str) -> GenePerturbationFormState:
             candidate_limit=limit,
             enable_gene_rule_overlay=enable_overlay,
         )
+        # 预检按钮紧贴它自己的输出（结果渲染在下方），故放在各输入区之后。
         if st.button("预检 KO/OE 输入", key="pichia_preview_screen_inputs"):
             _render_screen_input_preview(target_id, state)
         return state
