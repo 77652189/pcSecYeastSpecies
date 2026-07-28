@@ -23,6 +23,7 @@ from pathlib import Path
 import pandas as pd
 
 from app import ensure_python_pichia_on_path
+from app.services.gene_name_annotation import safe_gene_display_label
 
 ensure_python_pichia_on_path()
 
@@ -121,12 +122,19 @@ def _oe_shortlist(frame: pd.DataFrame, target_id: str, top_n: int) -> list[dict[
     for _, r in sub.iterrows():
         rows.append(
             {
-                "candidate": str(r.get("common_name") or r.get("gene_id")),
+                # 名字梯队：正式符号 → 标准显示名 → 蛋白描述名 → 策展常用名，位点号始终随行显示
+                # （见 gene_name_annotation.safe_gene_display_label）。此前只回退 common_name，
+                # 基因候选因此常只显示 locus tag，研究员看不出是什么基因。
+                "candidate": safe_gene_display_label(r),
                 "reaction": str(r.get("gene_id")),
                 "layer": str(r.get("secretory_process") or "未解析"),
                 "effect": float(r["effect"]),
                 "growth_retention": float(r.get("growth_retention_ratio") or 1.0),
                 "confidence": str(r.get("mapping_confidence") or ""),
+                # 名字可信度标注：信息量分档、可自查的库 ID、俗名↔位点待复核标记。
+                "annotation_tier": str(r.get("annotation_tier") or ""),
+                "annotation_accession": str(r.get("annotation_accession") or ""),
+                "identity_review": str(r.get("identity_review") or ""),
             }
         )
     return rows

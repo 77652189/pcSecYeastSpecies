@@ -15,6 +15,7 @@ import plotly.express as px
 import streamlit as st
 
 from app.core.i18n import sim_result_column_label, sim_result_value_label, sim_result_warning_label
+from app.services import gene_name_annotation as gene_names
 from app.services import genome_wide_screen_analysis as analysis
 from app.services import genome_wide_screen_service as service
 from app.services import genome_wide_screen_shortlist as shortlist_service
@@ -213,7 +214,10 @@ def _run_option_label(run: RunInfo) -> str:
 # 重建短名单读出，页面会卡到"没有响应"。mtime 入 key，结果文件变了自动失效。
 @st.cache_data(show_spinner=False)
 def _cached_tradeoff_frame(csv_path: str, mtime: float) -> pd.DataFrame:
-    return analysis.load_gene_tradeoff_csv(csv_path)
+    # 基因名在**显示时**补：旧筛查 CSV（命名功能上线前跑的）只有 locus tag `PAS_chr*`，
+    # 研究员看不出是什么基因。这里按 gene_id join 命名标准化缓存补上可读名 + 数据库 ID，
+    # 并按注释档位门控（只显示位点号精确命中的那档）。不改任何可执行 id。
+    return gene_names.annotate_screen_frame(analysis.load_gene_tradeoff_csv(csv_path))
 
 
 @st.cache_data(show_spinner=False)
@@ -441,6 +445,12 @@ def _render_shortlist_readout(readout: dict, *, target_id: str) -> None:
                     "生长保持": round(float(row["growth_retention"]), 3),
                     "证据置信度": sim_result_value_label(row["confidence"]) if row["confidence"] else "—",
                 }
+                # 名字可信度：正式符号 / 描述性注释 / 泛化注释 / 无注释 + 可自查的库 ID。
+                # 让研究员一眼看出"这个名字有多硬"，而不是把自动注释当已知功能。
+                if row.get("annotation_tier"):
+                    entry["名字类型"] = sim_result_value_label(row.get("annotation_tier"))
+                if row.get("annotation_accession"):
+                    entry["数据库 ID"] = str(row.get("annotation_accession"))
                 if dose_available:
                     # 越加越好(线性) / 很快到顶(饱和) / 要过阈值 / 无响应——来自离线剂量响应扫描缓存
                     entry["剂量响应形状"] = sim_result_value_label(row.get("shape")) if row.get("shape") else "—"
@@ -481,6 +491,17 @@ def _render_shortlist_readout(readout: dict, *, target_id: str) -> None:
                 "「相对提升(%)」是模型内部相对量、不是 titer 预测——**同一列内看名次比看绝对数值更靠谱**；"
                 "亚百分比差异（如 0.0x%）勿当噪声直接否掉，它仍是模型给的方向排序。"
             )
+            st.caption(gene_names.GENE_NAME_CAVEAT)
+            unverified = [
+                str(row["candidate"])
+                for row in shortlist
+                if str(row.get("identity_review") or "") == "curated_identity_unverified"
+            ]
+            if unverified:
+                st.warning(
+                    "⚠ 以下候选的**基因身份待复核**（团队俗名与模型位点的对应关系尚未坐实，"
+                    "数据库给出的是该位点真实注释、可能与俗名不是一回事）：" + "、".join(unverified)
+                )
             st.download_button(
                 "⬇️ 导出候选短名单（CSV，Excel 可直接打开）",
                 data=shortlist_frame.to_csv(index=False).encode("utf-8-sig"),
@@ -641,6 +662,8 @@ _SCREEN_VALUE_COLUMNS = (
     "feasibility_interpretation",
     "annotation_confidence",
     "standard_name_status",
+    "annotation_tier",
+    "identity_review",
     "has_timeout",
     "secretory_process",
 )
@@ -669,6 +692,7 @@ def _short_reaction(reaction_id: object) -> str:
 
 
 def _render_dimension_tables(result: analysis.DimensionalResults) -> None:
+    st.caption(gene_names.GENE_NAME_CAVEAT)
     st.metric("必需基因数（KO后任何测试生长速率下都不可行）", len(result.essential_genes))
     with st.expander(f"必需基因清单（{len(result.essential_genes)}）"):
         st.dataframe(_localize_screen_frame(result.essential_genes), width='stretch', hide_index=True)
@@ -738,6 +762,42 @@ def _render_dimension_tables(result: analysis.DimensionalResults) -> None:
         )
 
 
+def _render_selected_gene_provenance(row: object) -> None:
+    """选中候选后显示其名字的出处与可信度，让研究员能自己核对，而不是照着名字直接下实验。
+
+    诚实要点（见 app/services/gene_name_annotation.py）：位点号精确匹配只保证"名字↔位点"，
+    不保证"位点↔你口头说的那个基因"；已知俗名对应待复核的位点在此显式警告。
+    """
+
+    def value(key: str) -> str:
+        try:
+            return str(row.get(key) or "").strip()
+        except AttributeError:
+            return ""
+
+    if value("identity_review") == "curated_identity_unverified":
+        curated = gene_names.UNVERIFIED_IDENTITY_LOCI.get(value("gene_id"), "")
+        st.warning(
+            f"**这个位点的基因身份待复核**：团队常把它当作 **{curated}**，但"
+            f"“{curated} 就是这个位点”这一对应关系在本项目里尚未坐实（已记录在架构文档）。"
+            f"外部数据库对该位点给出的注释是“{value('protein_name') or '（无）'}”——"
+            "这是**该位点真实的**注释，可能与俗名完全不是一回事。下实验前请按位点号自行核对。"
+        )
+
+    tier = value("annotation_tier")
+    accession = value("annotation_accession")
+    if not tier or tier == "no_annotation":
+        st.caption(f"该位点没有外部数据库注释，只能按位点号 {value('gene_id')} 识别（模型仍可正常计算它）。")
+        return
+    parts = [f"名字类型：{sim_result_value_label(tier)}"]
+    if accession:
+        parts.append(f"出处：{accession}")
+    confidence = value("annotation_confidence")
+    if confidence:
+        parts.append(f"匹配方式：{sim_result_value_label(confidence)}")
+    st.caption(" · ".join(parts) + "。名字是数据库对该位点的注释，不是经验证的正式基因符号。")
+
+
 def _render_verifiable_table(df: pd.DataFrame, *, target_id: str, intervention_type: str, table_key: str) -> None:
     """Render a candidate table with row selection wired to the 仿真验证 cross-link.
 
@@ -762,11 +822,9 @@ def _render_verifiable_table(df: pd.DataFrame, *, target_id: str, intervention_t
         row = df.iloc[selected_rows[0]]  # 行选择按原始英文列 df、按位置对齐（展示副本行序一致）
         candidate_id = str(row["gene_id"])
         candidate_kind = str(row["candidate_kind"]) if "candidate_kind" in row else "gene"
-        common_name = str(row["common_name"]) if "common_name" in row and row["common_name"] else ""
-        standard_symbol = str(row.get("standard_symbol") or "").strip()
-        gene_display_name = str(row.get("gene_display_name") or "").strip()
-        friendly_name = standard_symbol or gene_display_name or common_name
-        display_label = f"{friendly_name} ({candidate_id})" if friendly_name else candidate_id
+        # 名字梯队（正式符号→标准显示名→蛋白描述名→策展常用名）与位点号一起显示，口径与短名单一致。
+        display_label = gene_names.safe_gene_display_label(row)
+        _render_selected_gene_provenance(row)
         is_gene = candidate_kind == "gene"
         columns = st.columns(2 if is_gene else 1)
         if columns[0].button(

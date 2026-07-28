@@ -34,6 +34,11 @@ STANDARD_NAME_COLUMNS = [
     "protein_name",
     "annotation_confidence",
     "standard_name_status",
+    # 显示层补的诚实标注（见 app/services/gene_name_annotation.py）：名字信息量分档、
+    # 可自查的数据库 ID、以及"俗名↔位点对应待复核"标记。旧 CSV 无这些列时按空补齐。
+    "annotation_tier",
+    "annotation_accession",
+    "identity_review",
 ]
 
 
