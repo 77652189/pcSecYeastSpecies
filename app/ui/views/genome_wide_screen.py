@@ -777,6 +777,13 @@ def _render_llm_report_section(paths, selected_run: RunInfo, csv_path: Path) -> 
         "页面只读取已有筛查结果生成 fact pack；点击按钮后才调用 LLM。"
         "LLM 只能读取 fact pack，最终报告必须通过程序校验和 Judge 审核。"
     )
+    # 性能：生成 fact pack 约 1 秒，是本页首屏最贵的一步、且研究员多数时候不看报告——默认不建，
+    # 勾选才构建/渲染。这样切到本页/首屏只留核心短名单，不再被这 ~1s 拖住。
+    if not st.checkbox(
+        "展开研发建议报告 / fact pack（读取本次结果生成，约 1 秒；不看可不展开、页面更快）",
+        key=f"show_screen_report_{selected_run.run_name}",
+    ):
+        return
     try:
         fact_pack, fact_summary = _cached_fact_pack(str(csv_path), csv_path.stat().st_mtime)
     except Exception as exc:  # noqa: BLE001 - user-facing diagnostic
