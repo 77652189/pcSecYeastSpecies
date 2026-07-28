@@ -121,6 +121,33 @@ def apply_routed_candidates(routed: dict[str, list[str]]) -> int:
     return added
 
 
+def _attach_lab_gene_hints(frame: pd.DataFrame) -> pd.DataFrame:
+    """给复合体行补「实验时对应基因」（E3 反向映射，ADR-007）。
+
+    无策展映射数据时整列为 "—"——这是**预期状态**（策展待拍板），不是错误；此时研究员仍能跑复合体
+    反应，只是"该动哪几个基因"要自己查。策展数据放进 Data/pcSecPichia/gene_complex_mapping.json 即生效。
+    """
+    if frame.empty:
+        return frame
+    try:
+        from app.services.gene_complex_mapping_service import lab_gene_hint_for_complex
+    except Exception:  # noqa: BLE001 - 映射层缺席不该拖垮选择器
+        return frame
+    hints: list[str] = []
+    for _, row in frame.iterrows():
+        if str(row.get("作用对象")) != KIND_COMPLEX:
+            hints.append("—")  # 基因行本身就是基因，无需翻译
+            continue
+        try:
+            hint = lab_gene_hint_for_complex(str(row.get("模型对象") or ""))
+        except Exception:  # noqa: BLE001
+            hint = ""
+        hints.append(hint or "—")
+    frame = frame.copy()
+    frame["实验时对应基因"] = hints
+    return frame
+
+
 def render_candidate_selector(target_id: str, *, target_context: str) -> None:
     """勾选式候选选择器。放在输入框之前（见 apply_routed_candidates 的 session_state 约束）。"""
     candidates = load_hlf_opn_candidate_genes(target_context=target_context, include_shared=True)
@@ -133,6 +160,7 @@ def render_candidate_selector(target_id: str, *, target_context: str) -> None:
         "勾选想改造的对象 → 点下面的按钮，系统会自动填进对应输入框（**基因和复合体都在这里，"
         "不用自己判断该填哪个框**）。「把握」列说明模型能给到什么程度。"
     )
+    frame = _attach_lab_gene_hints(frame)
     processes = [ALL_PROCESSES, *sorted(frame["分泌环节"].unique())]
     chosen_process = st.selectbox(
         "按分泌环节筛选",
@@ -150,6 +178,13 @@ def render_candidate_selector(target_id: str, *, target_context: str) -> None:
         column_config={
             "选择": st.column_config.CheckboxColumn("选择", help="勾选后点下面的按钮加入 KO/OE 输入"),
             "模型对象": st.column_config.TextColumn("模型对象（实际算的东西）"),
+            "实验时对应基因": st.column_config.TextColumn(
+                "实验时对应基因",
+                help=(
+                    "复合体在模型里没有基因关联，这一列来自人工策展的「基因↔复合体」映射（ADR-007）。"
+                    "显示 — 表示还没有策展映射，需自行确认该复合体对应哪几个基因。"
+                ),
+            ),
         },
         key=f"candidate_selector_editor_{target_context}_{chosen_process}",
     )
