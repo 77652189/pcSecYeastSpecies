@@ -24,7 +24,8 @@ def test_helper_panels_are_collapsed_not_dumped_inline_above_the_inputs() -> Non
     """
     source = _source()
 
-    helper_expander = source.index('st.expander("不知道基因 ID？在这里查找 / 从候选库挑", expanded=False)')
+    # 标签 2026-07-28 随 E2 统一选择器上线改名（选择器成为主路径，这两个面板退为查找/证据表）。
+    helper_expander = source.index('st.expander("按名字查找 / 查看完整候选证据表", expanded=False)')
     candidate_panel = source.index("render_hlf_opn_candidate_panel(target_id)")
     ko_gene_widget = source.index('key="pichia_draft_ko_genes"')
 

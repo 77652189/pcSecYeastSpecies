@@ -9,7 +9,11 @@ import streamlit as st
 from app.services.pichia_screen_preview_service import preview_screen_inputs
 from app.services.pichia_secretion_schema import SecretionRunRequest
 from app.ui.common import PATHS
-from app.ui.views.hlf_opn_candidate_panel import render_hlf_opn_candidate_panel
+from app.ui.views.candidate_selector import render_candidate_selector
+from app.ui.views.hlf_opn_candidate_panel import (
+    render_hlf_opn_candidate_panel,
+    target_context_for_hlf_opn_candidates,
+)
 from app.ui.views.simulation_display import (
     GPR_ROLE_LABELS,
     KO_SUPPORT_STATUS_LABELS,
@@ -84,15 +88,23 @@ def render_gene_perturbation_form(target_id: str) -> GenePerturbationFormState:
         # 否则用户从筛查页点"在仿真验证中核实"跳来只看到两个空的基因框，会以为跳转没生效。
         reaction_prefilled = _has_text("pichia_draft_ko_reactions") or _has_text("pichia_draft_oe_reactions")
 
+        # E2 统一选择器（ADR-007）：勾选式挑候选，基因与复合体并列、系统自动路由到对应输入框。
+        # 默认展开——这是"选择要改造什么"的主路径；下面的四个输入框退居为手填 / 微调入口。
+        # 位置必须在输入框之前（写 session_state 的约束，见本函数 docstring）。
+        target_context = target_context_for_hlf_opn_candidates(target_id)
+        if target_context is not None:
+            with st.expander("① 选择要改造的基因 / 复合体（推荐从这里开始）", expanded=True):
+                render_candidate_selector(target_id, target_context=target_context)
+
         # 折叠成一行入口，展开才出内容——此前这两个面板默认展开、把输入框挤到屏幕外。
-        # 位置必须在下面的输入框之前，原因见本函数 docstring（"加入 KO/OE 输入"要写 session_state）。
-        with st.expander("不知道基因 ID？在这里查找 / 从候选库挑", expanded=False):
+        with st.expander("按名字查找 / 查看完整候选证据表", expanded=False):
             render_hlf_opn_candidate_panel(target_id)
             render_gene_lookup_panel()
 
+        st.markdown("**② 确认要跑的输入**（上面勾选的会自动填进来；也可手填）")
         st.caption(
-            "最常用：填要敲除或过表达的**模型基因 ID**。从「全基因组KO/OE筛查」点“在仿真验证中核实”"
-            "会自动填好这里，不用手抄。多个条目用逗号、分号或换行分隔；单次最多 20 个候选。"
+            "填**模型基因 ID**。从「全基因组KO/OE筛查」点“在仿真验证中核实”也会自动填好这里，不用手抄。"
+            "多个条目用逗号、分号或换行分隔；单次最多 20 个候选。"
         )
         ko_text = st.text_area(
             "敲除基因（KO gene）",
