@@ -232,6 +232,11 @@ def _cached_single_target(
 
 
 @st.cache_data(show_spinner=False)
+def _cached_ko_candidate_view(csv_path: str, mtime: float, target_id: str, name_version: str) -> dict:
+    return analysis.build_ko_candidate_view(_cached_tradeoff_frame(csv_path, mtime, name_version), target_id)
+
+
+@st.cache_data(show_spinner=False)
 def _cached_divergence(
     csv_path: str, mtime: float, target_ids: tuple[str, ...], name_version: str
 ) -> pd.DataFrame:
@@ -372,9 +377,19 @@ def _render_results_section(paths, runs: list[RunInfo]) -> None:
                 st.divider()
             except Exception as exc:  # noqa: BLE001 - 读出只是概览，任何失败都不该拖垮下方的明细表格
                 st.caption(f"候选短名单读出暂不可用：{exc}")
-            # 性能：明细表（必需基因 / 求解未定 / 求解器重试）是 3 张大表，默认不渲染、勾选才出——首屏更轻。
+            # KO 与 OE 对等的可视化读出（此前 KO 只有表格、且被埋在下面的明细表勾选框里）。
+            try:
+                _render_ko_candidate_readout(
+                    _cached_ko_candidate_view(str(csv_path), mtime, target_id, name_version),
+                    target_id=target_id,
+                )
+                st.divider()
+            except Exception as exc:  # noqa: BLE001 - 同上，读出失败不该拖垮明细表格
+                st.caption(f"KO 候选读出暂不可用：{exc}")
+            # 性能：明细表是多张大表，默认不渲染、勾选才出——首屏更轻。标签必须点明里面**也有
+            # KO/OE 候选明细表**：只写"必需基因/求解未定"会让研究员以为 KO 候选没做（实测踩到）。
             if st.checkbox(
-                "显示明细表（必需基因 / 求解未定 / 求解器重试证据）",
+                "显示全部明细表（KO/OE 候选逐条 · 必需基因 · 求解未定 · 求解器重试证据）",
                 value=False,
                 key=f"show_dimension_tables_{target_id}",
             ):
@@ -539,6 +554,121 @@ def _render_shortlist_readout(readout: dict, *, target_id: str) -> None:
         st.markdown("**该测什么：哪个实验最值得先做**")
         st.caption("模型给的是相对排序、不是绝对产量。这里标出顶部名次里模型分不清的候选，并给出最能消解歧义的最小湿实验——只排测量优先级，不预测结果。")
         _render_shortlist_voi(voi)
+
+
+_KO_GROWTH_IMPACT_COLORS = {
+    "生长不受影响（零代价）": "#0F766E",
+    "轻微生长代价": "#CA8A04",
+    "明显生长代价（需补救）": "#B91C1C",
+}
+
+
+def _render_ko_candidate_readout(view: dict, *, target_id: str) -> None:
+    """KO 候选可视化（与 OE 短名单面板对等）。
+
+    KO 比 OE 多一维：敲掉基因可能提升分泌、同时压低生长。所以主图是"分泌提升排序 + 按生长影响
+    着色"，另给一张分泌↔生长权衡散点（默认折叠，点多、渲染贵）。数据与阈值来自服务层。
+    """
+    ranked = view.get("ranked")
+    scatter = view.get("scatter")
+    counts = view.get("counts") or {}
+    if not isinstance(ranked, pd.DataFrame):
+        return
+
+    with st.expander("KO 候选读出：敲掉哪些基因可能提升分泌（含生长代价）", expanded=True):
+        if ranked.empty:
+            st.caption(
+                f"本次筛查里 {target_id} 没有“敲除后分泌提升”的 KO 候选"
+                f"（已判读 {counts.get('ko_rows', 0)} 个可行 KO；不代表无解，必需基因另见清单）。"
+            )
+            return
+
+        labeled = ranked.copy()
+        labeled["候选"] = [gene_names.safe_gene_display_label(row) for _, row in labeled.iterrows()]
+        labeled["相对提升(%)"] = labeled["secretion_effect"].astype(float) * 100.0
+        labeled["生长影响"] = labeled["growth_impact"].map(sim_result_value_label)
+        labeled["生长保持"] = labeled["growth_retention"].astype(float).round(3)
+        labeled["资源层"] = labeled["secretory_process"].map(sim_result_value_label) if "secretory_process" in labeled.columns else "—"
+
+        clean = counts.get("clean_wins", 0)
+        st.markdown(
+            f"> 一句话：**{target_id}** 有 **{counts.get('secretion_up', 0)}** 个 KO 候选敲除后分泌上升，"
+            f"其中 **{clean}** 个生长零代价（最值得先试）；"
+            f"另有 {counts.get('growth_cost', 0)} 个要付明显生长代价、需补救。"
+        )
+        figure = px.bar(
+            labeled.sort_values("相对提升(%)"),
+            x="相对提升(%)",
+            y="候选",
+            color="生长影响",
+            orientation="h",
+            text="相对提升(%)",
+            color_discrete_map=_KO_GROWTH_IMPACT_COLORS,
+            title=f"KO 提升候选 top-{len(labeled)}：敲除后的分泌提升（颜色=生长代价，绿色最划算）",
+        )
+        figure.update_traces(texttemplate="%{text:.3g}%", textposition="outside", cliponaxis=False)
+        figure.update_layout(
+            xaxis_title="相对提升（%，相对野生型；非绝对产量）",
+            yaxis_title="",
+            legend_title_text="生长影响",
+            yaxis={"categoryorder": "total ascending"},
+        )
+        st.plotly_chart(figure, width='stretch')
+
+        table = labeled[["候选", "资源层", "相对提升(%)", "生长保持", "生长影响"]]
+        st.dataframe(table, width="stretch", hide_index=True)
+        st.caption(
+            "同 OE：「相对提升(%)」是模型内部相对量、不是 titer 预测——**看名次比看绝对数值更靠谱**。"
+            "KO 要同时看生长：绿色=生长零代价，黄色=轻微代价，红色=需要额外生物学手段补救。"
+        )
+        if counts.get("slight_growth_cost"):
+            st.caption(
+                f"其中 {counts['slight_growth_cost']} 个属「轻微生长代价」——这一档在下方两张 KO 明细表里"
+                "两边都不落（一张要求生长保持≥0.999、另一张要求<0.99），只有这里看得到。"
+            )
+        st.download_button(
+            "⬇️ 导出 KO 候选（CSV，Excel 可直接打开）",
+            data=table.to_csv(index=False).encode("utf-8-sig"),
+            file_name=f"{target_id}_KO候选.csv",
+            mime="text/csv",
+            key=f"genome_wide_ko_download_{target_id}",
+        )
+
+        # 权衡散点：KO 特有的"提升 vs 生长代价"全局视图。点多、渲染贵 → 默认不画。
+        if isinstance(scatter, pd.DataFrame) and not scatter.empty and st.checkbox(
+            "显示分泌↔生长权衡散点（看清哪些 KO 是陷阱）", value=False, key=f"show_ko_scatter_{target_id}"
+        ):
+            _render_ko_tradeoff_scatter(scatter, counts=counts, target_id=target_id)
+
+
+def _render_ko_tradeoff_scatter(scatter: pd.DataFrame, *, counts: dict, target_id: str) -> None:
+    points = scatter.copy()
+    points["候选"] = [gene_names.safe_gene_display_label(row) for _, row in points.iterrows()]
+    points["分泌相对提升(%)"] = points["secretion_effect"].astype(float) * 100.0
+    points["生长保持率"] = points["growth_retention"].astype(float)
+    points["生长影响"] = points["growth_impact"].map(sim_result_value_label)
+    figure = px.scatter(
+        points,
+        x="生长保持率",
+        y="分泌相对提升(%)",
+        color="生长影响",
+        hover_name="候选",
+        color_discrete_map=_KO_GROWTH_IMPACT_COLORS,
+        title="KO 权衡全景：右上角＝提升分泌又不伤生长（理想区），左上角＝提升但伤生长（陷阱）",
+    )
+    figure.add_hline(y=0.0, line_dash="dot", line_color="#64748B")
+    figure.add_vline(x=1.0, line_dash="dot", line_color="#64748B")
+    figure.update_layout(
+        xaxis_title="生长保持率（1.0＝完全不影响生长，越左越伤生长）",
+        yaxis_title="分泌相对提升（%，>0 才是提升）",
+        legend_title_text="生长影响",
+    )
+    st.plotly_chart(figure, width='stretch')
+    truncated = counts.get("scatter_truncated", 0)
+    st.caption(
+        "虚线交点＝野生型。每点一个 KO 候选，鼠标悬停看基因名。"
+        + (f"为保证页面流畅，只画了效应最大的 {len(points)} 个，省略 {truncated} 个效应接近 0 的中性 KO。" if truncated else "")
+    )
 
 
 def _render_shortlist_voi(voi: dict) -> None:

@@ -176,6 +176,10 @@ SIMULATION_RESULT_VALUE_LABELS = {
     # 边界类型
     "upper": "上限（OE 可放宽）",
     "lower": "下限（最低要求，OE 动不了）",
+    # KO 候选的生长影响分档（见 genome_wide_screen_analysis._growth_impact_bucket）
+    "growth_fully_retained": "生长不受影响（零代价）",
+    "growth_slight_cost": "轻微生长代价",
+    "growth_cost": "明显生长代价（需补救）",
     # 基因名可信度分档（见 app/services/gene_name_annotation.py 的诚实边界）
     "verified_symbol": "正式基因符号",
     "descriptive_annotation": "描述性注释（非正式符号）",

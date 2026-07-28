@@ -215,6 +215,82 @@ def analyze_single_target(frame: pd.DataFrame, target_id: str) -> DimensionalRes
     )
 
 
+KO_CANDIDATE_VIEW_TOP_N = 12
+# 散点最多画多少个 KO 候选：全量 ~1000 点的 plotly 散点会拖慢浏览器渲染（本页曾因图表过多卡到
+# 无法滑动），按 |效应| 取最值得看的一批即可——被截掉的都是效应接近 0 的中性 KO。
+KO_SCATTER_MAX_POINTS = 300
+
+
+def _growth_impact_bucket(growth_retention: float) -> str:
+    if growth_retention >= GROWTH_FULLY_RETAINED_THRESHOLD:
+        return "growth_fully_retained"
+    if growth_retention >= GROWTH_COST_THRESHOLD:
+        # 注意：既有的两张 KO 维度表一个要求 >=0.999、另一个要求 <0.99，这一档在表里**两边都不落**，
+        # 只有在可视化里才看得到（不是新算的数，是原本被漏掉的显示口径）。
+        return "growth_slight_cost"
+    return "growth_cost"
+
+
+def build_ko_candidate_view(
+    frame: pd.DataFrame,
+    target_id: str,
+    *,
+    top_n: int = KO_CANDIDATE_VIEW_TOP_N,
+    scatter_max_points: int = KO_SCATTER_MAX_POINTS,
+) -> dict[str, object]:
+    """KO 候选的可视化数据（与 OE 短名单对等的排序视图 + KO 特有的分泌↔生长权衡散点）。
+
+    为什么 KO 不能照抄 OE 的单条柱状图：KO 的关键信息是**两维**的——敲掉某个基因也许提升分泌，
+    但同时压低生长；只按分泌效应排名会把"提升 5% 却掉 40% 生长"的陷阱candidate排到前面。故除了
+    排序柱状图（只取分泌提升的候选、按生长影响着色）之外，另给一张分泌↔生长散点看清权衡。
+
+    必需基因（KO 后任何测试生长速率都不可行）本就没有比值、不进这两张图，它们在必需基因清单里。
+    阈值沿用本模块既有常量，UI 不自己判定。
+    """
+    empty = pd.DataFrame()
+    if frame.empty or "intervention_type" not in frame.columns:
+        return {"target_id": target_id, "ranked": empty, "scatter": empty, "counts": {}, "available": False}
+
+    ko = frame[(frame.target_id == target_id) & (frame.intervention_type == "KO")].copy()
+    if "secretion_ratio_vs_wildtype" not in ko.columns:
+        return {"target_id": target_id, "ranked": empty, "scatter": empty, "counts": {}, "available": False}
+    ko = ko.dropna(subset=["secretion_ratio_vs_wildtype"])
+    if ko.empty:
+        return {"target_id": target_id, "ranked": empty, "scatter": empty, "counts": {}, "available": False}
+
+    ko["secretion_effect"] = ko["secretion_ratio_vs_wildtype"].astype(float) - 1.0
+    ko["growth_retention"] = (
+        pd.to_numeric(ko.get("growth_retention_ratio"), errors="coerce").fillna(1.0)
+        if "growth_retention_ratio" in ko.columns
+        else 1.0
+    )
+    ko["growth_impact"] = ko["growth_retention"].map(_growth_impact_bucket)
+
+    wins = ko[ko["secretion_ratio_vs_wildtype"] > SECRETION_UP_THRESHOLD]
+    ranked = wins.sort_values("secretion_effect", ascending=False).head(top_n).reset_index(drop=True)
+    scatter = (
+        ko.reindex(ko["secretion_effect"].abs().sort_values(ascending=False).index)
+        .head(scatter_max_points)
+        .reset_index(drop=True)
+    )
+    counts = {
+        "ko_rows": int(len(ko)),
+        "secretion_up": int(len(wins)),
+        "clean_wins": int((wins["growth_impact"] == "growth_fully_retained").sum()),
+        "slight_growth_cost": int((wins["growth_impact"] == "growth_slight_cost").sum()),
+        "growth_cost": int((wins["growth_impact"] == "growth_cost").sum()),
+        "secretion_down": int((ko["secretion_ratio_vs_wildtype"] < SECRETION_DOWN_THRESHOLD).sum()),
+        "scatter_truncated": int(max(0, len(ko) - len(scatter))),
+    }
+    return {
+        "target_id": target_id,
+        "ranked": ranked,
+        "scatter": scatter,
+        "counts": counts,
+        "available": not ranked.empty or not scatter.empty,
+    }
+
+
 def complex_subunit_oe_hypothesis_candidates(frame: pd.DataFrame, target_id: str) -> list[str]:
     """Gene ids worth a "hypothetical whole-complex OE" test: KO is feasible but lowers
     secretion (same criterion as ko_yield_down), and the gene's GPR role is complex_subunit
@@ -257,11 +333,14 @@ __all__ = [
     "DIVERGENCE_TOP_N",
     "GROWTH_COST_THRESHOLD",
     "GROWTH_FULLY_RETAINED_THRESHOLD",
+    "KO_CANDIDATE_VIEW_TOP_N",
+    "KO_SCATTER_MAX_POINTS",
     "SECRETION_DOWN_THRESHOLD",
     "SECRETION_UP_THRESHOLD",
     "DimensionalResults",
     "analyze_single_target",
     "analyze_target_divergence",
+    "build_ko_candidate_view",
     "complex_subunit_oe_hypothesis_candidates",
     "load_gene_tradeoff_csv",
 ]
