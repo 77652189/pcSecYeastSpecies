@@ -50,6 +50,9 @@ def render_genome_wide_screen() -> None:
     _maybe_launch_queued_request(paths)
 
     runs = list_runs(paths)
+    # complex_hypothesis（假设性整体过表达）的过表达响应已由 catalog（策展复合体反应对照表）的剂量响应曲线覆盖、
+    # 冗余——从研究员视图移除：过滤掉这类历史运行（磁盘仍保留、仅不在页面呈现），结果查看/运行记录都不再出现。
+    runs = [run for run in runs if run_scope_family(run) != "complex_hypothesis"]
     active_runs = [run for run in runs if run.status in {"starting", "running"}]
 
     # Results first: this is an expensive, infrequent, hours-long computation -
@@ -67,7 +70,7 @@ SCOPE_LABELS = {
     "gene": "全基因组（约1025个基因，小时级）",
     "gene_limited": "小规模基因试跑（smoke/pilot，分钟级）",
     "catalog": "策展复合体反应对照表（约30个反应，分钟级）",
-    "complex_hypothesis": "复合体假设性整体过表达测试（源自已有KO筛查结果，分钟级）",
+    # complex_hypothesis 已从研究员视图移除（其过表达响应由 catalog 剂量响应曲线覆盖）；引擎/工具仍支持该 scope。
 }
 
 
