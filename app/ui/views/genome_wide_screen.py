@@ -205,6 +205,46 @@ def _run_option_label(run: RunInfo) -> str:
     return f"{run.run_name} · {SCOPE_LABELS.get(run_scope_family(run), run.scope)}"
 
 
+# 性能关键：Streamlit 每次交互（展开面板、切标签/单选）都会重跑整个页面脚本。下面把结果段的
+# 重活按 (csv 路径 + 文件 mtime[, 靶点]) 缓存——否则每次交互都重读+重析 2050 行 × 多靶点 +
+# 重建短名单读出，页面会卡到"没有响应"。mtime 入 key，结果文件变了自动失效。
+@st.cache_data(show_spinner=False)
+def _cached_tradeoff_frame(csv_path: str, mtime: float) -> pd.DataFrame:
+    return analysis.load_gene_tradeoff_csv(csv_path)
+
+
+@st.cache_data(show_spinner=False)
+def _cached_single_target(csv_path: str, mtime: float, target_id: str) -> "analysis.DimensionalResults":
+    return analysis.analyze_single_target(_cached_tradeoff_frame(csv_path, mtime), target_id)
+
+
+@st.cache_data(show_spinner=False)
+def _cached_divergence(csv_path: str, mtime: float, target_ids: tuple[str, ...]) -> pd.DataFrame:
+    return analysis.analyze_target_divergence(_cached_tradeoff_frame(csv_path, mtime), list(target_ids))
+
+
+@st.cache_data(show_spinner=False)
+def _cached_shortlist_readout(
+    csv_path: str, mtime: float, target_id: str, r1_dir: str, dose_dir: str, cond_dir: str
+) -> dict:
+    # 注：R1/剂量响应/条件矩阵是离线缓存目录，其内容更新不进本 key——它们很少变；真更新了可在
+    # Streamlit 菜单"Clear cache"或重启刷新（换缓存新鲜度换页面响应，值得）。
+    return shortlist_service.build_shortlist_readout(
+        _cached_tradeoff_frame(csv_path, mtime),
+        target_id,
+        r1_readout_dir=Path(r1_dir),
+        dose_response_dir=Path(dose_dir),
+        condition_matrix_dir=Path(cond_dir),
+    )
+
+
+@st.cache_data(show_spinner=False)
+def _cached_fact_pack(csv_path: str, mtime: float) -> tuple[dict, dict]:
+    # build_fact_pack_for_runs 每次渲染约 600ms（处理全表→证据条目），是本页单点最贵的重活；缓存掉。
+    fact_pack = screen_report_service.build_fact_pack_for_runs(_paths(), csv_paths=(Path(csv_path),))
+    return fact_pack, screen_report_service.summarize_fact_pack(fact_pack)
+
+
 def _render_results_section(paths, runs: list[RunInfo]) -> None:
     st.subheader("结果查看")
     done_runs = [run for run in runs if run.status == "done"]
@@ -277,9 +317,12 @@ def _render_results_section(paths, runs: list[RunInfo]) -> None:
         st.error(f"找不到结果文件：{csv_path}")
         return
 
-    frame = analysis.load_gene_tradeoff_csv(str(csv_path))
+    mtime = csv_path.stat().st_mtime  # 入缓存 key：结果文件变了就自动失效重算
+    frame = _cached_tradeoff_frame(str(csv_path), mtime)
     target_ids = sorted(frame.target_id.dropna().unique().tolist())
-    per_target_results = {target_id: analysis.analyze_single_target(frame, target_id) for target_id in target_ids}
+    per_target_results = {
+        target_id: _cached_single_target(str(csv_path), mtime, target_id) for target_id in target_ids
+    }
 
     meta_cols = st.columns(4)
     meta_cols[0].metric("精度模式", selected_run.mode)
@@ -297,12 +340,13 @@ def _render_results_section(paths, runs: list[RunInfo]) -> None:
     for tab, target_id in zip(tabs, target_ids):
         with tab:
             try:
-                readout = shortlist_service.build_shortlist_readout(
-                    frame,
+                readout = _cached_shortlist_readout(
+                    str(csv_path),
+                    mtime,
                     target_id,
-                    r1_readout_dir=r1_readout_dir,
-                    dose_response_dir=dose_response_dir,
-                    condition_matrix_dir=condition_matrix_dir,
+                    str(r1_readout_dir),
+                    str(dose_response_dir),
+                    str(condition_matrix_dir),
                 )
                 _render_shortlist_readout(readout, target_id=target_id)
                 st.divider()
@@ -311,7 +355,7 @@ def _render_results_section(paths, runs: list[RunInfo]) -> None:
             _render_dimension_tables(per_target_results[target_id])
     if len(target_ids) >= 2:
         with tabs[-1]:
-            divergence = analysis.analyze_target_divergence(frame, target_ids)
+            divergence = _cached_divergence(str(csv_path), mtime, tuple(target_ids))
             st.markdown("同一个基因的KO，在不同靶点上效应差异最大的候选：")
             st.dataframe(_localize_screen_frame(divergence), width='stretch', hide_index=True)
 
@@ -731,8 +775,7 @@ def _render_llm_report_section(paths, selected_run: RunInfo, csv_path: Path) -> 
         "LLM 只能读取 fact pack，最终报告必须通过程序校验和 Judge 审核。"
     )
     try:
-        fact_pack = screen_report_service.build_fact_pack_for_runs(paths, csv_paths=(csv_path,))
-        fact_summary = screen_report_service.summarize_fact_pack(fact_pack)
+        fact_pack, fact_summary = _cached_fact_pack(str(csv_path), csv_path.stat().st_mtime)
     except Exception as exc:  # noqa: BLE001 - user-facing diagnostic
         st.error(f"fact pack 生成失败：{exc}")
         return
