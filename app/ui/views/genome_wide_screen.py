@@ -386,6 +386,7 @@ def _render_results_section(paths, runs: list[RunInfo]) -> None:
                 st.divider()
             except Exception as exc:  # noqa: BLE001 - 同上，读出失败不该拖垮明细表格
                 st.caption(f"KO 候选读出暂不可用：{exc}")
+                _render_stale_module_hint(exc)
             # 性能：明细表是多张大表，默认不渲染、勾选才出——首屏更轻。标签必须点明里面**也有
             # KO/OE 候选明细表**：只写"必需基因/求解未定"会让研究员以为 KO 候选没做（实测踩到）。
             if st.checkbox(
@@ -902,6 +903,20 @@ def _render_dimension_tables(result: analysis.DimensionalResults) -> None:
             target_id=result.target_id,
             intervention_type="OE",
             table_key=f"dimtable_complex_hypothesis_{result.target_id}",
+        )
+
+
+def _render_stale_module_hint(exc: Exception) -> None:
+    """把"进程里模块是旧的"这类错误翻译成可执行提示。
+
+    Streamlit 的热重载对**依赖模块里新增的函数**不可靠：页面源码会重载（新文案会出现），但
+    `app/services/*` 仍是进程启动时载入的旧模块对象 → `has no attribute 'xxx'`。这不是代码缺陷、
+    重启进程即可，但原始 AttributeError 看不出这一点（实测让人误判成"功能没做"）。
+    """
+    if isinstance(exc, AttributeError) and "has no attribute" in str(exc):
+        st.info(
+            "看起来是**运行中的 app 还在用旧模块**（Streamlit 热重载对新增函数无效），不是功能缺失。"
+            "请完全重启 app 进程（Ctrl+C 后重新运行 `./run_streamlit.ps1`）再看本段。"
         )
 
 
