@@ -43,6 +43,16 @@ from pcsec_pichia.services.gene_id_standardization import (  # noqa: E402 - engi
 # 只有这一档是"locus tag 精确命中外部库"，才允许把名字显示给研究员当参考。
 EXACT_LOCUS_TAG_CONFIDENCE = "high_exact_locus_tag"
 
+# 命名显示逻辑的版本号。**改本模块的显示口径时必须 bump**：结果页的 `st.cache_data` 是嵌套的
+# （短名单/维度表缓存各自记住了"用某个 frame 算出的结果"），只改本模块不会让那些下游缓存失效，
+# 页面会继续显示改动前的旧名字。视图把这个常量放进各缓存函数的 key，bump 即全部失效。
+ANNOTATION_DISPLAY_VERSION = "2026-07-28-gated-exact-locus-tag-names"
+
+# 图表 / 按钮标签里名字的最长字符数。库里名字中位数 32 但 p90≈72、最长 239（UniProt 会把整段
+# 功能描述塞进名字），不截断会撑爆柱状图 Y 轴、并重演长标签拖慢渲染的问题。完整名字仍可在
+# 维度表的「蛋白名」列和数据库 ID 里看到。
+MAX_DISPLAY_NAME_CHARS = 40
+
 # 泛化自动注释标志词：命中即降档为 `generic_annotation`（诚实但无功能信息量，别让研究员
 # 以为这是已知功能）。小写比对。
 GENERIC_ANNOTATION_MARKERS: tuple[str, ...] = (
@@ -255,7 +265,7 @@ def annotate_screen_frame(
     return annotated
 
 
-def safe_gene_display_label(row: Any) -> str:
+def safe_gene_display_label(row: Any, *, max_name_chars: int = MAX_DISPLAY_NAME_CHARS) -> str:
     """一个候选的显示标签。名字梯队：正式符号 → 标准显示名 → 蛋白描述名 → 策展常用名。
 
     位点号只在名字来自**外部数据库注释**时附在括号里——研究员需要它来核对"模型实际算的是哪个
@@ -274,16 +284,25 @@ def safe_gene_display_label(row: Any) -> str:
     gene_id = value("gene_id")
     annotation_name = value("standard_symbol") or value("gene_display_name") or value("protein_name")
     if annotation_name and annotation_name != gene_id:
-        return f"{annotation_name}（{gene_id}）"
+        return f"{_shorten(annotation_name, max_name_chars)}（{gene_id}）"
     curated_name = value("common_name")
     if curated_name and curated_name != gene_id:
-        return curated_name
+        return _shorten(curated_name, max_name_chars)
     return gene_id
 
 
+def _shorten(name: str, max_chars: int) -> str:
+    """截断过长名字（UniProt 常把整段功能描述当名字），位点号仍会紧跟其后显示。"""
+    if max_chars <= 0 or len(name) <= max_chars:
+        return name
+    return name[: max_chars - 1].rstrip(" ,;:-") + "…"
+
+
 __all__ = [
+    "ANNOTATION_DISPLAY_VERSION",
     "EXACT_LOCUS_TAG_CONFIDENCE",
     "GENE_NAME_CAVEAT",
+    "MAX_DISPLAY_NAME_CHARS",
     "GENERIC_ANNOTATION_MARKERS",
     "NAME_ANNOTATION_COLUMNS",
     "UNVERIFIED_IDENTITY_LOCI",

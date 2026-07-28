@@ -184,6 +184,40 @@ def test_curated_candidate_label_keeps_human_name_without_model_id_suffix() -> N
     assert gene_names.safe_gene_display_label(annotated_gene) == "SEC11（PAS_chr1-4_0187）"
 
 
+def test_long_annotation_name_is_truncated_but_locus_stays_visible() -> None:
+    """UniProt 会把整段功能描述当名字（库里最长 239 字符）；不截断会撑爆柱状图 Y 轴。
+    截断后位点号必须仍然在场——研究员靠它认模型实际算的对象。"""
+    long_name = "Arginine biosynthesis bifunctional protein ArgJ, mitochondrial [Cleaved into: fragment]"
+    row = pd.Series(
+        {"gene_id": "PAS_chr3_0176", "standard_symbol": "", "gene_display_name": long_name, "protein_name": "", "common_name": ""}
+    )
+
+    label = gene_names.safe_gene_display_label(row)
+
+    assert label.endswith("（PAS_chr3_0176）")
+    assert "…" in label
+    assert len(label) < len(long_name)
+    # 不截断时能拿到完整名字（表格列仍显示全名）
+    assert gene_names.safe_gene_display_label(row, max_name_chars=0).startswith(long_name)
+
+
+def test_annotation_display_version_is_wired_into_screen_caches() -> None:
+    """嵌套 st.cache_data 的坑：只改富集逻辑不会让下游短名单缓存失效，页面会继续显示旧名字
+    （2026-07-28 实测踩到）。四个缓存函数都必须收 name_version 参数。"""
+    import inspect
+
+    from app.ui.views import genome_wide_screen as view
+
+    for function in (
+        view._cached_tradeoff_frame,
+        view._cached_single_target,
+        view._cached_divergence,
+        view._cached_shortlist_readout,
+    ):
+        target = getattr(function, "__wrapped__", function)
+        assert "name_version" in inspect.signature(target).parameters, function
+
+
 def test_classify_annotation_tier_boundaries() -> None:
     assert gene_names.classify_annotation_tier("SEC11", "anything") == "verified_symbol"
     assert gene_names.classify_annotation_tier("", "Phosphoenolpyruvate carboxykinase") == "descriptive_annotation"

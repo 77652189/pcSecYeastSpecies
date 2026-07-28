@@ -212,8 +212,12 @@ def _run_option_label(run: RunInfo) -> str:
 # 性能关键：Streamlit 每次交互（展开面板、切标签/单选）都会重跑整个页面脚本。下面把结果段的
 # 重活按 (csv 路径 + 文件 mtime[, 靶点]) 缓存——否则每次交互都重读+重析 2050 行 × 多靶点 +
 # 重建短名单读出，页面会卡到"没有响应"。mtime 入 key，结果文件变了自动失效。
+#
+# `name_version` 必须逐个传下去：这些缓存是**嵌套**的（下游记住的是"某个 frame 算出的结果"），
+# 只改富集逻辑不会让下游失效，页面会继续显示旧名字（2026-07-28 实测踩到）。把命名版本号放进
+# 每个 key，bump ANNOTATION_DISPLAY_VERSION 即全部失效，不必依赖"记得重启 app"。
 @st.cache_data(show_spinner=False)
-def _cached_tradeoff_frame(csv_path: str, mtime: float) -> pd.DataFrame:
+def _cached_tradeoff_frame(csv_path: str, mtime: float, name_version: str) -> pd.DataFrame:
     # 基因名在**显示时**补：旧筛查 CSV（命名功能上线前跑的）只有 locus tag `PAS_chr*`，
     # 研究员看不出是什么基因。这里按 gene_id join 命名标准化缓存补上可读名 + 数据库 ID，
     # 并按注释档位门控（只显示位点号精确命中的那档）。不改任何可执行 id。
@@ -221,23 +225,29 @@ def _cached_tradeoff_frame(csv_path: str, mtime: float) -> pd.DataFrame:
 
 
 @st.cache_data(show_spinner=False)
-def _cached_single_target(csv_path: str, mtime: float, target_id: str) -> "analysis.DimensionalResults":
-    return analysis.analyze_single_target(_cached_tradeoff_frame(csv_path, mtime), target_id)
+def _cached_single_target(
+    csv_path: str, mtime: float, target_id: str, name_version: str
+) -> "analysis.DimensionalResults":
+    return analysis.analyze_single_target(_cached_tradeoff_frame(csv_path, mtime, name_version), target_id)
 
 
 @st.cache_data(show_spinner=False)
-def _cached_divergence(csv_path: str, mtime: float, target_ids: tuple[str, ...]) -> pd.DataFrame:
-    return analysis.analyze_target_divergence(_cached_tradeoff_frame(csv_path, mtime), list(target_ids))
+def _cached_divergence(
+    csv_path: str, mtime: float, target_ids: tuple[str, ...], name_version: str
+) -> pd.DataFrame:
+    return analysis.analyze_target_divergence(
+        _cached_tradeoff_frame(csv_path, mtime, name_version), list(target_ids)
+    )
 
 
 @st.cache_data(show_spinner=False)
 def _cached_shortlist_readout(
-    csv_path: str, mtime: float, target_id: str, r1_dir: str, dose_dir: str, cond_dir: str
+    csv_path: str, mtime: float, target_id: str, r1_dir: str, dose_dir: str, cond_dir: str, name_version: str
 ) -> dict:
     # 注：R1/剂量响应/条件矩阵是离线缓存目录，其内容更新不进本 key——它们很少变；真更新了可在
     # Streamlit 菜单"Clear cache"或重启刷新（换缓存新鲜度换页面响应，值得）。
     return shortlist_service.build_shortlist_readout(
-        _cached_tradeoff_frame(csv_path, mtime),
+        _cached_tradeoff_frame(csv_path, mtime, name_version),
         target_id,
         r1_readout_dir=Path(r1_dir),
         dose_response_dir=Path(dose_dir),
@@ -325,10 +335,12 @@ def _render_results_section(paths, runs: list[RunInfo]) -> None:
         return
 
     mtime = csv_path.stat().st_mtime  # 入缓存 key：结果文件变了就自动失效重算
-    frame = _cached_tradeoff_frame(str(csv_path), mtime)
+    name_version = gene_names.ANNOTATION_DISPLAY_VERSION  # 入缓存 key：命名显示口径变了也自动失效
+    frame = _cached_tradeoff_frame(str(csv_path), mtime, name_version)
     target_ids = sorted(frame.target_id.dropna().unique().tolist())
     per_target_results = {
-        target_id: _cached_single_target(str(csv_path), mtime, target_id) for target_id in target_ids
+        target_id: _cached_single_target(str(csv_path), mtime, target_id, name_version)
+        for target_id in target_ids
     }
 
     meta_cols = st.columns(4)
@@ -354,6 +366,7 @@ def _render_results_section(paths, runs: list[RunInfo]) -> None:
                     str(r1_readout_dir),
                     str(dose_response_dir),
                     str(condition_matrix_dir),
+                    name_version,
                 )
                 _render_shortlist_readout(readout, target_id=target_id)
                 st.divider()
@@ -368,7 +381,7 @@ def _render_results_section(paths, runs: list[RunInfo]) -> None:
                 _render_dimension_tables(per_target_results[target_id])
     if len(target_ids) >= 2:
         with tabs[-1]:
-            divergence = _cached_divergence(str(csv_path), mtime, tuple(target_ids))
+            divergence = _cached_divergence(str(csv_path), mtime, tuple(target_ids), name_version)
             st.markdown("同一个基因的KO，在不同靶点上效应差异最大的候选：")
             st.dataframe(_localize_screen_frame(divergence), width='stretch', hide_index=True)
 
