@@ -15,6 +15,7 @@ docs/archive/
 *.float.out
 
 # Agent/IDE workspace config
+.claude/
 .reasonix/
 .workbuddy/
 
