@@ -355,7 +355,13 @@ def _render_results_section(paths, runs: list[RunInfo]) -> None:
                 st.divider()
             except Exception as exc:  # noqa: BLE001 - 读出只是概览，任何失败都不该拖垮下方的明细表格
                 st.caption(f"候选短名单读出暂不可用：{exc}")
-            _render_dimension_tables(per_target_results[target_id])
+            # 性能：明细表（必需基因 / 求解未定 / 求解器重试）是 3 张大表，默认不渲染、勾选才出——首屏更轻。
+            if st.checkbox(
+                "显示明细表（必需基因 / 求解未定 / 求解器重试证据）",
+                value=False,
+                key=f"show_dimension_tables_{target_id}",
+            ):
+                _render_dimension_tables(per_target_results[target_id])
     if len(target_ids) >= 2:
         with tabs[-1]:
             divergence = _cached_divergence(str(csv_path), mtime, tuple(target_ids))
@@ -486,7 +492,10 @@ def _render_shortlist_readout(readout: dict, *, target_id: str) -> None:
             if risky:
                 st.caption("⚠️ 生长有代价（保持率 < 0.9）：" + "、".join(str(c) for c in risky))
             _render_dose_response_note(readout, dose_available)
-            if dose_available:
+            # 性能：剂量响应曲线是额外 plotly 图（含长复合体名图例），默认不渲染、勾选才画——首屏更轻、不卡。
+            if dose_available and st.checkbox(
+                "显示剂量响应曲线（额外图表）", value=False, key=f"show_dose_curve_{target_id}"
+            ):
                 _render_dose_response_curve(readout, shortlist)
             _render_condition_matrix_note(readout, condition_matrix_available)
         else:
