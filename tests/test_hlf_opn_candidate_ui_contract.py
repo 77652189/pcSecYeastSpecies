@@ -158,7 +158,9 @@ def test_hlf_opn_panel_filters_context_and_adds_only_executable_inputs(monkeypat
     assert fake_st.session_state["pichia_draft_oe_genes"] == "PAS_OE"
     rendered = "\n".join(frame.to_csv(index=False) for frame in fake_st.dataframes)
     assert "PAS_NOT_MODEL" in rendered
-    assert "不在模型内" in rendered  # operability_status 已汉化（原 not_in_model）
+    # operability_status 已汉化（原 not_in_model）。措辞 2026-07-28 改为点明"复合体反应可跑"——
+    # 旧措辞"不在模型内"读着像死胡同，实际这些候选的复合体反应在模型里真实可跑。
+    assert "无基因把手（复合体反应可跑·基因归属待复核）" in rendered
 
 
 def _candidate_row(

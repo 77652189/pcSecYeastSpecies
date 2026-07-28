@@ -23,8 +23,11 @@ _CANDIDATE_ENUM_LABELS = {
     "model_ko_executable": "模型可执行 KO",
     "model_oe_proxy_executable": "模型可执行 OE（反应代理）",
     "model_explain_only_complex_subunit": "仅解释：复合体亚基",
-    "not_in_model": "不在模型内",
-    "unresolved_name": "命名未解析",
+    # 这两档此前显示成"不在模型内 / 命名未解析"，读起来像死胡同——但它们的**复合体反应在模型里
+    # 真实存在且能跑**（项目头号 hLF 杠杆 sec_Pdi1p_complex_formation 就在这一档）。不能按基因跑的
+    # 原因是模型对分泌机器没有 GPR：2793 个复合体形成反应零基因关联，故没有基因节点可敲。
+    "not_in_model": "无基因把手（复合体反应可跑·基因归属待复核）",
+    "unresolved_name": "无单一基因（复合体/家族·反应可跑）",
     "manual_review_required": "需人工复核",
     # recommended_intervention
     "KO": "敲除(KO)",
@@ -97,6 +100,27 @@ def render_hlf_opn_candidate_panel(target_id: str) -> None:
             added = _apply_executable_candidate_inputs(executable)
             _toast_added_inputs(context, added, int(executable.get("excluded_count") or 0))
 
+        # 第二个入口：把"不能按基因跑"的候选按**复合体反应**加进反应框。刻意与上面的按钮分开——
+        # 引擎把这些归为 review_reactions（反应在模型里真实可跑，但基因归属只有同源证据），
+        # 混进"可执行"会抹掉那条诚实边界。项目头号 hLF 杠杆 sec_Pdi1p_complex_formation 就在这里。
+        review_reactions = _review_reactions_by_intervention(filtered_candidates)
+        if review_reactions["ko"] or review_reactions["oe"]:
+            if st.button(
+                f"加入 {context} 复合体反应到反应框（基因归属待复核）",
+                key=f"hlf_opn_add_review_reactions_{context}",
+            ):
+                added = _apply_review_reaction_inputs(review_reactions)
+                st.toast(
+                    f"已加入复合体反应：KO {len(added['ko'])}、OE {len(added['oe'])}。"
+                    "这些反应在模型里可跑；但"
+                    "实验时要过表达/敲除的具体基因仍需按同源证据复核。"
+                )
+            st.caption(
+                f"另有 KO {len(review_reactions['ko'])}、OE {len(review_reactions['oe'])} 个候选**不能按基因跑**"
+                "（模型对分泌机器没有 GPR），但它们的复合体反应可跑——用上面的按钮填进"
+                "「复合体 / 反应级扰动（高级）」。"
+            )
+
         for warning in executable.get("warnings") or []:
             st.caption(str(warning))
 
@@ -134,7 +158,8 @@ def _render_candidate_metrics(
     metrics[0].metric(f"{context} 候选", len(candidates))
     metrics[1].metric("KO 可执行", len(executable.get("ko_gene_ids") or []))
     metrics[2].metric("OE 代理可执行", len(executable.get("oe_gene_ids") or []))
-    metrics[3].metric("仅复核/模型外", int(executable.get("excluded_count") or 0))
+    # 措辞诚实化：这些不是"没法用"，而是"只能按复合体反应跑"（其复合体反应在模型里真实可跑）。
+    metrics[3].metric("只能按反应跑", int(executable.get("excluded_count") or 0))
     metrics[4].metric("模型外候选", len(overlay_rows))
     target_counts = summary.get("target_candidate_counts") if isinstance(summary.get("target_candidate_counts"), dict) else {}
     if target_counts:
@@ -176,6 +201,48 @@ def _apply_executable_candidate_inputs(executable: dict[str, Any]) -> dict[str, 
     return {"ko": ko_gene_ids, "oe": oe_gene_ids}
 
 
+def _review_reactions_by_intervention(rows: list[dict[str, Any]]) -> dict[str, list[str]]:
+    """收集"不能按基因跑、但复合体反应可跑"的候选反应，按建议扰动方向分组。
+
+    只是把引擎**已经分好类**的 `review_reactions` 按 `recommended_intervention` 归堆（纯搬运，
+    不做科学判断）——判定哪些算 executable / review 仍归引擎
+    （`executable_inputs_for_hlf_opn_candidates`）。
+    """
+    grouped: dict[str, list[str]] = {"ko": [], "oe": []}
+    for row in rows:
+        reactions = [str(item).strip() for item in row.get("review_reactions") or [] if str(item).strip()]
+        if not reactions:
+            continue
+        bucket = {"KO": "ko", "OE": "oe"}.get(str(row.get("recommended_intervention") or "").upper())
+        if bucket is None:
+            continue  # review_only 之类不进反应框
+        for reaction in reactions:
+            if reaction not in grouped[bucket]:
+                grouped[bucket].append(reaction)
+    return grouped
+
+
+def _apply_review_reaction_inputs(reactions: dict[str, list[str]]) -> dict[str, list[str]]:
+    """把复合体反应填进**反应**框（不是基因框）。
+
+    与 `_apply_executable_candidate_inputs` 分开：那个只碰基因框（有测试锁着，给基因就别写反应框），
+    这个只碰反应框。两者都不覆盖已有内容，走 merge。
+    """
+    ko = list(reactions.get("ko") or [])
+    oe = list(reactions.get("oe") or [])
+    if ko:
+        st.session_state["pichia_draft_ko_reactions"] = merge_candidate_text(
+            str(st.session_state.get("pichia_draft_ko_reactions", "")),
+            ko,
+        )
+    if oe:
+        st.session_state["pichia_draft_oe_reactions"] = merge_candidate_text(
+            str(st.session_state.get("pichia_draft_oe_reactions", "")),
+            oe,
+        )
+    return {"ko": ko, "oe": oe}
+
+
 def _toast_added_inputs(context: str, added: dict[str, list[str]], excluded_count: int) -> None:
     parts: list[str] = []
     if added["ko"]:
@@ -191,6 +258,16 @@ def _candidate_frame(rows: list[dict[str, Any]]) -> pd.DataFrame:
         [
             {
                 "目标": _label(row.get("target_context", "")),
+                # 策展俗名放最前：这才是研究员认得的名字（PDI1 / KAR2 / OCH1）。此前整张表只有位点号
+                # 和模型注释，俗名根本没列出来，结果看着像一堆无意义的门牌号。
+                "俗名": row.get("source_common_name", ""),
+                "分泌环节": row.get("source_category", ""),
+                # 唯一能跑这些候选的入口。此前完全不显示，导致"仅复核"看着像死胡同。
+                "可跑的复合体反应": _join_values(
+                    row.get("executable_ko_reactions")
+                    or row.get("executable_oe_proxy_reactions")
+                    or row.get("review_reactions")
+                ),
                 "基因": row.get("gene_id", ""),
                 "标准命名": row.get("display_name", ""),
                 "标准符号": row.get("standard_symbol", ""),
