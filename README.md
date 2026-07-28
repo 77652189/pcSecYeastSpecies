@@ -35,8 +35,9 @@ The Python layer is not a full rewrite of the three-species MATLAB project. It d
 | Cross-species MATLAB models | Reference model construction, simulation scripts, figure scripts, enzyme data, and processed results are retained under the original folders |
 | Python pcSecPichia engine | Loads Pichia model inputs, applies media conditions, builds target-protein secretion plans, adds constraints, solves secretion-capacity scenarios, and summarizes results |
 | Target proteins | Supports built-in reference targets, project-specific targets, candidate targets, and custom target inputs |
-| Medium conditions | Supports baseline and carbon-source conditions, including mixed-carbon objective probes |
-| KO/OE analysis | Supports candidate preview, screen rows, small candidate screens, and genome-wide KO/OE screen tooling |
+| Medium conditions | Supports baseline and carbon-source conditions, including mixed-carbon objective probes and internal carbon-source condition calibration |
+| KO/OE analysis | Supports candidate preview, screen rows, small candidate screens, genome-wide KO/OE screen tooling, and modified-strain re-solve shortlists with layered reuse |
+| Decision-support signals | Relative-signal deepening: shadow-price bottleneck attribution, OE dose-response shape, ranking robustness, and value-of-information (relative comparison only, never absolute capacity) |
 | Evidence layer | Adds gene catalog, gene-rule overlays, phenotype-evidence tiers, and recommendation wording for manual review |
 | Local workbench | Streamlit UI for biology users, with service-layer request mapping, background task support, and report-style outputs |
 
@@ -179,7 +180,7 @@ Slow solver/model checks are intentionally gated by environment variables. See [
 |---|---|
 | [Docs Index](docs/README.md) | Current document entry points and archived notes |
 | [Current Requirements And Architecture](docs/pichia_current_architecture_and_requirements.md) | Active target-protein workflow, boundaries, and system layering |
-| [BLAST/RBH Homology Crosswalk](docs/pichia_homology_crosswalk_architecture.md) | Offline SCE-to-Pichia homology evidence design |
+| [Execution Plan](docs/EXECUTION_PLAN.md) | Current stage, data-gated next work, and scope boundaries |
 | [Data And Artifact Governance](docs/pichia_current_architecture_and_requirements.md#数据与产物治理) | Protected directories, runtime artifacts, and archive rules |
 
 ## Citation And Contact

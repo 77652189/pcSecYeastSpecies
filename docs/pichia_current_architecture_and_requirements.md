@@ -1,7 +1,7 @@
 # pcSecPichia 当前架构与能力边界
 
 状态：active  
-最后更新：2026-07-23
+最后更新：2026-07-28
 
 ## 原始研发目标
 
@@ -50,7 +50,7 @@ OE 产品能力分为两个独立层级：相对、未校准的决策层用于�
   -> 实验反馈与下一轮排序校准
 ```
 
-实验反馈闭环和 OE 产品分层已经完成。reaction proxy、relative uncalibrated、absolute unavailable 和 not executable 由核心层统一判定；绝对 hLF/OPN gene-capacity 因缺审核 baseline capacity 保持不可执行。当前架构工作转向独立 secretory resource layer。
+实验反馈闭环和 OE 产品分层已经完成。reaction proxy、relative uncalibrated、absolute unavailable 和 not executable 由核心层统一判定；绝对 hLF/OPN gene-capacity 因缺审核 baseline capacity 保持不可执行。分泌资源层（direction 3）Round 0 已完成，其后又落地相对信号深化 R1–R4、碳源条件标定和改造后候选系统（见下“已有能力”）；**候选生成侧能力至此完整，当前收在“等湿实验数据”**——剩余有意义工作（#2 实验反馈一致性验证、RNA-seq 表达约束、绝对容量）均数据门控。
 
 ## 已有能力
 
@@ -63,6 +63,7 @@ OE 产品能力分为两个独立层级：相对、未校准的决策层用于�
 - 生成 OE reaction-capacity proxy，并保留“不是 gene-level OE”的 warning。
 - 输出 secretion ratio、growth retention、最大可行生长率、protein cost 和 solver 状态。
 - 对 essential KO、growth risk、不可解析和模型不可执行候选进行降级。
+- **改造后候选系统**：把 KO/OE 叠进模型重解（`strain_modifications`，默认关闭、glucose 逐字不变），对改造后菌株再找瓶颈并排下一步 OE/KO 候选（迭代 1），并用分层复用（受影响层重算、其余复用同口径野生型基线缓存）产出改造后短名单（迭代 2）。复用是**近似**、显式标注失效范围；**真增益只在瓶颈集中（约束档开、folding-limited）时兑现**，约束档关时瓶颈弥散、候选被保守全标“已失效”。KO 无免费派生、必求解；层复用只对分泌专属层干净、代谢桶保守。
 
 ### 基因、GPR 与证据
 
@@ -95,6 +96,7 @@ OE 产品能力分为两个独立层级：相对、未校准的决策层用于�
 - prediction linkage 显式区分 matched、ambiguous、missing 和 context mismatch。
 - hLF/OPN 回放可生成校准记录、方向一致性、Top-K 描述指标和证据不足提示。
 - 实验导入不会自动修改 recommendation tier、curated evidence 或模型约束。
+- **一致性记分卡（模型 KO/OE 预测 ↔ 实验改造→titer 对齐）当前数据门控**：`direction_consistent` / `rank_correlation` 信号机器现成，但在手私有数据只有 PH / 温度条件验证时间序列、**缺“改造→titer”可链数据集**，稀疏 N 被门槛卡、未投短名单。数据到位当天可落。
 
 ## 核心证据边界
 
@@ -141,7 +143,7 @@ OE 产品能力分为两个独立层级：相对、未校准的决策层用于�
 2. **gene-level OE capacity**：产品分层已验收关闭。reaction proxy / 相对未校准 / 绝对 unavailable / not-executable 由核心层统一判定；绝对层缺 reviewed baseline capacity 保持 unavailable。
 3. **分泌通路机制约束**：Round 0 完成，七类资源架构与可执行契约冻结；ERAD 约束验证完成、决定保持可选（不改默认值）。不做完整机制求解 / 组合搜索。
 4. **组合改造设计**：**战略性暂缓**——真实组合在模型范围外，模型内搜遗传组合（GA/SA/MILP）低价值；留到有稳定性标注的可信单基因排序后，仅在 top 短名单做有界两两上位性。
-5. **条件鲁棒性筛查**：从局部验收维度**有界升级**为当前 slice（碳源条件标定 + 短名单跨条件稳健性标注，见执行计划阶段① / [ADR-006](adr/006-carbon-source-condition-calibration.md)）。无界完整跨条件排名产品仍不做。**当前结论**：hLF OE 短名单跨碳源（甘油/葡萄糖）稳健——top-15 候选均 `saturating`、排序逐字不变（分泌机器瓶颈杠杆与碳源无关，合 R1 folding-limited）；真实工艺条件集 0 表观敏感，噪声门控（B3）在未来出现敏感时再建。
+5. **条件鲁棒性筛查**：从局部验收维度**有界升级**为一个独立 slice 并已收尾（碳源条件标定 + 短名单跨条件稳健性标注，见执行计划已完成能力 / [ADR-006](adr/006-carbon-source-condition-calibration.md)）。无界完整跨条件排名产品仍不做。**当前结论**：hLF OE 短名单跨碳源（甘油/葡萄糖）稳健——top-15 候选均 `saturating`、排序逐字不变（分泌机器瓶颈杠杆与碳源无关，合 R1 folding-limited）；真实工艺条件集 0 表观敏感，噪声门控（B3）在未来出现敏感时再建。
 
 **横切层**（不属于单个方向，叠在相对决策层上）：相对信号深化 R1–R4（[ADR-004](adr/004-relative-signal-deepening-under-permanent-data-gap.md)：瓶颈归因 / 剂量响应形状 / 排序稳健性 / 价值-of-information，均已落地）；RNA-seq 表达约束（[ADR-005](adr/005-rnaseq-expression-constrained-enzyme-capacity.md)，待数据）；碳源条件标定（[ADR-006](adr/006-carbon-source-condition-calibration.md)，进行中）。绝对容量层恒 unavailable；目标蛋白降解层明确不建。
 

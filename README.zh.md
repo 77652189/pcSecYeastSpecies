@@ -35,8 +35,9 @@ Python 层不是三物种 MATLAB 项目的完整重写，而是只迁移当前�
 | 跨物种 MATLAB 模型 | 原始构建脚本、仿真脚本、figure 脚本、酶数据和处理结果保留在原目录 |
 | Python pcSecPichia 引擎 | 支持 Pichia 输入加载、培养基条件、目标蛋白分泌路径、约束构建、求解和结果摘要 |
 | 目标蛋白 | 支持内置参考目标、项目专属目标、候选目标和自定义目标输入 |
-| 培养基条件 | 支持基础碳源条件和混合碳源目标探针 |
-| KO/OE 分析 | 支持候选预览、筛查结果行、小规模候选筛查和全基因组 KO/OE 筛查工具 |
+| 培养基条件 | 支持基础碳源条件、混合碳源目标探针和内部碳源条件标定 |
+| KO/OE 分析 | 支持候选预览、筛查结果行、小规模候选筛查、全基因组 KO/OE 筛查工具，以及改造后菌株重解短名单（分层复用） |
+| 决策支持信号 | 相对信号深化：影子价格瓶颈归因、OE 剂量响应形状、排序稳健性和价值-of-information（仅相对比较，绝不给绝对容量） |
 | 证据层 | 支持基因目录、基因规则覆盖、表型证据分层和人工复核提示 |
 | 本地工作台 | 提供面向生物研发用户的 Streamlit 页面、后台任务和报告式输出 |
 
@@ -179,7 +180,7 @@ python -m pytest -q tests\test_pichia_secretion_service_contract.py
 |---|---|
 | [文档索引](docs/README.md) | 当前文档入口和归档记录 |
 | [当前需求与架构](docs/pichia_current_architecture_and_requirements.md) | 目标蛋白工作流、科学边界和系统分层 |
-| [BLAST/RBH 同源映射架构](docs/pichia_homology_crosswalk_architecture.md) | 酿酒酵母到 Pichia 的离线同源证据层设计 |
+| [执行计划](docs/EXECUTION_PLAN.md) | 当前阶段、待数据工作和范围边界 |
 | [数据与产物治理](docs/pichia_current_architecture_and_requirements.md#数据与产物治理) | 保护目录、运行产物和归档规则 |
 
 ## 引用与联系人
