@@ -85,12 +85,14 @@ def test_docs_readme_routes_to_current_slice() -> None:
 
 def test_handoff_points_to_current_slice() -> None:
     # handoff 精简为"当前目标 + 下一步 + 必读 + 验证"；current_slice 随推进更新
-    # （从 direction_3_erad 推进到 direction_5 碳源标定 + 跨条件稳健性）。
+    # （direction_3_erad → direction_5 碳源标定 → 改造后分层短名单 → 当前的可用性/可达性）。
     text = (REPO_ROOT / "docs" / "handoff.md").read_text(encoding="utf-8")
 
-    assert "current_slice: modified_strain_ko_oe_layered_shortlist" in text
-    # 迭代2 D1–D6 全落地全 push；#2 验证诊断为数据门控 → slice 收在"生成侧完成、等数据"。
-    assert "slice_status: done" in text
+    # 2026-07-28：迭代2 D1–D6 已全 push，slice 推进到阶段④ 可用性 + 可达性（ADR-007）。
+    # 此前"剩余全部数据门控"的判断已被证伪——分泌机器复合体可跑但界面上不可达，属非数据门控。
+    assert "current_slice: usability_and_secretory_machinery_reachability" in text
+    assert "slice_status: in_progress" in text
+    assert "previous_slice: modified_strain_ko_oe_layered_shortlist" in text
     assert "absolute_capacity_status: unavailable_waiting_for_qualified_evidence" in text
     assert "碳源条件标定 + 跨条件稳健性" in text
     # 硬边界必须在场
