@@ -663,19 +663,29 @@ def _render_solver_robustness(solver_robustness: dict[str, object]) -> None:
 
 
 def _short_reaction_label(reaction_id: str, max_len: int = 34) -> str:
-    """Human-scannable label for a reaction id: drop boilerplate suffixes, middle-truncate huge names.
+    """图表轴/图例上的反应标签：优先显示**可读名称**，没有名称才退回压缩后的 id。
 
-    Model reaction ids like `sec_Pdi1p_complex_formation` or a 90-char COPII complex are unreadable on a
-    chart axis/legend; this keeps the informative head and tail so a biologist can still recognize it.
+    名称解析统一走 `app.services.display_naming`（模型自带 rxnNames → 策展俗名 → 借基因名），
+    别在这里再造一套——此前各页面各自截断 id，同一个反应在不同页面长得不一样、也永远看不到名字。
     """
-    label = str(reaction_id)
+    resolved = str(reaction_id)
+    try:
+        from app.services.display_naming import reaction_display_name
+
+        name = reaction_display_name(resolved)
+    except Exception:  # noqa: BLE001 - 命名是显示增强，失败就退回原 id
+        name = ""
+    if name:
+        # 图表空间有限：有名字时只放名字（完整 id 在表格与悬浮里仍可见）。
+        return name if len(name) <= max_len else f"{name[: max_len - 1]}…"
+    label = resolved
     for suffix in ("_complex_formation", "_formation", "_complex"):
         if label.endswith(suffix):
             label = label[: -len(suffix)]
             break
     if len(label) > max_len:
         label = f"{label[: max_len - 12]}…{label[-11:]}"
-    return label or str(reaction_id)
+    return label or resolved
 
 
 def _resource_layer_label(process: object) -> str:

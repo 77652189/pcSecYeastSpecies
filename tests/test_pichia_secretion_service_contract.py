@@ -579,7 +579,11 @@ def test_streamlit_relative_signal_charts_render_biologist_facing_figures() -> N
     # biologist-facing labels: strip boilerplate suffix, middle-truncate huge ids, and localize the
     # engine-provided secretory_process code via the central i18n dict (the engine now classifies
     # sec_* complexes itself, so this is a straight lookup with no name-based inference).
-    assert _short_reaction_label("sec_Pdi1p_complex_formation") == "sec_Pdi1p"
+    # 2026-07-29：标签升级为"优先显示可读名称"（模型自带 rxnNames → 策展俗名 → 借基因名），
+    # 只有查不到名称才退回压缩后的 id。此前一律只给截断 id，研究员看不出这条反应是什么。
+    assert _short_reaction_label("sec_Pdi1p_complex_formation").startswith("PDI1")  # 策展俗名
+    assert _short_reaction_label("METtm_no_1_fwd").startswith("L-methionine")  # 模型自带名称
+    assert _short_reaction_label("TOTALLY_UNKNOWN_RXN") == "TOTALLY_UNKNOWN_RXN"  # 查不到就原样给 id
     long_id = "PAS_chr2-2_0475_COPII_ERGL_sec_Ypt1p_Uso1p_Bet3p_Bet5p_Trs20p_Trs23p_Trs31p_Trs33p_complex"
     assert len(_short_reaction_label(long_id)) <= 34 and "…" in _short_reaction_label(long_id)
     assert _resource_layer_label("disulfide_folding") == "二硫键折叠 / DSB"  # PDI floor, classified by the engine

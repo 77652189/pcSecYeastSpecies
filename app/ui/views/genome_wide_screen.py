@@ -832,8 +832,21 @@ def _localize_screen_frame(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _short_reaction(reaction_id: object) -> str:
-    """去掉复合体反应名冗长的样板后缀，缩短图表 y 轴标签（模型自身实体名，非保密内容）。"""
-    label = str(reaction_id)
+    """图表 y 轴标签：优先显示可读名称，没有才退回压缩后的 id。
+
+    名称解析统一走 `app.services.display_naming`——不要在这里再造一套截断逻辑
+    （此前本页与结果页各有一份，同一个反应两边显示不一致、且都看不到名字）。
+    """
+    resolved = str(reaction_id)
+    try:
+        from app.services.display_naming import reaction_display_name
+
+        name = reaction_display_name(resolved)
+    except Exception:  # noqa: BLE001 - 命名是显示增强，失败退回原 id
+        name = ""
+    if name:
+        return name if len(name) <= 34 else name[:33] + "…"
+    label = resolved
     for suffix in ("_complex_formation", "_complex", "_formation"):
         if label.endswith(suffix):
             label = label[: -len(suffix)]

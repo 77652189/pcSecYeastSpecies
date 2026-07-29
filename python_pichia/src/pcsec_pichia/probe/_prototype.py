@@ -5,7 +5,7 @@ import json
 import math
 import re
 from collections import Counter
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field as dataclass_field
 from pathlib import Path
 from typing import Iterable
 
@@ -76,6 +76,18 @@ class CobraModel:
     s_matrix: sparse.csc_matrix
     rules: list[str]
     gr_rules: list[str]
+    # 反应的可读名称（.mat 里的 rxnNames，29026 条全覆盖、其中 18371 条比 id 多给信息）。
+    # 纯展示用、**不参与任何计算**——加载器此前没读这一列，导致界面上只能显示 PROTEINS_glyc、
+    # METtm_no_1_fwd 这类 id。默认空列表，历史构造点不受影响。
+    rxn_names: list[str] = dataclass_field(default_factory=list)
+
+    def reaction_name(self, reaction_id: str) -> str:
+        """反应 id → 可读名称；没有名称（或名称与 id 相同）时返回空串。"""
+        index = self.reaction_index.get(reaction_id)
+        if index is None or index >= len(self.rxn_names):
+            return ""
+        name = str(self.rxn_names[index] or "").strip()
+        return "" if name == reaction_id else name
 
     @property
     def reaction_index(self) -> dict[str, int]:
@@ -108,6 +120,7 @@ class CobraModel:
             s_matrix=self.s_matrix,
             rules=self.rules,
             gr_rules=self.gr_rules,
+            rxn_names=self.rxn_names,
         )
 
     def add_reaction(
@@ -156,6 +169,8 @@ class CobraModel:
             s_matrix=new_matrix,
             rules=[*self.rules, rule],
             gr_rules=[*self.gr_rules, gr_rule],
+            # 新增反应没有 .mat 名称；补空串保持与 rxns 等长，否则后续按下标取名会错位。
+            rxn_names=[*self.rxn_names, ""] if self.rxn_names else [],
         )
 
 
@@ -457,10 +472,14 @@ def load_pcsec_pichia_model(root: Path) -> CobraModel:
     rules = string_list(getattr(model, "rules", []))
     gr_rules = string_list(getattr(model, "grRules", []))
     rxns = string_list(getattr(model, "rxns"))
+    # 反应可读名称：纯展示，不参与计算。长度对不齐时补空，保证按下标取名永远安全。
+    rxn_names = string_list(getattr(model, "rxnNames", []))
     if len(rules) < len(rxns):
         rules.extend([""] * (len(rxns) - len(rules)))
     if len(gr_rules) < len(rxns):
         gr_rules.extend([""] * (len(rxns) - len(gr_rules)))
+    if len(rxn_names) < len(rxns):
+        rxn_names.extend([""] * (len(rxns) - len(rxn_names)))
     result = CobraModel(
         source_file=str(path),
         rxns=rxns,
@@ -472,6 +491,7 @@ def load_pcsec_pichia_model(root: Path) -> CobraModel:
         s_matrix=matrix,
         rules=rules,
         gr_rules=gr_rules,
+        rxn_names=rxn_names,
     )
     _MODEL_CACHE[cache_key] = result
     return result
