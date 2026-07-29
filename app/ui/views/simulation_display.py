@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.core.i18n import sim_result_value_label
+
 import pandas as pd
 
 
@@ -55,92 +57,128 @@ CANDIDATE_DISPLAY_COLUMNS = {
 }
 
 
+# 键集合在此声明，中文释义统一取自中央字典（app.core.i18n），不再各写一份。
 TARGET_SEMANTICS_LABELS = {
-    "project_defined_hLF": "项目定义 hLF（用户提供序列）",
-    "product_target": "产品草案目标",
-    "opn_leader_candidate": "OPN leader 候选",
-    "custom": "自定义目标",
-    "native_signal_plus_mature_hLF": "人源天然信号肽 + mature hLF",
-    "mature_secreted_with_leader_candidate": "成熟蛋白 + leader 候选",
-    "mature_secreted": "成熟分泌蛋白",
-    "custom_user_sequence": "用户自定义序列",
-    "user_provided_as_provided": "用户提供序列，按原样使用",
-    "as_provided": "按提供序列记录",
+    code: sim_result_value_label(code)
+    for code in (
+    "project_defined_hLF",
+    "product_target",
+    "opn_leader_candidate",
+    "custom",
+    "native_signal_plus_mature_hLF",
+    "mature_secreted_with_leader_candidate",
+    "mature_secreted",
+    "custom_user_sequence",
+    "user_provided_as_provided",
+    "as_provided",
+    )
 }
 
 
+# 键集合在此声明，中文释义统一取自中央字典（app.core.i18n），不再各写一份。
 MAPPING_LEVEL_LABELS = {
-    "direct_gpr": "GPR 直接关联",
-    "complex_subunit": "复合体亚基",
-    "reaction_proxy": "反应代理",
-    "metabolic_or_other": "代谢/其它",
-    "unresolved": "未解析",
+    code: sim_result_value_label(code)
+    for code in (
+    "direct_gpr",
+    "complex_subunit",
+    "reaction_proxy",
+    "metabolic_or_other",
+    "unresolved",
+    )
 }
 
 
+# 键集合在此声明，中文释义统一取自中央字典（app.core.i18n），不再各写一份。
 MAPPING_CONFIDENCE_LABELS = {
-    "high": "高",
-    "medium": "中",
-    "low": "低",
-    "unresolved": "未解析",
+    code: sim_result_value_label(code)
+    for code in (
+    "high",
+    "medium",
+    "low",
+    "unresolved",
+    )
 }
 
 
+# 键集合在此声明，中文释义统一取自中央字典（app.core.i18n），不再各写一份。
 GPR_ROLE_LABELS = {
-    "single_gene": "单基因酶",
-    "isoenzyme": "同工酶",
-    "complex_subunit": "复合体亚基",
-    "mixed": "混合 GPR",
-    "reaction_level": "反应级",
-    "unresolved": "未解析",
+    code: sim_result_value_label(code, domain="gpr_role")
+    for code in (
+    "single_gene",
+    "isoenzyme",
+    "complex_subunit",
+    "mixed",
+    "reaction_level",
+    "unresolved",
+    )
 }
 
 
+# 键集合在此声明，中文释义统一取自中央字典（app.core.i18n），不再各写一份。
 CAPACITY_EFFECT_LABELS = {
-    "disables_reactions": "失活反应",
-    "no_reaction_disabled": "未失活反应",
-    "reaction_disabled": "反应敲除",
-    "reaction_capacity_proxy": "反应容量代理",
-    "partial_reaction_capacity_proxy": "部分反应容量代理",
-    "complex_subunit_limited": "复合体亚基受限",
-    "manual_review_required": "需要人工检查",
-    "no_gpr_effect": "模型无 GPR 影响",
-    "unresolved": "未解析",
+    code: sim_result_value_label(code, domain="capacity_effect")
+    for code in (
+    "disables_reactions",
+    "no_reaction_disabled",
+    "reaction_disabled",
+    "reaction_capacity_proxy",
+    "partial_reaction_capacity_proxy",
+    "complex_subunit_limited",
+    "manual_review_required",
+    "no_gpr_effect",
+    "unresolved",
+    )
 }
 
 
+# 键集合在此声明，中文释义统一取自中央字典（app.core.i18n），不再各写一份。
 SIMULATION_BASIS_LABELS = {
-    "gpr_gene_deletion": "GPR 基因敲除",
-    "reaction_deletion": "反应敲除",
-    "reaction_level_capacity_proxy": "反应级容量代理",
-    "explain_only": "仅解释",
-    "unresolved": "未解析",
+    code: sim_result_value_label(code)
+    for code in (
+    "gpr_gene_deletion",
+    "reaction_deletion",
+    "reaction_level_capacity_proxy",
+    "explain_only",
+    "unresolved",
+    )
 }
 
 
+# 键集合在此声明，中文释义统一取自中央字典（app.core.i18n），不再各写一份。
 KO_SUPPORT_STATUS_LABELS = {
-    "ko_runnable_gpr_gene_deletion": "可运行：GPR 基因敲除",
-    "ko_no_reaction_disabled": "无明显 GPR 失活",
-    "ko_no_gpr_effect": "模型无 GPR 影响",
-    "unresolved_gene": "基因未解析",
-    "reaction_level_diagnostic": "反应级诊断入口",
+    code: sim_result_value_label(code)
+    for code in (
+    "ko_runnable_gpr_gene_deletion",
+    "ko_no_reaction_disabled",
+    "ko_no_gpr_effect",
+    "unresolved_gene",
+    "reaction_level_diagnostic",
+    )
 }
 
 
+# 键集合在此声明，中文释义统一取自中央字典（app.core.i18n），不再各写一份。
 OE_SUPPORT_STATUS_LABELS = {
-    "oe_runnable_reaction_proxy": "可运行：反应容量代理",
-    "oe_explain_only_complex_subunit": "仅解释：复合体亚基受限",
-    "oe_explain_only_no_capacity_model": "仅解释：缺少容量模型",
-    "oe_no_gpr_effect": "模型无 GPR 影响",
-    "unresolved_gene": "基因未解析",
-    "reaction_level_diagnostic": "反应级诊断入口",
+    code: sim_result_value_label(code)
+    for code in (
+    "oe_runnable_reaction_proxy",
+    "oe_explain_only_complex_subunit",
+    "oe_explain_only_no_capacity_model",
+    "oe_no_gpr_effect",
+    "unresolved_gene",
+    "reaction_level_diagnostic",
+    )
 }
 
 
+# 键集合在此声明，中文释义统一取自中央字典（app.core.i18n），不再各写一份。
 WET_LAB_READINESS_LABELS = {
-    "database_supported_experiment_candidate": "可直接推进：数据库精确支持",
-    "manual_review_required": "需人工确认：有部分数据库证据",
-    "model_only_not_experiment_ready": "仅模型级候选：不建议直接实验",
+    code: sim_result_value_label(code, domain="wet_lab_readiness")
+    for code in (
+    "database_supported_experiment_candidate",
+    "manual_review_required",
+    "model_only_not_experiment_ready",
+    )
 }
 
 

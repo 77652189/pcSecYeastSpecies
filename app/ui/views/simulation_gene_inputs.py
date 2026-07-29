@@ -23,20 +23,12 @@ from app.ui.views.simulation_gene_catalog import render_gene_lookup_panel
 from app.ui.views.simulation_gene_text import parse_candidate_text
 
 
-MAPPING_LEVEL_LABELS = {
-    "direct_gpr": "GPR 直接关联",
-    "complex_subunit": "复合体亚基",
-    "reaction_proxy": "反应代理",
-    "metabolic_or_other": "代谢/其它",
-    "unresolved": "未解析",
-}
-
-MAPPING_CONFIDENCE_LABELS = {
-    "high": "高",
-    "medium": "中",
-    "low": "低",
-    "unresolved": "未解析",
-}
+# 这两个字典曾在本文件与 simulation_display.py **各定义一份**（内容当时恰好相同，但迟早分叉）。
+# 现统一从 simulation_display 复用，而后者又源自中央字典 app.core.i18n——单一来源。
+from app.ui.views.simulation_display import (  # noqa: E402 - 复用同一份标签，避免重复定义
+    MAPPING_CONFIDENCE_LABELS,
+    MAPPING_LEVEL_LABELS,
+)
 
 
 @dataclass(frozen=True)

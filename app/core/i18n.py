@@ -232,6 +232,8 @@ SIMULATION_RESULT_VALUE_LABELS = {
     "non_monotonic_successful_grid": "所测生长速率上分泌不单调（各点均求解成功）",
     "insufficient_successful_points": "求解成功的点太少，判不出趋势",
     "insufficient_points": "数据点不足",
+    # 通用释义；容量效应 / 湿实验就绪度语境下另有更具体的说法，见 DOMAIN_VALUE_LABELS
+    "manual_review_required": "需人工复核",
     # R4 歧义类型
     "near_tie": "近似并列（模型分不清谁更好）",
     "capacity_flip": "跨容量假设翻转",
@@ -326,6 +328,97 @@ SIMULATION_RESULT_VALUE_LABELS = {
     False: "否",
     "True": "是",
     "False": "否",
+    # ↓↓↓ 2026-07-29 从各视图的本地枚举字典收拢而来（此前散在 simulation_display /
+    # hlf_opn_candidate_panel / homology_audit / simulation_results 等处，同一编码多处重复定义、
+    # 且已出现同码不同义）。一码多义的少数编码不在这里，见 DOMAIN_VALUE_LABELS。
+    # 目标语义 / 序列角色 / 规范化
+    "project_defined_hLF": "项目定义 hLF（用户提供序列）",
+    "product_target": "产品草案目标",
+    "opn_leader_candidate": "OPN leader 候选",
+    "custom": "自定义目标",
+    "native_signal_plus_mature_hLF": "人源天然信号肽 + mature hLF",
+    "mature_secreted_with_leader_candidate": "成熟蛋白 + leader 候选",
+    "mature_secreted": "成熟分泌蛋白",
+    "custom_user_sequence": "用户自定义序列",
+    "user_provided_as_provided": "用户提供序列，按原样使用",
+    "as_provided": "按提供序列记录",
+    # 基因→反应映射层级与置信度
+    "direct_gpr": "GPR 直接关联",
+    "reaction_proxy": "反应代理",
+    # GPR 角色
+    "reaction_level": "反应级",
+    # 绝对容量场景效应
+    "disables_reactions": "失活反应",
+    "no_reaction_disabled": "未失活反应",
+    "reaction_disabled": "反应敲除",
+    "reaction_capacity_proxy": "反应容量代理",
+    "partial_reaction_capacity_proxy": "部分反应容量代理",
+    "complex_subunit_limited": "复合体亚基受限",
+    "no_gpr_effect": "模型无 GPR 影响",
+    # 仿真依据
+    "gpr_gene_deletion": "GPR 基因敲除",
+    "reaction_deletion": "反应敲除",
+    "reaction_level_capacity_proxy": "反应级容量代理",
+    "explain_only": "仅解释",
+    # KO / OE 可执行性
+    "ko_runnable_gpr_gene_deletion": "可运行：GPR 基因敲除",
+    "ko_no_reaction_disabled": "无明显 GPR 失活",
+    "ko_no_gpr_effect": "模型无 GPR 影响",
+    "unresolved_gene": "基因未解析",
+    "reaction_level_diagnostic": "反应级诊断入口",
+    "oe_runnable_reaction_proxy": "可运行：反应容量代理",
+    "oe_explain_only_complex_subunit": "仅解释：复合体亚基受限",
+    "oe_explain_only_no_capacity_model": "仅解释：缺少容量模型",
+    "oe_no_gpr_effect": "模型无 GPR 影响",
+    # 湿实验就绪度
+    "database_supported_experiment_candidate": "可直接推进：数据库精确支持",
+    # hLF/OPN 候选与 overlay 复核
+    "model_ko_executable": "模型可执行 KO",
+    "model_oe_proxy_executable": "模型可执行 OE（反应代理）",
+    "model_explain_only_complex_subunit": "仅解释：复合体亚基",
+    "not_in_model": "无基因把手（复合体反应可跑·基因归属待复核）",
+    "unresolved_name": "无单一基因（复合体/家族·反应可跑）",
+    "review_only": "仅复核",
+    "homology_auxiliary": "同源辅助证据",
+    "model_reaction_proxy": "模型反应代理",
+    "phenotype_or_literature_evidence": "表型/文献证据",
+    "curated_evidence_model_executable": "策展证据·模型可执行",
+    "homology_supported_review_required": "同源支持·需复核",
+    "model_executable_annotation_supported": "模型可执行·注释支持",
+    "reaction_proxy_review_required": "反应代理·需复核",
+    "high_exact_multi_source": "高·多源精确匹配",
+    "low_identity_review_required": "低相似度·需复核",
+    "model_ready_rbh_high_confidence": "RBH 高置信·模型就绪",
+    "no_reciprocal_hit": "无双向最佳命中",
+    "rbh_not_in_model": "RBH 命中但不在模型内",
+    "rule_transfer_low_confidence": "规则迁移·低置信",
+    "rule_transfer_not_supported": "规则迁移·不支持",
+    "rule_transfer_ready": "规则迁移·就绪",
+    "rule_transfer_supported_not_model_operable": "规则迁移支持·但模型不可操作",
+    "shared": "共享",
+    "candidate_gpr_overlay_review": "候选 GPR overlay 复核",
+    "eligible_for_overlay_if_all_complex_subunits_are_confirmed": "全部复合体亚基确认后可 overlay",
+    "manual_locus_review_required": "需人工核对基因座",
+    # 改造后复用的分泌模块
+    "folding": "折叠",
+    "transport": "转运",
+    "translation": "翻译",
+    "degradation": "降解",
+    "metabolic": "代谢/其它",
+    # 同源审计
+    "coverage_review_required": "覆盖度·需复核",
+    "paralog_risk_review_required": "旁系同源风险·需复核",
+    "unresolved_query_symbol": "查询符号未解析",
+    "name_confirmed_by_rbh": "RBH 确认命名",
+    "alias_confirmed_by_rbh": "RBH 确认别名",
+    "pichia_locus_confirmed_by_rbh": "RBH 确认 Pichia 基因座",
+    "sequence_name_conflict": "序列-命名冲突",
+    "external_name_missing": "缺外部命名",
+    "internal_name_missing": "缺内部命名",
+    "rule_transfer_paralog_risk": "规则迁移·旁系同源风险",
+    "rule_transfer_unresolved": "规则迁移·未解析",
+    "not_available": "不可用",
+    "available": "可用",
 }
 
 
@@ -395,10 +488,40 @@ def sim_result_column_label(name: object) -> str:
     return SIMULATION_RESULT_COLUMN_LABELS.get(str(name), str(name))
 
 
-def sim_result_value_label(value: object) -> str:
-    """结果页枚举/编码值 -> 中文（未知值回退原文；None -> —）。"""
+# 少数编码在**不同语境下含义不同**，扁平字典装不下——这里是它们唯一的登记处。
+# 例：`manual_review_required` 在容量效应里是"需要人工检查"，在湿实验就绪度里还要交代
+# "有部分数据库证据"。此前这类差异散在各视图的本地字典里，同一个码在三处三种说法、无人知情。
+# 新增按域覆盖必须写在这里并说明理由，不要再在视图里私开字典。
+DOMAIN_VALUE_LABELS: dict[str, dict[str, str]] = {
+    # 基因在 GPR 里的角色（相对通用词，需点明是"酶/GPR"语境）
+    "gpr_role": {
+        "single_gene": "单基因酶",
+        "mixed": "混合 GPR",
+    },
+    # 绝对容量场景的执行结论
+    "capacity_effect": {
+        "manual_review_required": "需要人工检查",
+    },
+    # 候选能不能拿去做实验——比通用"需复核"多一层证据说明
+    "wet_lab_readiness": {
+        "manual_review_required": "需人工确认：有部分数据库证据",
+        "model_only_not_experiment_ready": "仅模型级候选：不建议直接实验",
+    },
+}
+
+
+def sim_result_value_label(value: object, *, domain: str | None = None) -> str:
+    """结果页枚举/编码值 -> 中文（未知值回退原文；None -> —）。
+
+    `domain` 用于少数一码多义的编码（见 DOMAIN_VALUE_LABELS）；不传则走通用释义。
+    """
     if value is None:
         return "—"
+    if domain:
+        override = DOMAIN_VALUE_LABELS.get(domain, {})
+        key = value if value in override else str(value)
+        if key in override:
+            return override[key]
     if value in SIMULATION_RESULT_VALUE_LABELS:
         return SIMULATION_RESULT_VALUE_LABELS[value]
     return SIMULATION_RESULT_VALUE_LABELS.get(str(value), str(value))
