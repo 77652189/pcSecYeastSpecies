@@ -83,7 +83,9 @@ def render_gene_perturbation_form(target_id: str) -> GenePerturbationFormState:
 
     session_state 的 key 一律不变——`apply_simulation_prefill` 靠它们从筛查页填入候选。
     """
-    with st.expander("基因扰动", expanded=True):
+    # 外层不再自己开 expander：步骤向导（simulation._render_pichia_builder）已经提供了这一层容器，
+    # 再套一层会变成 expander 嵌套、且多一层无谓的点击。container 只分组、不加视觉外壳。
+    with st.container():
         # 反应级候选（策展库 / 复合体假设）会被预填进下面的高级区；若真被填了就必须自动展开，
         # 否则用户从筛查页点"在仿真验证中核实"跳来只看到两个空的基因框，会以为跳转没生效。
         reaction_prefilled = _has_text("pichia_draft_ko_reactions") or _has_text("pichia_draft_oe_reactions")
@@ -93,7 +95,8 @@ def render_gene_perturbation_form(target_id: str) -> GenePerturbationFormState:
         # 位置必须在输入框之前（写 session_state 的约束，见本函数 docstring）。
         target_context = target_context_for_hlf_opn_candidates(target_id)
         if target_context is not None:
-            with st.expander("① 选择要改造的基因 / 复合体（推荐从这里开始）", expanded=True):
+            # 不再用 ①②③ 编号：向导已经占用了这套编号，内部再编一次会撞号、看不出层级。
+            with st.expander("从候选里勾选（推荐从这里开始）", expanded=True):
                 render_candidate_selector(target_id, target_context=target_context)
 
         # 折叠成一行入口，展开才出内容——此前这两个面板默认展开、把输入框挤到屏幕外。
@@ -101,7 +104,7 @@ def render_gene_perturbation_form(target_id: str) -> GenePerturbationFormState:
             render_hlf_opn_candidate_panel(target_id)
             render_gene_lookup_panel()
 
-        st.markdown("**② 确认要跑的输入**（上面勾选的会自动填进来；也可手填）")
+        st.markdown("**确认要跑的输入**（上面勾选的会自动填进来；也可手填）")
         st.caption(
             "填**模型基因 ID**。从「全基因组KO/OE筛查」点“在仿真验证中核实”也会自动填好这里，不用手抄。"
             "多个条目用逗号、分号或换行分隔；单次最多 20 个候选。"

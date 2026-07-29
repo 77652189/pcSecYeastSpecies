@@ -83,22 +83,41 @@ def render_simulation() -> None:
         render_matlab_reference()
 
 
-def _render_pichia_builder() -> None:
-    st.caption("按 ①→②→③ 依次设置，然后点最下方的运行按钮。每步只呈现当前这件事，不必一屏看完。")
+_BUILDER_STEP_KEY = "pichia_builder_step"
+_BUILDER_STEPS = ("目标蛋白", "改造候选（KO/OE）", "培养条件与分析")
 
-    # 分步标签页：此前把"选目标 / 挑候选 / 设条件 / 选分析"平铺在一屏，元素多到看不过来。
-    # 注意：标签页内容是**急切渲染**的（和 expander 一样），所以这只降低视觉密度、不改渲染开销；
-    # 性能另有缓存与按需渲染处理。
-    tab_target, tab_candidates, tab_conditions = st.tabs(
-        ["① 目标蛋白", "② 改造候选（KO/OE）", "③ 培养条件与分析"]
-    )
-    with tab_target:
+
+def _render_pichia_builder() -> None:
+    # 分步向导：标签页地位平等、看不出先后，用户反馈"太不明显"。改成一次只展开当前步 +
+    # 显式的上一步/下一步，运行按钮只在最后一步出现。
+    #
+    # 为什么三步全部渲染、只是折叠起来：Streamlit 在某个控件本轮未渲染时会清掉它的 session_state，
+    # 只渲染当前步会导致"回到上一步时填过的内容全没了"，也会打断从筛查页跳来的预填。
+    # 全渲染 + 只展开当前步，既有向导的引导感，又不丢状态。
+    step = int(st.session_state.get(_BUILDER_STEP_KEY, 1))
+    step = min(max(step, 1), len(_BUILDER_STEPS))
+    st.caption(f"第 {step} / {len(_BUILDER_STEPS)} 步 — {_BUILDER_STEPS[step - 1]}")
+    st.progress(step / len(_BUILDER_STEPS))
+
+    with st.expander(f"① {_BUILDER_STEPS[0]}", expanded=step == 1):
         target_fields = render_target_selection()
-    with tab_candidates:
+    with st.expander(f"② {_BUILDER_STEPS[1]}", expanded=step == 2):
         gene_state = render_gene_perturbation_form(str(target_fields["target_id"]))
-    with tab_conditions:
+    with st.expander(f"③ {_BUILDER_STEPS[2]}", expanded=step == 3):
         condition_fields = render_conditions_and_constraints()
     build_state = TargetBuildFormState(**target_fields, **condition_fields)
+
+    col_back, col_next, _ = st.columns([1, 1, 3])
+    if step > 1 and col_back.button("← 上一步", key="pichia_builder_prev_step"):
+        st.session_state[_BUILDER_STEP_KEY] = step - 1
+        st.rerun()
+    if step < len(_BUILDER_STEPS) and col_next.button("下一步 →", key="pichia_builder_next_step", type="primary"):
+        st.session_state[_BUILDER_STEP_KEY] = step + 1
+        st.rerun()
+
+    if step < len(_BUILDER_STEPS):
+        st.caption("走到第 3 步后会出现运行按钮。")
+        return
 
     st.divider()
     out_dir = st.text_input("输出目录", value=str(PATHS.local_runs_dir/"streamlit_pichia_runs"), key="pichia_out")
