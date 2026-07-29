@@ -119,6 +119,27 @@ def test_merge_marks_builtin_readonly_and_custom_editable(paths) -> None:
     assert merged["my_sp"]["source"] == "custom"
 
 
+def test_copying_a_builtin_entry_under_a_new_id_is_how_editing_starts(paths) -> None:
+    """内置只读 ⇒ 没有自建条目时"修改"无从下手。起步方式是"复制内置 → 改 → 存新编号"，
+    这条路径必须走得通（用户 2026-07-28 反馈"看上去只有新建"就是因为它缺失）。"""
+    builtin = {"alpha_factor": {"label": "内置 alpha-factor", "sequence": "MRFPSIFTAVLFAASSALA"}}
+
+    copied = dict(lib.merge_with_builtin(builtin, lib.KIND_SIGNAL_PEPTIDE, paths=paths)["alpha_factor"])
+    copied["id"] = "alpha_factor_my_variant"
+    copied["label"] = "我的改版"
+    copied["sequence"] = copied["sequence"] + "GG"
+
+    ok, problems = lib.save_entry(
+        lib.KIND_SIGNAL_PEPTIDE, copied, builtin_ids=set(builtin), paths=paths
+    )
+
+    assert (ok, problems) == (True, [])
+    merged = lib.merge_with_builtin(builtin, lib.KIND_SIGNAL_PEPTIDE, paths=paths)
+    assert merged["alpha_factor"]["sequence"] == "MRFPSIFTAVLFAASSALA", "内置条目必须原样不动"
+    assert merged["alpha_factor_my_variant"]["editable"] is True
+    assert merged["alpha_factor_my_variant"]["sequence"].endswith("GG")
+
+
 def test_corrupt_or_stale_library_degrades_to_empty(paths) -> None:
     path = lib.library_path(paths)
     path.parent.mkdir(parents=True, exist_ok=True)

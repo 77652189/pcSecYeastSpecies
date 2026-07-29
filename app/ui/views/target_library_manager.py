@@ -59,27 +59,62 @@ def _overview_frame(entries: dict[str, dict[str, Any]], kind: str) -> pd.DataFra
 
 def _entry_form(kind: str, entries: dict[str, dict[str, Any]]) -> None:
     editable_ids = [key for key, value in entries.items() if value.get("editable")]
-    choice = st.selectbox(
-        "要做什么",
-        ["➕ 新建", *[f"✏️ 修改 {entry_id}" for entry_id in editable_ids]],
-        key=f"library_action_{kind}",
-    )
-    editing_id = choice.replace("✏️ 修改 ", "") if choice.startswith("✏️") else ""
-    current = entries.get(editing_id, {}) if editing_id else {}
+    builtin_ids = [key for key, value in entries.items() if value.get("source") == "builtin"]
 
-    with st.form(key=f"library_form_{kind}"):
+    # 内置条目只读，所以"修改"只列自建条目。但没有自建条目时"改"就无从下手——
+    # 故提供"从内置复制一份再改"：既能起步，又不破坏内置只读。
+    actions = ["➕ 新建"]
+    if builtin_ids:
+        actions.append("📋 从内置条目复制一份再改")
+    actions.extend(f"✏️ 修改 {entry_id}" for entry_id in editable_ids)
+    choice = st.selectbox("要做什么", actions, key=f"library_action_{kind}")
+
+    editing_id = ""
+    current: dict[str, Any] = {}
+    if choice.startswith("✏️"):
+        editing_id = choice.replace("✏️ 修改 ", "")
+        current = entries.get(editing_id, {})
+    elif choice.startswith("📋"):
+        # 这个选择框必须在 st.form 之外：表单内的控件要提交后才触发重跑，选了也不会即时带出内容。
+        copy_from = st.selectbox(
+            "复制自",
+            builtin_ids,
+            format_func=lambda key: entries[key].get("label", key),
+            key=f"library_copy_from_{kind}",
+        )
+        current = dict(entries.get(copy_from, {}))
+        st.caption(f"已带出「{entries[copy_from].get('label', copy_from)}」的内容，改完取个新编号保存即可。")
+    elif not editable_ids:
+        st.caption("内置条目只读；新建一条，或用上面的“从内置条目复制一份再改”起步。")
+
+    # 控件 key 要跟随当前选择变化：带 key 的控件在重跑时优先用 session_state、会忽略新的 value=，
+    # 那样"复制/切换修改对象"时旧值会粘住不更新（尤其是三个 PTM 数值框）。
+    scope = f"{kind}_{editing_id or str(current.get('id') or 'new')}"
+
+    with st.form(key=f"library_form_{scope}"):
         col_id, col_label = st.columns([1, 2])
-        entry_id = col_id.text_input("编号", value=editing_id, disabled=bool(editing_id), help="字母/数字/下划线")
-        label = col_label.text_input("名称", value=str(current.get("label", "")), help="下拉框里显示的名字")
+        entry_id = col_id.text_input(
+            "编号",
+            value=editing_id,
+            disabled=bool(editing_id),
+            help="字母/数字/下划线；复制内置条目时请取一个新编号",
+            key=f"library_id_{scope}",
+        )
+        label = col_label.text_input(
+            "名称", value=str(current.get("label", "")), help="下拉框里显示的名字", key=f"library_label_{scope}"
+        )
 
         if kind == library.KIND_TEMPLATE:
-            signal_sequence = st.text_area("信号肽序列（可空）", value=str(current.get("signal_peptide_sequence", "")), height=68)
-            leader_sequence = st.text_area("引导肽序列（可空）", value=str(current.get("leader_sequence", "")), height=68)
-            main_sequence = st.text_area("成熟蛋白序列", value=str(current.get("mature_sequence", "")), height=110)
+            signal_sequence = st.text_area("信号肽序列（可空）", value=str(current.get("signal_peptide_sequence", "")),
+                                           height=68, key=f"library_sp_{scope}")
+            leader_sequence = st.text_area("引导肽序列（可空）", value=str(current.get("leader_sequence", "")),
+                                           height=68, key=f"library_ld_{scope}")
+            main_sequence = st.text_area("成熟蛋白序列", value=str(current.get("mature_sequence", "")),
+                                         height=110, key=f"library_seq_{scope}")
         else:
             signal_sequence = leader_sequence = ""
             main_sequence = st.text_area("序列", value=str(current.get("sequence", "")), height=110,
-                                         help="可直接粘贴，空格和换行会自动清理")
+                                         help="可直接粘贴，空格和换行会自动清理", key=f"library_seq_{scope}")
 
         ptm_values: dict[str, int] = {}
         if kind in {library.KIND_MATURE, library.KIND_TEMPLATE}:
@@ -87,7 +122,7 @@ def _entry_form(kind: str, entries: dict[str, dict[str, Any]]) -> None:
             for column, (field, field_label) in zip(ptm_columns, _PTM_FIELDS):
                 ptm_values[field] = int(
                     column.number_input(field_label, min_value=0, value=int(current.get(field, 0) or 0), step=1,
-                                        key=f"library_{kind}_{field}")
+                                        key=f"library_{field}_{scope}")
                 )
 
         submitted = st.form_submit_button("保存", type="primary")
