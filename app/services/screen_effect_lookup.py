@@ -61,6 +61,43 @@ def _read_effects(csv_path: str, mtime: float, target_id: str) -> dict[tuple[str
     return effects
 
 
+def available_screen_targets(paths: Any | None = None) -> list[str]:
+    """已有筛查结果覆盖了哪些靶点。"""
+    resolved = paths or PATHS
+    targets: set[str] = set()
+    for run in list_runs(resolved):
+        if run.csv_path:
+            targets.update(str(item) for item in (run.targets or []) if str(item).strip())
+    return sorted(targets)
+
+
+def resolve_effect_source(
+    target_id: str, target_context: str | None = None, *, paths: Any | None = None
+) -> str:
+    """把界面上的 target_id 解析成**筛查结果里真实存在的靶点**，解析不出则返回空串。
+
+    为什么需要这层：三段式 / 自定义构建的 target_id 是拼出来的复合串
+    （如 `alpha-factor_MRFPS_OPN_alpha-pro_OPN_ALPHA_FULL_PROJECT`），跟筛查按规范靶点存的结果对不上，
+    直接查会得到 0 条、效应列整列消失（2026-07-28 实测到的回归）。而且筛查里的 OPN 靶点实际叫
+    `OPN_ALPHA_FULL_PROJECT` 而非 `OPN`，所以只按上下文精确匹配也不够，要做子串匹配。
+
+    解析出的靶点可能与当前正在构建的目标**不完全相同**（例如自定义三段式组合 vs 规范 OPN），
+    调用方应把这一点如实告诉用户，不要让人以为效应就是这个自定义构建体算出来的。
+    """
+    targets = available_screen_targets(paths)
+    if target_id in targets:
+        return target_id
+    context = str(target_context or "").strip().upper()
+    if context:
+        exact = [item for item in targets if item.upper() == context]
+        if exact:
+            return exact[0]
+        partial = [item for item in targets if context in item.upper()]
+        if partial:
+            return partial[0]
+    return ""
+
+
 def load_screen_effect_lookup(target_id: str, *, paths: Any | None = None) -> dict[tuple[str, str], tuple[float, float]]:
     """合并该靶点所有可用筛查结果（策展优先）。没跑过筛查 → 返回空 dict。"""
     merged: dict[tuple[str, str], tuple[float, float]] = {}
@@ -73,4 +110,4 @@ def load_screen_effect_lookup(target_id: str, *, paths: Any | None = None) -> di
     return merged
 
 
-__all__ = ["load_screen_effect_lookup"]
+__all__ = ["available_screen_targets", "load_screen_effect_lookup", "resolve_effect_source"]

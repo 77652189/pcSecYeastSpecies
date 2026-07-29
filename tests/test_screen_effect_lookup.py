@@ -87,6 +87,37 @@ def test_missing_file_degrades_to_empty(tmp_path) -> None:
     assert lookup._read_effects(str(tmp_path / "nope.csv"), 0.0, "hLF") == {}
 
 
+def test_composite_target_id_resolves_to_the_screened_target(monkeypatch) -> None:
+    """回归：把默认构建模式改成三段式后，target_id 变成拼接串
+    （alpha-factor_MRFPS_OPN_alpha-pro_OPN_ALPHA_FULL_PROJECT），与筛查按规范靶点存的结果对不上，
+    效应列整列消失。且筛查里的 OPN 靶点实际叫 OPN_ALPHA_FULL_PROJECT 而非 OPN——精确匹配也不够。"""
+    monkeypatch.setattr(lookup, "available_screen_targets", lambda paths=None: ["hLF", "OPN_ALPHA_FULL_PROJECT"])
+
+    composite = "alpha-factor_MRFPS_OPN_alpha-pro_OPN_ALPHA_FULL_PROJECT"
+    assert lookup.resolve_effect_source(composite, "OPN") == "OPN_ALPHA_FULL_PROJECT"
+    # 规范靶点原样命中
+    assert lookup.resolve_effect_source("hLF", "hLF") == "hLF"
+    # 完全无关的上下文不该硬凑一个
+    assert lookup.resolve_effect_source("something_else", "KLM") == ""
+
+
+def test_effect_source_is_reported_so_borrowed_numbers_are_disclosed(monkeypatch) -> None:
+    """自定义组合借用规范靶点的效应时，必须把来源报出来——否则会被当成这个构建体自己的预测。"""
+    monkeypatch.setattr(
+        "app.services.screen_effect_lookup.resolve_effect_source", lambda *a, **k: "hLF"
+    )
+    monkeypatch.setattr(
+        "app.services.screen_effect_lookup.load_screen_effect_lookup",
+        lambda *a, **k: {("OE", "R1"): (0.08, 1.0)},
+    )
+    frame = pd.DataFrame([{"改造方式": "OE", "模型对象": "R1", "作用对象": selector.KIND_COMPLEX}])
+
+    _, has_effects, source = selector._attach_screen_effects(frame, "my_custom_build", target_context="hLF")
+
+    assert has_effects is True
+    assert source == "hLF", "来源靶点要回传给界面提示"
+
+
 def test_selector_shows_dash_when_no_screen_results_exist(monkeypatch) -> None:
     """没跑过筛查是**预期状态**——选择器仍要能用，效应列为空。"""
     monkeypatch.setattr(
@@ -96,7 +127,7 @@ def test_selector_shows_dash_when_no_screen_results_exist(monkeypatch) -> None:
         [{"改造方式": "OE", "模型对象": "sec_Pdi1p_complex_formation", "作用对象": selector.KIND_COMPLEX}]
     )
 
-    result, has_effects = selector._attach_screen_effects(frame, "hLF")
+    result, has_effects, _ = selector._attach_screen_effects(frame, "hLF")
 
     assert has_effects is False
     assert "模型预测提升(%)" not in result.columns
@@ -115,7 +146,7 @@ def test_selector_attaches_effect_and_growth_columns(monkeypatch) -> None:
         ]
     )
 
-    result, has_effects = selector._attach_screen_effects(frame, "hLF")
+    result, has_effects, _ = selector._attach_screen_effects(frame, "hLF")
 
     assert has_effects is True
     assert result.iloc[0]["模型预测提升(%)"] == pytest_approx(8.15)
@@ -139,7 +170,7 @@ def test_effect_column_is_numeric_so_sorting_is_by_magnitude_not_alphabet(monkey
         ]
     )
 
-    result, _ = selector._attach_screen_effects(frame, "hLF")
+    result, _, _ = selector._attach_screen_effects(frame, "hLF")
 
     column = result["模型预测提升(%)"]
     assert pd.api.types.is_numeric_dtype(column), "必须是数值列，否则排序按字典序"
@@ -155,7 +186,7 @@ def test_tiny_noise_level_effects_stay_numeric_not_scientific_notation(monkeypat
     )
     frame = pd.DataFrame([{"改造方式": "OE", "模型对象": "NOISE", "作用对象": selector.KIND_COMPLEX}])
 
-    result, _ = selector._attach_screen_effects(frame, "hLF")
+    result, _, _ = selector._attach_screen_effects(frame, "hLF")
 
     value = result.iloc[0]["模型预测提升(%)"]
     assert isinstance(value, float)

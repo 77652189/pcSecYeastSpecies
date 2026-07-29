@@ -148,21 +148,26 @@ def _attach_lab_gene_hints(frame: pd.DataFrame) -> pd.DataFrame:
     return frame
 
 
-def _attach_screen_effects(frame: pd.DataFrame, target_id: str) -> tuple[pd.DataFrame, bool]:
+def _attach_screen_effects(
+    frame: pd.DataFrame, target_id: str, *, target_context: str | None = None
+) -> tuple[pd.DataFrame, bool, str]:
     """把已跑筛查的真实效应接上，让"该先试哪个"由模型算的数字说了算而不是靠机制猜。
 
     返回 (frame, 是否有筛查数据)。没跑过筛查时整列 `—`——策展 scope 是分钟级的，跑一轮即可填上。
     """
     if frame.empty:
-        return frame, False
+        return frame, False, ""
     try:
-        from app.services.screen_effect_lookup import load_screen_effect_lookup
+        from app.services.screen_effect_lookup import load_screen_effect_lookup, resolve_effect_source
 
-        effects = load_screen_effect_lookup(target_id)
+        # 三段式/自定义构建的 target_id 是拼接串，跟筛查按规范靶点存的结果对不上——必须先解析，
+        # 否则效应列会整列消失（2026-07-28 把默认构建模式改成三段式后实测到的回归）。
+        source_target = resolve_effect_source(target_id, target_context)
+        effects = load_screen_effect_lookup(source_target) if source_target else {}
     except Exception:  # noqa: BLE001 - 效应只是加分项，读不到不该拖垮选择器
-        return frame, False
+        return frame, False, ""
     if not effects:
-        return frame, False
+        return frame, False, ""
 
     # 存**数值**而不是格式化字符串：这一列要能按大小排序。字符串列会被按字典序排——
     # "+8.15%" 会排在 "+10.5%" 前面（'8' > '1'），研究员按提升排序时看到的名次是错的。
@@ -181,7 +186,7 @@ def _attach_screen_effects(frame: pd.DataFrame, target_id: str) -> tuple[pd.Data
     frame = frame.copy()
     frame["模型预测提升(%)"] = gains
     frame["生长保持"] = growths
-    return frame, True
+    return frame, True, source_target
 
 
 def render_candidate_selector(target_id: str, *, target_context: str) -> None:
@@ -210,13 +215,19 @@ def render_candidate_selector(target_id: str, *, target_context: str) -> None:
         "不用自己判断该填哪个框**）。「把握」列说明模型能给到什么程度。"
     )
     frame = _attach_lab_gene_hints(frame)
-    frame, has_effects = _attach_screen_effects(frame, target_id)
+    frame, has_effects, effect_source = _attach_screen_effects(frame, target_id, target_context=target_context)
     if has_effects:
         st.caption(
             "「模型预测提升(%)」来自已跑的筛查结果——**模型内部相对量、不是产量预测**，看名次比看绝对数值可靠"
             "（点列头可按提升排序）。显示 0.000 表示效应低于 0.001%、与求解噪声无法区分；空白＝该候选还没被筛查覆盖。"
             "KO 要连「生长保持」一起看：1.000＝不影响生长，明显低于 1 的即使提升也要额外补救。"
         )
+        if effect_source and effect_source != target_id:
+            # 自定义组合没被单独筛查过，效应借用规范靶点的结果——必须说清楚，别让人以为是这个构建体算的。
+            st.caption(
+                f"⚠ 效应数字来自靶点 **{effect_source}** 的筛查结果（当前构建的 `{target_id}` 没有单独筛查过），"
+                "机制层可参考，但不等同于这个具体构建体的预测。"
+            )
     else:
         st.caption(
             "还没有可用的筛查结果，所以没有效应数字。想让这里显示"
