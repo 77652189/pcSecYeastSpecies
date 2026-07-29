@@ -39,6 +39,7 @@ class TargetBuildFormState:
     signal_peptide_sequence: str
     leader_sequence: str
     mature_sequence: str
+    target_is_custom_library: bool
     enable_ribosome: bool
     enable_misfolding: bool
     enable_cost_slope_compatibility: bool
@@ -75,7 +76,25 @@ def _render_template_sequences(template) -> None:
             st.code(sequence, language="text")
 
 
+def _render_custom_template_summary(entry: dict) -> None:
+    signal_sequence = str(entry.get("signal_peptide_sequence", ""))
+    leader_sequence = str(entry.get("leader_sequence", ""))
+    mature_sequence = str(entry.get("mature_sequence", ""))
+    summary = st.columns(4)
+    summary[0].metric("全长", f"{len(signal_sequence) + len(leader_sequence) + len(mature_sequence)} aa")
+    summary[1].metric("二硫键", int(entry.get("disulfide_sites", 0) or 0))
+    summary[2].metric("N-糖位点", int(entry.get("n_glycosylation_sites", 0) or 0))
+    summary[3].metric("O-糖位点", int(entry.get("o_glycosylation_sites", 0) or 0))
+    st.caption("自建模板：按你保存的序列直接构建，不走内置目标的参数解析。")
+    with st.expander("查看序列", expanded=False):
+        for name, sequence in (("信号肽", signal_sequence), ("引导肽", leader_sequence), ("成熟蛋白", mature_sequence)):
+            if sequence:
+                st.markdown(f"**{name}**（{len(sequence)} aa）")
+                st.code(sequence, language="text")
+
+
 def render_target_build_form() -> TargetBuildFormState:
+    st.markdown("**① 目标蛋白**")
     # 三段式排在最前：它把"信号肽 + 引导肽 + 成熟蛋白"三段拆开显式选择，研究员看得见自己在组装什么；
     # 快速模板是打包好的整体，适合复现既有目标，故退居其次。
     build_mode = st.radio(
@@ -87,44 +106,61 @@ def render_target_build_form() -> TargetBuildFormState:
     target_id, target_name, custom_json_path = "OPN", "", None
     disulfide_sites = n_glycosylation_sites = o_glycosylation_sites = 0
     signal_peptide_sequence = leader_sequence = mature_sequence = ""
+    target_is_custom_library = False
 
     if build_mode == "快速选择（内置模板）":
-        templates = {item.target_id: item for item in list_builtin_target_templates(PATHS)}
-        choice = st.selectbox(
-            "模板",
-            list(templates.keys()),
-            format_func=lambda key: templates[key].label,
-            key="pichia_template",
-        )
+        from app.ui.views.target_library_manager import merged_entries
+
+        builtin_templates = {item.target_id: item for item in list_builtin_target_templates(PATHS)}
+        custom_templates = {
+            key: value
+            for key, value in merged_entries("templates").items()
+            if value.get("source") == "custom"
+        }
+        options = [*builtin_templates.keys(), *custom_templates.keys()]
+
+        def _template_label(key: str) -> str:
+            if key in builtin_templates:
+                return builtin_templates[key].label
+            return f"{custom_templates[key].get('label', key)}（自建）"
+
+        choice = st.selectbox("模板", options, format_func=_template_label, key="pichia_template")
         target_id = choice
         target_name = choice
-        selected_template = templates[choice]
-        # 快速模板此前只给各段长度，看不到实际序列——三段式反而看得见，两种模式信息不对等。
-        _render_template_sequences(selected_template)
-        if selected_template.note:
-            st.info(selected_template.note)
-        # 目标语义与历史对照（含与旧 MATLAB 实现的差异说明）是溯源信息，研究员日常用不到，
-        # 收进折叠区，别用 st.warning 在主流程上制造噪声。
-        with st.expander("数据来源与历史对照（溯源信息）", expanded=False):
-            st.caption(
-                "目标语义："
-                f"{target_semantics_label(selected_template.alignment_target_kind)}；"
-                f"序列角色：{target_semantics_label(selected_template.sequence_role)}；"
-                f"规范化：{target_semantics_label(selected_template.normalization_mode)}"
-            )
-            if selected_template.target_warning:
-                st.caption(selected_template.target_warning)
+        if choice in builtin_templates:
+            selected_template = builtin_templates[choice]
+            # 快速模板此前只给各段长度，看不到实际序列——三段式反而看得见，两种模式信息不对等。
+            _render_template_sequences(selected_template)
+            if selected_template.note:
+                st.info(selected_template.note)
+            # 目标语义与历史对照是溯源信息，研究员日常用不到，收进折叠区、别在主流程上制造噪声。
+            with st.expander("数据来源与历史对照（溯源信息）", expanded=False):
+                st.caption(
+                    "目标语义："
+                    f"{target_semantics_label(selected_template.alignment_target_kind)}；"
+                    f"序列角色：{target_semantics_label(selected_template.sequence_role)}；"
+                    f"规范化：{target_semantics_label(selected_template.normalization_mode)}"
+                )
+                if selected_template.target_warning:
+                    st.caption(selected_template.target_warning)
+        else:
+            # 自建模板没有内置 spec，不能按 id 解析——必须把序列显式带上走 custom_sequence 路径。
+            entry = custom_templates[choice]
+            target_is_custom_library = True
+            signal_peptide_sequence = str(entry.get("signal_peptide_sequence", ""))
+            leader_sequence = str(entry.get("leader_sequence", ""))
+            mature_sequence = str(entry.get("mature_sequence", ""))
+            disulfide_sites = int(entry.get("disulfide_sites", 0) or 0)
+            n_glycosylation_sites = int(entry.get("n_glycosylation_sites", 0) or 0)
+            o_glycosylation_sites = int(entry.get("o_glycosylation_sites", 0) or 0)
+            _render_custom_template_summary(entry)
 
     elif build_mode == "三段式构建（自定义组合）":
-        from app.services.pichia_target_catalog_service import (
-            known_leaders,
-            known_mature_proteins,
-            known_signal_peptides,
-        )
+        from app.ui.views.target_library_manager import merged_entries
 
-        signal_peptides = known_signal_peptides()
-        leaders = known_leaders()
-        mature_proteins = known_mature_proteins()
+        signal_peptides = merged_entries("signal_peptides")
+        leaders = merged_entries("leaders")
+        mature_proteins = merged_entries("mature_proteins")
         signal_peptide_id = st.selectbox(
             "信号肽",
             list(signal_peptides.keys()),
@@ -150,11 +186,21 @@ def render_target_build_form() -> TargetBuildFormState:
         disulfide_sites = int(mature_info.get("disulfide_sites", 0))
         n_glycosylation_sites = int(mature_info.get("n_glycosylation_sites", 0))
         o_glycosylation_sites = int(mature_info.get("o_glycosylation_sites", 0))
-        st.info(f"全长: {len(signal_peptide_sequence) + len(leader_sequence) + len(mature_sequence)} aa")
-        st.caption(
-            "自定义组合不会智能推断 PTM；当前 DSB/NG/OG 来自所选成熟蛋白模板："
-            f"{disulfide_sites}/{n_glycosylation_sites}/{o_glycosylation_sites}。"
-        )
+        summary = st.columns(4)
+        summary[0].metric("全长", f"{len(signal_peptide_sequence) + len(leader_sequence) + len(mature_sequence)} aa")
+        summary[1].metric("二硫键", disulfide_sites)
+        summary[2].metric("N-糖位点", n_glycosylation_sites)
+        summary[3].metric("O-糖位点", o_glycosylation_sites)
+        st.caption("修饰位点数取自所选成熟蛋白条目，不会自动推断——换蛋白请确认这三个数。")
+        with st.expander("查看已组装的序列", expanded=False):
+            for name, sequence in (
+                ("信号肽", signal_peptide_sequence),
+                ("引导肽", leader_sequence),
+                ("成熟蛋白", mature_sequence),
+            ):
+                if sequence:
+                    st.markdown(f"**{name}**（{len(sequence)} aa）")
+                    st.code(sequence, language="text")
         target_id = f"{signal_peptide_id}_{leader_id}_{mature_id}"
         target_name = target_id
 
@@ -170,8 +216,49 @@ def render_target_build_form() -> TargetBuildFormState:
         target_name = target_id
         st.warning("自定义 JSON 需要显式提供成熟序列、leader/signal peptide 边界和 DSB/NG/OG 计数；当前不会自动推断。")
 
-    enable_ribosome = st.checkbox("启用核糖体约束", value=True)
-    enable_misfolding = st.checkbox("启用错误折叠约束", value=True)
+    # 序列库管理放在目标选择之后：改完库，上面的下拉框立刻能选到新条目。
+    from app.ui.views.target_library_manager import render_target_library_manager
+
+    render_target_library_manager()
+
+    st.divider()
+    st.markdown("**② 培养条件**")
+    col_mu, col_media, col_carbon = st.columns(3)
+    with col_mu:
+        mu = st.number_input("μ (h⁻¹)", 0.01, 0.44, 0.10, 0.01, format="%.2f", key="pichia_mu")
+    with col_media:
+        media_type = int(
+            st.selectbox(
+                "培养基配方",
+                list(MEDIA_TYPE_LABELS),
+                index=1,
+                format_func=medium_type_label,
+                key="pichia_media",
+                help="这里显示的是成分名称；内部仍映射到 MATLAB/Python 使用的 media_type 编号，数值行为不变。",
+            )
+        )
+    with col_carbon:
+        carbon_source_id = st.selectbox(
+            "碳源",
+            ["glucose", "methanol", "glycerol", "glucose_glycerol", "glycerol_methanol"],
+            format_func=lambda value: {
+                "glucose": "葡萄糖 glucose",
+                "methanol": "甲醇 methanol",
+                "glycerol": "甘油 glycerol",
+                "glucose_glycerol": "葡萄糖 + 甘油",
+                "glycerol_methanol": "甘油 + 甲醇",
+            }[value],
+            key="pichia_carbon_source",
+            help="切换模型中允许摄取的主要碳源。葡萄糖是当前默认 corrected 条件；甲醇/甘油为 Python draft 边界配置，仍需按目标场景验证。",
+        )
+    with st.expander("培养基成分", expanded=False):
+        st.code(MEDIA_TYPE_DESCRIPTIONS.get(media_type, ""), language="text")
+
+    st.divider()
+    st.markdown("**③ 模型约束与可选分析**")
+    col_basic, col_optional = st.columns(2)
+    enable_ribosome = col_basic.checkbox("启用核糖体约束", value=True)
+    enable_misfolding = col_basic.checkbox("启用错误折叠约束", value=True)
     enable_cost_slope_compatibility = st.checkbox(
         "启用蛋白成本分析（固定生长率+分泌比例网格测算成本斜率，较慢）",
         value=False,
@@ -221,42 +308,12 @@ def render_target_build_form() -> TargetBuildFormState:
             ),
             key="pichia_cost_slope_medium_mode",
         )
-    col_mu, col_media, col_carbon = st.columns(3)
-    with col_mu:
-        mu = st.number_input("μ (h⁻¹)", 0.01, 0.44, 0.10, 0.01, format="%.2f", key="pichia_mu")
-    with col_media:
-        media_type = int(
-            st.selectbox(
-                "培养基配方",
-                list(MEDIA_TYPE_LABELS),
-                index=1,
-                format_func=medium_type_label,
-                key="pichia_media",
-                help="这里显示的是成分名称；内部仍映射到 MATLAB/Python 使用的 media_type 编号，数值行为不变。",
-            )
-        )
-        with st.expander("成分", expanded=False):
-            st.code(MEDIA_TYPE_DESCRIPTIONS.get(media_type, ""), language="text")
-    with col_carbon:
-        carbon_source_id = st.selectbox(
-            "碳源",
-            ["glucose", "methanol", "glycerol", "glucose_glycerol", "glycerol_methanol"],
-            format_func=lambda value: {
-                "glucose": "葡萄糖 glucose",
-                "methanol": "甲醇 methanol",
-                "glycerol": "甘油 glycerol",
-                "glucose_glycerol": "葡萄糖 + 甘油",
-                "glycerol_methanol": "甘油 + 甲醇",
-            }[value],
-            key="pichia_carbon_source",
-            help="切换模型中允许摄取的主要碳源。葡萄糖是当前默认 corrected 条件；甲醇/甘油为 Python draft 边界配置，仍需按目标场景验证。",
-        )
-
     return TargetBuildFormState(
         build_mode=build_mode,
         target_id=target_id,
         target_name=target_name,
         custom_json_path=custom_json_path,
+        target_is_custom_library=target_is_custom_library,
         disulfide_sites=disulfide_sites,
         n_glycosylation_sites=n_glycosylation_sites,
         o_glycosylation_sites=o_glycosylation_sites,

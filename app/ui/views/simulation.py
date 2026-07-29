@@ -112,17 +112,19 @@ def _render_pichia_builder() -> None:
                       screen_candidate_limit=gene_state.candidate_limit,
                       enable_gene_rule_overlay=gene_state.enable_gene_rule_overlay,
                       output_dir=Path(out_dir) if out_dir.strip() else None)
-        if build_state.build_mode == "快速选择（内置模板）":
+        # 自建模板没有内置 spec，不能按 id 解析——它保存的是显式序列，必须走 custom_sequence，
+        # 否则运行时会按 id 找不到目标而失败。
+        if build_state.build_mode == "快速选择（内置模板）" and not build_state.target_is_custom_library:
             req = SecretionRunRequest(target_source="builtin", target_id=build_state.target_id, target_name=build_state.target_name, **common)
-        elif build_state.build_mode == "三段式构建（自定义组合）":
+        elif build_state.build_mode == "自定义 JSON":
+            req = SecretionRunRequest(target_source="custom_json", target_id=build_state.target_id, target_name=build_state.target_name,
+                custom_json_path=build_state.custom_json_path, **common)
+        else:
             req = SecretionRunRequest(target_source="custom_sequence", target_id=build_state.target_id, target_name=build_state.target_name,
                 sequence=build_state.mature_sequence, leader_sequence=build_state.leader_sequence, signal_peptide_sequence=build_state.signal_peptide_sequence,
                 sequence_role="mature_secreted", normalization_mode="as_provided",
                 disulfide_sites=build_state.disulfide_sites, n_glycosylation_sites=build_state.n_glycosylation_sites,
                 o_glycosylation_sites=build_state.o_glycosylation_sites, **common)
-        else:
-            req = SecretionRunRequest(target_source="custom_json", target_id=build_state.target_id, target_name=build_state.target_name,
-                custom_json_path=build_state.custom_json_path, **common)
         # Stash the strain-defining modifications so the results page can offer "下一步 OE 候选"
         # (a modified-strain re-solve). Reaction/complex-level KO/OE are what the re-solve applies;
         # gene-level entries are recorded so the results page can flag they are not yet re-solved.
