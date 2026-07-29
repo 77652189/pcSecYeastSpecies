@@ -536,7 +536,8 @@ def test_simulation_result_localization_goes_through_one_central_dictionary() ->
 
     # 列名 -> 中文；未知列回退原文
     assert sim_result_column_label("secretory_process") == "分泌资源层"
-    assert sim_result_column_label("abs_marginal") == "影子价格绝对值"
+    # 2026-07-29：把"影子价格/绝对值"这类线性规划术语换成它的生物学含义（这条约束把分泌卡得多紧）。
+    assert sim_result_column_label("abs_marginal") == "限制强度"
     assert sim_result_column_label("totally_unknown_field") == "totally_unknown_field"
     # 枚举/编码值 -> 中文（边界类型 / 分类 / 形状 / 布尔）；未知回退原文；None -> —
     assert sim_result_value_label("lower").startswith("下限")
@@ -550,7 +551,7 @@ def test_simulation_result_localization_goes_through_one_central_dictionary() ->
         [{"reaction_id": "sec_X", "bound_type": "lower", "abs_marginal": 5.0}],
         value_columns=("bound_type",),
     )
-    assert list(frame.columns) == ["反应", "边界类型", "影子价格绝对值"]
+    assert list(frame.columns) == ["反应", "边界类型", "限制强度"]
     assert frame["边界类型"].iloc[0].startswith("下限")
     # 产量提升推荐表的单元格枚举也走同一字典
     assert sim_result_value_label("model_executable") == "模型可执行"
@@ -616,7 +617,7 @@ def test_streamlit_relative_signal_charts_render_biologist_facing_figures() -> N
     }
     bars = _lp_oe_bottleneck_frame(lp_payload)
     assert set(bars["分泌资源层"]) == {"二硫键折叠 / DSB", "翻译（核糖体）"}
-    assert bars["影子价格(绝对值)"].max() == 0.92
+    assert bars["限制强度"].max() == 0.92
 
     # the large lower-bound floors are the 'why is it limited' answer and are charted separately.
     # hLF's dominant floor is the PDI disulfide-folding complex: the engine tags it disulfide_folding
@@ -628,7 +629,7 @@ def test_streamlit_relative_signal_charts_render_biologist_facing_figures() -> N
         ]
     }
     floors = _lp_floor_bottleneck_frame(floor_payload)
-    assert floors["影子价格(绝对值)"].max() == 5073.9
+    assert floors["限制强度"].max() == 5073.9
     assert set(floors["分泌资源层"]) == {"二硫键折叠 / DSB", "翻译（核糖体）"}
 
 

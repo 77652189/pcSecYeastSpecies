@@ -43,10 +43,22 @@ def _localized_frame(records: object, value_columns: tuple[str, ...] = ()) -> pd
 
 
 def _fmt_num(value: object) -> str:
-    """数值 → 3 位有效数字；非数值 → —（结果页最常看的顶部指标统一格式，避免长浮点串）。"""
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
+    """数值 → 3 位有效数字；真的不是数才给 —（结果页最常看的顶部指标统一格式，避免长浮点串）。
+
+    必须接受**数字字符串**：后台任务把 objective_value 原样透传，而它在响应里是字符串
+    （如 '0.00429116390133443'，为保留完整精度）。此前只认 int/float，导致"分泌通量"顶部指标
+    长期显示 —，而同一个数在下方分析里却正常出现（2026-07-29 用户报出）。
+    """
+    if isinstance(value, bool):
         return "—"
-    return f"{value:.3g}"
+    if isinstance(value, (int, float)):
+        return f"{value:.3g}"
+    if isinstance(value, str):
+        try:
+            return f"{float(value.strip()):.3g}"
+        except ValueError:
+            return "—"
+    return "—"
 
 
 def render_pichia_results() -> None:
@@ -106,8 +118,17 @@ def render_pichia_results() -> None:
     with c2:
         st.metric("目标蛋白", data.get("target_id", "—"))
     with c3:
-        st.metric("MATLAB 对齐", sim_result_value_label(data.get("matlab_alignment_status")))
-    st.caption("不同构建之间可横向对比。不代表实际发酵产量。")
+        # 自定义构建根本没有 MATLAB 参照物，显示"待处理"会让人以为还有一步没做。
+        alignment_status = str(data.get("matlab_alignment_status") or "")
+        is_custom_target = not bool((data.get("target_metadata") or {}).get("is_builtin", True))
+        if alignment_status == "pending" and is_custom_target:
+            st.metric("与历史实现对照", "不适用")
+        else:
+            st.metric("与历史实现对照", sim_result_value_label(alignment_status))
+    st.caption(
+        "不同构建之间可横向对比。不代表实际发酵产量。"
+        "「与历史实现对照」只说明这次结果能否与旧 MATLAB 版逐点核对，与结果好坏无关；自定义构建没有对照物。"
+    )
 
     # 默认只给主结论。参数/注意事项/生长权衡/原始数据这类诊断信息此前各占一个折叠区常驻页面——
     # 折叠区本身也是认知成本（得先猜里面有什么才决定点不点）。合并成一个总开关，默认关。
@@ -381,7 +402,11 @@ def _render_next_oe_candidates(data: dict[str, object]) -> None:
             st.info("先在「仿真构建」页运行一次仿真，这里就能基于同一株算下一步 OE 候选。")
             return
         if not mods.get("target_is_builtin"):
-            st.info("下一步 OE 候选目前仅支持内置目标（如 hLF / OPN）；自定义序列目标暂不支持。")
+            # 说清楚"为什么不能"和"怎么才能"，别只说不支持——三段式成为默认后这条会经常出现。
+            st.info(
+                "这一步需要按目标 ID 重新装配模型，而三段式 / 自定义 JSON 构建的目标没有可复原的内置定义，"
+                "所以暂时算不了。想用它：在「① 目标蛋白」里改用**快速选择（内置模板）**跑一次即可。"
+            )
             return
 
         oe_rx = [str(r) for r in (mods.get("oe_reaction_ids") or [])]
@@ -501,7 +526,10 @@ def _render_modified_strain_shortlist(data: dict[str, object]) -> None:
             st.info("先在「仿真构建」页运行一次仿真，这里就能基于同一株算改造后候选短名单。")
             return
         if not mods.get("target_is_builtin"):
-            st.info("改造后候选短名单目前仅支持内置目标（hLF / OPN）。")
+            st.info(
+                "同上：改造后短名单要按目标 ID 复原野生型基线，三段式 / 自定义 JSON 目标没有内置定义可复原。"
+                "改用**快速选择（内置模板）**跑一次即可使用。"
+            )
             return
 
         oe_rx = [str(r) for r in (mods.get("oe_reaction_ids") or [])]
@@ -774,7 +802,7 @@ def _lp_oe_bottleneck_frame(lp_attribution: dict[str, object]) -> pd.DataFrame:
         rows.append(
             {
                 "反应": _short_reaction_label(reaction_id),
-                "影子价格(绝对值)": abs(float(marginal or 0.0)),
+                "限制强度": abs(float(marginal or 0.0)),
                 "分泌资源层": _resource_layer_label(entry.get("secretory_process")),
             }
         )
@@ -799,7 +827,7 @@ def _lp_floor_bottleneck_frame(lp_attribution: dict[str, object]) -> pd.DataFram
         rows.append(
             {
                 "反应": _short_reaction_label(reaction_id),
-                "影子价格(绝对值)": abs(float(marginal or 0.0)),
+                "限制强度": abs(float(marginal or 0.0)),
                 "分泌资源层": _resource_layer_label(entry.get("secretory_process")),
             }
         )
@@ -829,12 +857,12 @@ def _render_lp_attribution(lp_attribution: dict[str, object]) -> None:
         bottleneck_frame = _lp_oe_bottleneck_frame(lp_attribution)
         if not bottleneck_frame.empty:
             figure = px.bar(
-                bottleneck_frame.nlargest(8, "影子价格(绝对值)").sort_values("影子价格(绝对值)"),
-                x="影子价格(绝对值)",
+                bottleneck_frame.nlargest(8, "限制强度").sort_values("限制强度"),
+                x="限制强度",
                 y="反应",
                 color="分泌资源层",
                 orientation="h",
-                text="影子价格(绝对值)",
+                text="限制强度",
                 color_discrete_sequence=px.colors.qualitative.Set2,
                 title="过表达可缓解的瓶颈：哪一层最卡分泌（限制强度越大越紧）",
             )
@@ -862,12 +890,12 @@ def _render_lp_attribution(lp_attribution: dict[str, object]) -> None:
         floor_frame = _lp_floor_bottleneck_frame(lp_attribution)
         if not floor_frame.empty:
             figure = px.bar(
-                floor_frame.nlargest(8, "影子价格(绝对值)").sort_values("影子价格(绝对值)"),
-                x="影子价格(绝对值)",
+                floor_frame.nlargest(8, "限制强度").sort_values("限制强度"),
+                x="限制强度",
                 y="反应",
                 color="分泌资源层",
                 orientation="h",
-                text="影子价格(绝对值)",
+                text="限制强度",
                 color_discrete_sequence=px.colors.qualitative.Set2,
                 title="为什么受限：最强约束层（限制强度越大越卡；过表达松不动）",
             )
@@ -975,19 +1003,20 @@ def _render_cost_slope_ratio_policy(cost_slope: dict[str, object]) -> None:
 
 def _render_target_growth_analysis(target_growth: dict[str, object]) -> None:
     with st.expander("目标蛋白生长分析", expanded=True):
-        st.caption("解释型 small-grid tradeoff，不代表真实发酵生长预测。")
+        st.caption("在一小组生长速率上试算分泌量，看“长得快”和“分泌多”怎么权衡；不代表真实发酵生长预测。")
         best_flux = target_growth.get("best_secretion_point") or {}
         best_per_biomass = target_growth.get("best_secretion_per_biomass_point") or {}
         c1, c2, c3 = st.columns([1, 1, 1])
         with c1:
-            st.metric("趋势标签", target_growth.get("growth_sensitivity_label", "—"))
+            # 这些枚举此前直出英文（decreasing / monotonic_decreasing_successful_grid），走中央字典汉化。
+            st.metric("生长越快分泌怎么变", sim_result_value_label(target_growth.get("growth_sensitivity_label", "—")))
             reason = target_growth.get("growth_sensitivity_reason")
             if reason:
-                st.caption(f"原因: {reason}")
+                st.caption(f"判断依据：{sim_result_value_label(reason)}")
         with c2:
-            st.metric("最高分泌通量 mu", best_flux.get("mu", "—") if isinstance(best_flux, dict) else "—")
+            st.metric("分泌最高时的生长速率", best_flux.get("mu", "—") if isinstance(best_flux, dict) else "—")
         with c3:
-            st.metric("最高单位生物量 mu", best_per_biomass.get("mu", "—") if isinstance(best_per_biomass, dict) else "—")
+            st.metric("单位菌体分泌最高时的生长速率", best_per_biomass.get("mu", "—") if isinstance(best_per_biomass, dict) else "—")
 
         points = target_growth.get("tradeoff_points") or []
         if points:

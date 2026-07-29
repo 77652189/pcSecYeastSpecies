@@ -88,17 +88,19 @@ SIMULATION_RESULT_COLUMN_LABELS = {
     "variable_index_0based": "变量下标",
     "bound_type": "边界类型",
     "secretory_process": "分泌资源层",
-    "marginal": "影子价格",
-    "abs_marginal": "影子价格绝对值",
+    # "影子价格/绝对值"是线性规划术语，对湿实验研究员没有意义。这里统一换成它的**生物学含义**：
+    # 这条约束把分泌卡得有多紧（松开它能让分泌多出多少）。数值仍是同一个量，只是说法可懂。
+    "marginal": "限制强度",
+    "abs_marginal": "限制强度",
     "oe_actionable": "OE 可缓解",
     "flux": "通量",
     # 约束块 / 约束级 marginals
     "constraint_type": "约束类型",
     "block": "约束块",
     "row_count": "行数",
-    "nonzero_marginal_count": "非零影子价格数",
-    "sum_abs_marginal": "影子价格绝对值之和",
-    "max_abs_marginal": "最大影子价格绝对值",
+    "nonzero_marginal_count": "起限制作用的约束数",
+    "sum_abs_marginal": "限制强度合计",
+    "max_abs_marginal": "最强的一条限制",
     "row_index_0based": "行下标",
     "row_index_1based": "行号",
     # 求解器稳健性 per_method
@@ -220,6 +222,15 @@ SIMULATION_RESULT_VALUE_LABELS = {
     "threshold": "阈值型（要超过某个最小倍数才起效）",
     "flat_no_response": "无响应（任何倍数都几乎没提升，别过表达）",
     "non_monotonic_numerical_artifact": "非单调（数值假象，不可作结论）",
+    # 生长-分泌趋势标签与判断依据（此前在结果页直出英文枚举）
+    "decreasing": "生长越快，分泌越少",
+    "increasing": "生长越快，分泌越多",
+    "flat": "基本不随生长速率变化",
+    "mixed": "先升后降 / 不单调",
+    "monotonic_decreasing_successful_grid": "所测生长速率上分泌单调下降（各点均求解成功）",
+    "monotonic_increasing_successful_grid": "所测生长速率上分泌单调上升（各点均求解成功）",
+    "non_monotonic_successful_grid": "所测生长速率上分泌不单调（各点均求解成功）",
+    "insufficient_successful_points": "求解成功的点太少，判不出趋势",
     "insufficient_points": "数据点不足",
     # R4 歧义类型
     "near_tie": "近似并列（模型分不清谁更好）",
@@ -323,9 +334,10 @@ SIMULATION_RESULT_VALUE_LABELS = {
 # 未命中回退显示原文。新增警告时在这里加一条 (子串, 中文)。
 SIMULATION_RESULT_WARNING_RULES = (
     ("bound_type='lower') reflects a floor",
-     "下界（最低要求类）约束的大影子价格反映的是“最低需求”，而过表达放宽的是上限、解决不了下界——"
-     "把“边界级影子价格”表里很大的值当成 OE 线索前，先看它的“边界类型”是不是下界"
-     "（实测：PDI1 单敲、核糖体装配都是很大的下界影子价格、但 OE 效果≈0）。"),
+     "限制强度很大的那一条，如果是“下界（最低需求）”类约束，过表达是解决不了的——"
+     "过表达放宽的是产能上限，而下界说的是“这一步至少得做这么多”。"
+     "所以看到很大的数字先确认“边界类型”是上限还是下界"
+     "（实测：PDI1 单敲、核糖体装配的下界限制强度都很大，但过表达效果≈0）。"),
     ("oe_actionable_bottlenecks lists only binding UPPER-bound",
      "OE 可缓解瓶颈只列当前解处 binding 的上限天花板（OE 真能放宽的）；下界 floor 由“为什么受限”单列、OE 动不了。"
      "OE 可缓解天花板只是线索不是保证：放宽后耦合结构会让瓶颈转移，用前请与真实 reaction_oe_tradeoff 交叉验证。"),
