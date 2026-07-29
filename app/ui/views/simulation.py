@@ -87,6 +87,45 @@ _BUILDER_STEP_KEY = "pichia_builder_step"
 _BUILDER_STEPS = ("目标蛋白", "改造候选（KO/OE）", "培养条件与分析")
 
 
+def _go_to_step(target_step: int) -> None:
+    """切步骤只能走 on_click 回调，**不能在按钮分支里 st.rerun()**。
+
+    实测（2026-07-28）：用 st.rerun() 切步时，用户本轮刚敲进输入框的内容会被丢掉——
+    填完基因点"下一步"，回头一看框是空的。回调在脚本重跑**之前**执行，控件值已正常提交，不会丢。
+    """
+    st.session_state[_BUILDER_STEP_KEY] = target_step
+
+
+def _render_step_nav(current_step: int, this_step: int) -> None:
+    """把上一步/下一步放在**当前这步内容的正下方**。
+
+    此前放在三个折叠条之后（页面最底部），做完第 1 步还得往下翻过另外两个面板才找到"下一步"，
+    向导的引导感就没了——按钮必须紧跟着你刚做完的事。
+    """
+    if current_step != this_step:
+        return  # 非当前步是收起状态，不必也不该出现导航
+    st.divider()
+    col_back, col_next, _ = st.columns([1, 1, 3])
+    if this_step > 1:
+        col_back.button(
+            "← 上一步",
+            key=f"pichia_builder_prev_{this_step}",
+            on_click=_go_to_step,
+            args=(this_step - 1,),
+        )
+    if this_step < len(_BUILDER_STEPS):
+        col_next.button(
+            "下一步 →",
+            key=f"pichia_builder_next_{this_step}",
+            type="primary",
+            on_click=_go_to_step,
+            args=(this_step + 1,),
+        )
+        st.caption(f"下一步：{_BUILDER_STEPS[this_step]}")
+    else:
+        st.caption("这是最后一步——设置完向下就是运行按钮。")
+
+
 def _render_pichia_builder() -> None:
     # 分步向导：标签页地位平等、看不出先后，用户反馈"太不明显"。改成一次只展开当前步 +
     # 显式的上一步/下一步，运行按钮只在最后一步出现。
@@ -101,22 +140,16 @@ def _render_pichia_builder() -> None:
 
     with st.expander(f"① {_BUILDER_STEPS[0]}", expanded=step == 1):
         target_fields = render_target_selection()
+        _render_step_nav(step, 1)
     with st.expander(f"② {_BUILDER_STEPS[1]}", expanded=step == 2):
         gene_state = render_gene_perturbation_form(str(target_fields["target_id"]))
+        _render_step_nav(step, 2)
     with st.expander(f"③ {_BUILDER_STEPS[2]}", expanded=step == 3):
         condition_fields = render_conditions_and_constraints()
+        _render_step_nav(step, 3)
     build_state = TargetBuildFormState(**target_fields, **condition_fields)
 
-    col_back, col_next, _ = st.columns([1, 1, 3])
-    if step > 1 and col_back.button("← 上一步", key="pichia_builder_prev_step"):
-        st.session_state[_BUILDER_STEP_KEY] = step - 1
-        st.rerun()
-    if step < len(_BUILDER_STEPS) and col_next.button("下一步 →", key="pichia_builder_next_step", type="primary"):
-        st.session_state[_BUILDER_STEP_KEY] = step + 1
-        st.rerun()
-
     if step < len(_BUILDER_STEPS):
-        st.caption("走到第 3 步后会出现运行按钮。")
         return
 
     st.divider()
