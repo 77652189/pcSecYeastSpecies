@@ -99,7 +99,7 @@ def test_selector_shows_dash_when_no_screen_results_exist(monkeypatch) -> None:
     result, has_effects = selector._attach_screen_effects(frame, "hLF")
 
     assert has_effects is False
-    assert "模型预测提升" not in result.columns
+    assert "模型预测提升(%)" not in result.columns
 
 
 def test_selector_attaches_effect_and_growth_columns(monkeypatch) -> None:
@@ -118,7 +118,45 @@ def test_selector_attaches_effect_and_growth_columns(monkeypatch) -> None:
     result, has_effects = selector._attach_screen_effects(frame, "hLF")
 
     assert has_effects is True
-    assert result.iloc[0]["模型预测提升"].startswith("+8.15")
+    assert result.iloc[0]["模型预测提升(%)"] == pytest_approx(8.15)
     # 陷阱候选：提升可观但生长只剩 0.1，必须能一眼看见
-    assert result.iloc[1]["生长保持"] == "0.100"
-    assert result.iloc[2]["模型预测提升"] == "—", "没被筛查覆盖的显示为 —，不能瞎填 0"
+    assert result.iloc[1]["生长保持"] == pytest_approx(0.1)
+    # 没被筛查覆盖的留空（NaN），不能瞎填 0——0 会被读成"测过、没效果"
+    assert pd.isna(result.iloc[2]["模型预测提升(%)"])
+
+
+def test_effect_column_is_numeric_so_sorting_is_by_magnitude_not_alphabet(monkeypatch) -> None:
+    """曾是格式化字符串列 → Streamlit 按字典序排，"+8.15%" 会排在 "+10.5%" 之前（'8'>'1'），
+    研究员按提升排序时看到的名次是错的。必须存数值。"""
+    monkeypatch.setattr(
+        "app.services.screen_effect_lookup.load_screen_effect_lookup",
+        lambda *a, **k: {("OE", "BIG"): (0.105, 1.0), ("OE", "SMALL"): (0.0815, 1.0)},
+    )
+    frame = pd.DataFrame(
+        [
+            {"改造方式": "OE", "模型对象": "SMALL", "作用对象": selector.KIND_GENE},
+            {"改造方式": "OE", "模型对象": "BIG", "作用对象": selector.KIND_GENE},
+        ]
+    )
+
+    result, _ = selector._attach_screen_effects(frame, "hLF")
+
+    column = result["模型预测提升(%)"]
+    assert pd.api.types.is_numeric_dtype(column), "必须是数值列，否则排序按字典序"
+    assert list(column.sort_values(ascending=False).index) == [1, 0], "10.5% 必须排在 8.15% 之前"
+
+
+def test_tiny_noise_level_effects_stay_numeric_not_scientific_notation(monkeypatch) -> None:
+    """真实数据里有 9.27e-05% 这种量级；此前 .3g 直接把科学计数法显示给研究员，读不了。
+    现在存数值、由 NumberColumn 定点格式化（显示 0.000）。"""
+    monkeypatch.setattr(
+        "app.services.screen_effect_lookup.load_screen_effect_lookup",
+        lambda *a, **k: {("OE", "NOISE"): (9.27e-07, 1.0)},
+    )
+    frame = pd.DataFrame([{"改造方式": "OE", "模型对象": "NOISE", "作用对象": selector.KIND_COMPLEX}])
+
+    result, _ = selector._attach_screen_effects(frame, "hLF")
+
+    value = result.iloc[0]["模型预测提升(%)"]
+    assert isinstance(value, float)
+    assert value == pytest_approx(9.27e-05)

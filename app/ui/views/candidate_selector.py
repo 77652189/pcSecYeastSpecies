@@ -164,19 +164,22 @@ def _attach_screen_effects(frame: pd.DataFrame, target_id: str) -> tuple[pd.Data
     if not effects:
         return frame, False
 
-    gains: list[str] = []
-    growths: list[str] = []
+    # 存**数值**而不是格式化字符串：这一列要能按大小排序。字符串列会被按字典序排——
+    # "+8.15%" 会排在 "+10.5%" 前面（'8' > '1'），研究员按提升排序时看到的名次是错的。
+    # 缺失用 None（NaN），排序时自动垫底、显示为空，不会被误读成 0。
+    gains: list[float | None] = []
+    growths: list[float | None] = []
     for _, row in frame.iterrows():
         found = effects.get((str(row.get("改造方式") or "").upper(), str(row.get("模型对象") or "")))
         if found is None:
-            gains.append("—")
-            growths.append("—")
+            gains.append(None)
+            growths.append(None)
             continue
         effect, growth = found
-        gains.append(f"{effect * 100:+.3g}%")
-        growths.append(f"{growth:.3f}")
+        gains.append(effect * 100.0)
+        growths.append(growth)
     frame = frame.copy()
-    frame["模型预测提升"] = gains
+    frame["模型预测提升(%)"] = gains
     frame["生长保持"] = growths
     return frame, True
 
@@ -210,8 +213,9 @@ def render_candidate_selector(target_id: str, *, target_context: str) -> None:
     frame, has_effects = _attach_screen_effects(frame, target_id)
     if has_effects:
         st.caption(
-            "「模型预测提升」来自已跑的筛查结果——**模型内部相对量、不是产量预测**，看名次比看绝对数值可靠。"
-            "KO 要连「生长保持」一起看：1.0＝不影响生长，明显低于 1 的即使提升也要额外补救。"
+            "「模型预测提升(%)」来自已跑的筛查结果——**模型内部相对量、不是产量预测**，看名次比看绝对数值可靠"
+            "（点列头可按提升排序）。显示 0.000 表示效应低于 0.001%、与求解噪声无法区分；空白＝该候选还没被筛查覆盖。"
+            "KO 要连「生长保持」一起看：1.000＝不影响生长，明显低于 1 的即使提升也要额外补救。"
         )
     else:
         st.caption(
@@ -235,6 +239,21 @@ def render_candidate_selector(target_id: str, *, target_context: str) -> None:
         column_config={
             "选择": st.column_config.CheckboxColumn("选择", help="勾选后点下面的按钮加入 KO/OE 输入"),
             "模型对象": st.column_config.TextColumn("模型对象（实际算的东西）"),
+            # 数值列 + 定点格式：避免科学计数法（此前 .3g 把 9.27e-05 原样显示，研究员读不了），
+            # 同时保证按大小排序正确。低于 0.001% 的会显示成 0.000%——那本就在求解噪声量级。
+            "模型预测提升(%)": st.column_config.NumberColumn(
+                "模型预测提升(%)",
+                format="%.3f",
+                help=(
+                    "相对野生型的分泌变化，**模型内部相对量、不是产量预测**——看名次比看绝对数值可靠。"
+                    "显示 0.000 表示效应低于 0.001%，与求解噪声无法区分。空白＝该候选还没被筛查覆盖。"
+                ),
+            ),
+            "生长保持": st.column_config.NumberColumn(
+                "生长保持",
+                format="%.3f",
+                help="1.000＝敲除/过表达后生长不受影响；明显低于 1 的即使分泌有提升也要额外补救。",
+            ),
             "实验时对应基因": st.column_config.TextColumn(
                 "实验时对应基因",
                 help=(
