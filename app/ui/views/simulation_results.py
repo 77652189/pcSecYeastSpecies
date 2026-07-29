@@ -109,45 +109,54 @@ def render_pichia_results() -> None:
         st.metric("MATLAB 对齐", sim_result_value_label(data.get("matlab_alignment_status")))
     st.caption("不同构建之间可横向对比。不代表实际发酵产量。")
 
-    with st.expander("参数", expanded=False):
-        medium_condition = data.get("medium_condition") if isinstance(data.get("medium_condition"), dict) else {}
+    # 默认只给主结论。参数/注意事项/生长权衡/原始数据这类诊断信息此前各占一个折叠区常驻页面——
+    # 折叠区本身也是认知成本（得先猜里面有什么才决定点不点）。合并成一个总开关，默认关。
+    show_diagnostics = st.checkbox(
+        "显示诊断细节（参数 · 注意事项 · 生长权衡 · 原始数据）",
+        value=False,
+        key="pichia_results_show_diagnostics",
+    )
+
+    if show_diagnostics:
+        with st.expander("参数", expanded=False):
+            medium_condition = data.get("medium_condition") if isinstance(data.get("medium_condition"), dict) else {}
+            st.dataframe(
+                pd.DataFrame(
+                    [
+                        {"参数": key, "值": sim_result_value_label(value)}
+                        for key, value in {
+                            "目标": data.get("target_id"),
+                            "状态": data.get("result_status"),
+                            "MATLAB": data.get("matlab_alignment_status"),
+                            "目标值": data.get("objective_value"),
+                            "培养基条件": medium_condition.get("condition_id") if isinstance(medium_condition, dict) else None,
+                            "碳源": medium_condition.get("carbon_source_id") if isinstance(medium_condition, dict) else None,
+                            "培养基状态": medium_condition.get("status") if isinstance(medium_condition, dict) else None,
+                            "科学解释状态": medium_condition.get("scientific_status") if isinstance(medium_condition, dict) else None,
+                            "碳源标定档": (medium_condition.get("carbon_source_formulation") or {}).get("formulation_status") if isinstance(medium_condition, dict) else None,
+                        }.items()
+                        if value
+                    ]
+                ),
+                width='stretch',
+                hide_index=True,
+            )
+
+        files = {
+            "摘要": data.get("summary_path"),
+            "报告": data.get("report_path"),
+            "候选表": data.get("candidate_table_path"),
+            "权衡": data.get("tradeoff_path"),
+        }
+        st.write("**输出文件**")
         st.dataframe(
-            pd.DataFrame(
-                [
-                    {"参数": key, "值": sim_result_value_label(value)}
-                    for key, value in {
-                        "目标": data.get("target_id"),
-                        "状态": data.get("result_status"),
-                        "MATLAB": data.get("matlab_alignment_status"),
-                        "目标值": data.get("objective_value"),
-                        "培养基条件": medium_condition.get("condition_id") if isinstance(medium_condition, dict) else None,
-                        "碳源": medium_condition.get("carbon_source_id") if isinstance(medium_condition, dict) else None,
-                        "培养基状态": medium_condition.get("status") if isinstance(medium_condition, dict) else None,
-                        "科学解释状态": medium_condition.get("scientific_status") if isinstance(medium_condition, dict) else None,
-                        "碳源标定档": (medium_condition.get("carbon_source_formulation") or {}).get("formulation_status") if isinstance(medium_condition, dict) else None,
-                    }.items()
-                    if value
-                ]
-            ),
+            pd.DataFrame([{"文件": key, "路径": value} for key, value in files.items() if value]),
             width='stretch',
             hide_index=True,
         )
 
-    files = {
-        "摘要": data.get("summary_path"),
-        "报告": data.get("report_path"),
-        "候选表": data.get("candidate_table_path"),
-        "权衡": data.get("tradeoff_path"),
-    }
-    st.write("**输出文件**")
-    st.dataframe(
-        pd.DataFrame([{"文件": key, "路径": value} for key, value in files.items() if value]),
-        width='stretch',
-        hide_index=True,
-    )
-
     warns = data.get("warnings") or []
-    if warns:
+    if warns and show_diagnostics:
         with st.expander("注意事项", expanded=False):
             for warning in warns:
                 st.warning(sim_result_warning_label(warning))
@@ -177,15 +186,16 @@ def render_pichia_results() -> None:
         with st.expander("候选表与分泌路径", expanded=True):
             _render_candidate_outputs(str(candidate_path), data.get("summary_path"))
     tradeoff_path = data.get("tradeoff_path")
-    if tradeoff_path and Path(tradeoff_path).exists():
+    if show_diagnostics and tradeoff_path and Path(tradeoff_path).exists():
         with st.expander("生长权衡", expanded=False):
             st.dataframe(
                 pd.read_csv(tradeoff_path).rename(columns=sim_result_column_label),
                 width='stretch',
                 hide_index=True,
             )
-    with st.expander("完整结果数据（高级）", expanded=False):
-        st.json(data)
+    if show_diagnostics:
+        with st.expander("完整结果数据（高级）", expanded=False):
+            st.json(data)
 
 
 def _render_candidate_outputs(candidate_path: str, summary_path: str | None) -> None:

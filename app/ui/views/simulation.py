@@ -7,7 +7,11 @@ import streamlit as st
 from app.services.pichia_background_tasks import clear_last_result, submit_background_simulation
 from app.services.pichia_secretion_schema import SecretionRunRequest
 from app.ui.common import PATHS, request_navigation
-from app.ui.views.simulation_builder import render_target_build_form
+from app.ui.views.simulation_builder import (
+    TargetBuildFormState,
+    render_conditions_and_constraints,
+    render_target_selection,
+)
 from app.ui.views.simulation_gene_inputs import render_gene_perturbation_form
 from app.ui.views.simulation_matlab_reference import render_matlab_reference
 from app.ui.views.simulation_results import render_pichia_results
@@ -80,11 +84,23 @@ def render_simulation() -> None:
 
 
 def _render_pichia_builder() -> None:
-    st.markdown("""<div class="concept-box">毕赤酵母分泌仿真工作台。三段式构建目标蛋白，可选培养基、基因扰动。</div>""", unsafe_allow_html=True)
+    st.caption("按 ①→②→③ 依次设置，然后点最下方的运行按钮。每步只呈现当前这件事，不必一屏看完。")
 
-    build_state = render_target_build_form()
-    gene_state = render_gene_perturbation_form(build_state.target_id)
+    # 分步标签页：此前把"选目标 / 挑候选 / 设条件 / 选分析"平铺在一屏，元素多到看不过来。
+    # 注意：标签页内容是**急切渲染**的（和 expander 一样），所以这只降低视觉密度、不改渲染开销；
+    # 性能另有缓存与按需渲染处理。
+    tab_target, tab_candidates, tab_conditions = st.tabs(
+        ["① 目标蛋白", "② 改造候选（KO/OE）", "③ 培养条件与分析"]
+    )
+    with tab_target:
+        target_fields = render_target_selection()
+    with tab_candidates:
+        gene_state = render_gene_perturbation_form(str(target_fields["target_id"]))
+    with tab_conditions:
+        condition_fields = render_conditions_and_constraints()
+    build_state = TargetBuildFormState(**target_fields, **condition_fields)
 
+    st.divider()
     out_dir = st.text_input("输出目录", value=str(PATHS.local_runs_dir/"streamlit_pichia_runs"), key="pichia_out")
 
     task_sp = st.session_state.get("pichia_draft_task_status_path")

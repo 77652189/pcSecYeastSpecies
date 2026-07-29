@@ -171,6 +171,9 @@ NAV_RADIO_KEY = "app_page_nav"
 EXPERIMENT_FEEDBACK_PAGE = "实验反馈闭环"
 HOMOLOGY_AUDIT_PAGE = "基因命名与同源规则审计"
 SHADOW_CROSS_CHECK_PAGE = "Shadow LP一致性验证"
+# 序列库增删改 + 策展映射复核：偶尔做一次的**管理动作**，此前挤在每天都走的仿真主流程里。
+# 移到独立页面，主流程只留"选 / 跑 / 看"。
+LIBRARY_MANAGEMENT_PAGE = "序列库与映射管理"
 # Streamlit forbids writing to st.session_state[key] once that key's widget has
 # rendered in the current script run (raises StreamlitAPIException) - and the nav
 # radios below always render first, before any page-specific code runs. So a page
@@ -188,6 +191,7 @@ NAV_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("总览与结果", ("项目总览", "结果浏览")),
     ("候选生成与筛查", ("全基因组KO/OE筛查", "仿真验证")),
     ("证据与历史数据", (EXPERIMENT_FEEDBACK_PAGE, HOMOLOGY_AUDIT_PAGE)),
+    ("数据与管理", (LIBRARY_MANAGEMENT_PAGE,)),
     ("内部工具", (SHADOW_CROSS_CHECK_PAGE, "运行日志")),
 )
 DEFAULT_PAGE = NAV_GROUPS[0][1][0]

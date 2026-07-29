@@ -14,7 +14,8 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-from app.ui.common import EXPERIMENT_FEEDBACK_PAGE, HOMOLOGY_AUDIT_PAGE, SHADOW_CROSS_CHECK_PAGE, app_css, page_header, sidebar_navigation  # noqa: E402
+from app.ui.common import EXPERIMENT_FEEDBACK_PAGE, HOMOLOGY_AUDIT_PAGE, LIBRARY_MANAGEMENT_PAGE, SHADOW_CROSS_CHECK_PAGE, app_css, page_header, sidebar_navigation  # noqa: E402
+from app.ui.views.library_management import render_library_management  # noqa: E402
 from app.ui.views.experiment_feedback import render_experiment_feedback  # noqa: E402
 from app.ui.views.genome_wide_screen import render_genome_wide_screen  # noqa: E402
 from app.ui.views.homology_audit import render_homology_audit  # noqa: E402
@@ -49,6 +50,8 @@ def main() -> None:
         render_experiment_feedback()
     elif page == HOMOLOGY_AUDIT_PAGE:
         render_homology_audit()
+    elif page == LIBRARY_MANAGEMENT_PAGE:
+        render_library_management()
     elif page == SHADOW_CROSS_CHECK_PAGE:
         render_shadow_cross_check()
     elif page == "运行日志":

@@ -279,13 +279,10 @@ def render_candidate_selector(target_id: str, *, target_context: str) -> None:
         st.toast(f"已加入 {added} 个候选：基因 {genes} 个、复合体反应 {reactions} 个。")
         st.rerun()  # 让下面的输入框重新按新 session_state 渲染
 
-    # 策展回填入口就放在这里——「实验时对应基因」显示 — 的地方正是研究员意识到缺口的时刻。
-    try:
-        from app.ui.views.gene_complex_mapping_review import render_gene_complex_mapping_review
-
-        render_gene_complex_mapping_review()
-    except Exception as exc:  # noqa: BLE001 - 策展入口失败不该拖垮选择器主流程
-        st.caption(f"策展回填入口暂不可用：{exc}")
+    # 策展复核是偶尔做一次的管理动作，已移到侧边栏「序列库与映射管理」——主流程不该被它占位。
+    # 这里只在真的缺映射时留一句指路，不铺面板。
+    if "实验时对应基因" in frame.columns and (frame["实验时对应基因"] == "—").all():
+        st.caption("「实验时对应基因」还没有映射数据 → 去侧边栏「序列库与映射管理」复核一次即可填上。")
 
 
 __all__ = [

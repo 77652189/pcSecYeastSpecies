@@ -93,8 +93,9 @@ def _render_custom_template_summary(entry: dict) -> None:
                 st.code(sequence, language="text")
 
 
-def render_target_build_form() -> TargetBuildFormState:
-    st.markdown("**① 目标蛋白**")
+def render_target_selection() -> dict:
+    """只负责"要做哪个目标蛋白"。条件与约束见 render_conditions_and_constraints——
+    两者分开，好让上层把它们放进各自的步骤标签页，而不是堆在一屏。"""
     # 三段式排在最前：它把"信号肽 + 引导肽 + 成熟蛋白"三段拆开显式选择，研究员看得见自己在组装什么；
     # 快速模板是打包好的整体，适合复现既有目标，故退居其次。
     build_mode = st.radio(
@@ -216,13 +217,26 @@ def render_target_build_form() -> TargetBuildFormState:
         target_name = target_id
         st.warning("自定义 JSON 需要显式提供成熟序列、leader/signal peptide 边界和 DSB/NG/OG 计数；当前不会自动推断。")
 
-    # 序列库管理放在目标选择之后：改完库，上面的下拉框立刻能选到新条目。
-    from app.ui.views.target_library_manager import render_target_library_manager
+    st.caption("要新增/修改信号肽、引导肽、蛋白或模板，去侧边栏「序列库与映射管理」。")
 
-    render_target_library_manager()
+    return {
+        "build_mode": build_mode,
+        "target_id": target_id,
+        "target_name": target_name,
+        "custom_json_path": custom_json_path,
+        "target_is_custom_library": target_is_custom_library,
+        "disulfide_sites": disulfide_sites,
+        "n_glycosylation_sites": n_glycosylation_sites,
+        "o_glycosylation_sites": o_glycosylation_sites,
+        "signal_peptide_sequence": signal_peptide_sequence,
+        "leader_sequence": leader_sequence,
+        "mature_sequence": mature_sequence,
+    }
 
-    st.divider()
-    st.markdown("**② 培养条件**")
+
+def render_conditions_and_constraints() -> dict:
+    """培养条件 + 模型约束与可选分析。与目标选择分开，供上层放进各自的步骤标签页。"""
+    st.markdown("**培养条件**")
     col_mu, col_media, col_carbon = st.columns(3)
     with col_mu:
         mu = st.number_input("μ (h⁻¹)", 0.01, 0.44, 0.10, 0.01, format="%.2f", key="pichia_mu")
@@ -255,7 +269,7 @@ def render_target_build_form() -> TargetBuildFormState:
         st.code(MEDIA_TYPE_DESCRIPTIONS.get(media_type, ""), language="text")
 
     st.divider()
-    st.markdown("**③ 模型约束与可选分析**")
+    st.markdown("**模型约束与可选分析**")
     col_basic, col_optional = st.columns(2)
     enable_ribosome = col_basic.checkbox("启用核糖体约束", value=True)
     enable_misfolding = col_basic.checkbox("启用错误折叠约束", value=True)
@@ -308,28 +322,28 @@ def render_target_build_form() -> TargetBuildFormState:
             ),
             key="pichia_cost_slope_medium_mode",
         )
-    return TargetBuildFormState(
-        build_mode=build_mode,
-        target_id=target_id,
-        target_name=target_name,
-        custom_json_path=custom_json_path,
-        target_is_custom_library=target_is_custom_library,
-        disulfide_sites=disulfide_sites,
-        n_glycosylation_sites=n_glycosylation_sites,
-        o_glycosylation_sites=o_glycosylation_sites,
-        signal_peptide_sequence=signal_peptide_sequence,
-        leader_sequence=leader_sequence,
-        mature_sequence=mature_sequence,
-        enable_ribosome=enable_ribosome,
-        enable_misfolding=enable_misfolding,
-        enable_cost_slope_compatibility=enable_cost_slope_compatibility,
-        cost_slope_medium_compatibility_mode=cost_slope_medium_compatibility_mode,
-        enable_solver_robustness_check=enable_solver_robustness_check,
-        enable_oe_dose_response=enable_oe_dose_response,
-        mu=float(mu),
-        media_type=media_type,
-        carbon_source_id=str(carbon_source_id),
-    )
+    return {
+        "enable_ribosome": enable_ribosome,
+        "enable_misfolding": enable_misfolding,
+        "enable_cost_slope_compatibility": enable_cost_slope_compatibility,
+        "cost_slope_medium_compatibility_mode": cost_slope_medium_compatibility_mode,
+        "enable_solver_robustness_check": enable_solver_robustness_check,
+        "enable_oe_dose_response": enable_oe_dose_response,
+        "mu": float(mu),
+        "media_type": media_type,
+        "carbon_source_id": str(carbon_source_id),
+    }
 
 
-__all__ = ["TargetBuildFormState", "medium_type_label", "render_target_build_form"]
+def render_target_build_form() -> TargetBuildFormState:
+    """兼容入口：把目标选择与条件设置渲染在一起（不分步时使用）。"""
+    return TargetBuildFormState(**render_target_selection(), **render_conditions_and_constraints())
+
+
+__all__ = [
+    "TargetBuildFormState",
+    "medium_type_label",
+    "render_conditions_and_constraints",
+    "render_target_build_form",
+    "render_target_selection",
+]
