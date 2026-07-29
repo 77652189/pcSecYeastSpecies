@@ -1,16 +1,17 @@
 """E3 映射的**策展回填面板**（ADR-007）。
 
-给研究人员一个应用内入口：自动起草的映射摆在这里，逐条打勾/否决/补角色，改完导出成策展文件。
-把"从零查 78 个复合体"降成"审 59 条勾选题"。
+给研究人员一个应用内入口：同源比对的候选自动列好，逐条判断对不对，**点确认即保存生效**。
 
-**为什么是导出而不是直接写盘**：策展映射是长期科学资产，落在 `Data/` 下受保护目录，按数据治理
-必须由人显式提交、并声明为科学资产变更；应用运行时一律不写受保护目录（写入只落 `local_runs/`）。
-所以这里给下载按钮 + 明确的放置路径，最后一步由人来做。
+设计要点（2026-07-28 按用户反馈重做）：
+- **不做"导出再导入"**——那是多余摩擦。复核结果直接存 `local_runs/` 工作副本并立即生效，
+  沿用项目既有模式（实验反馈也是先落 local_runs、人工确认后才提升到 `Data/`）。
+  应用不自动写受保护的 `Data/`，但完全可以写工作区。
+- **按模型预测效应排序**：先审最值钱的（+8.15% 的 PDI1/ERO1 轴排最前），而不是从字母序第一条开始。
+- **写入前二次确认**：勾选确认才落盘，避免误点。
 """
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 import pandas as pd
@@ -20,129 +21,164 @@ from app.services.gene_complex_mapping_service import (
     CURATED_MAPPING_RELATIVE_PATH,
     build_draft_mapping_rows,
     load_gene_complex_mapping,
+    save_reviewed_mappings,
+    working_gene_complex_mapping_path,
 )
 
+REVIEW_CHOICES = ["待复核", "确认参与", "否决（同源猜错）"]
+ROLE_CHOICES = ["辅助/不确定", "必需亚基", "可替换同工酶"]
+STOICHIOMETRY_CHOICES = ["未知", "已知"]
 
-_ROLE_HELP = {
-    "required_subunit": "必需亚基：没有它复合体就不成立",
-    "replaceable_isoenzyme": "可替换同工酶：有别的基因能顶替",
-    "auxiliary": "辅助：参与但不是限速/必需",
-}
+_REVIEW_TO_CONTRACT = {"待复核": "pending_review", "确认参与": "reviewed", "否决（同源猜错）": "rejected"}
+_ROLE_TO_CONTRACT = {"辅助/不确定": "auxiliary", "必需亚基": "required_subunit", "可替换同工酶": "replaceable_isoenzyme"}
+_STOICHIOMETRY_TO_CONTRACT = {"未知": "unknown", "已知": "known"}
+_CONTRACT_TO_REVIEW = {value: key for key, value in _REVIEW_TO_CONTRACT.items()}
+_CONTRACT_TO_ROLE = {value: key for key, value in _ROLE_TO_CONTRACT.items()}
+_CONTRACT_TO_STOICHIOMETRY = {value: key for key, value in _STOICHIOMETRY_TO_CONTRACT.items()}
 
 
-def _draft_frame() -> pd.DataFrame:
-    """草稿由服务层提供（UI 不得直接 import 引擎——test_streamlit_ui_does_not_import_engine_directly）。"""
-    return pd.DataFrame(
-        [
+def _existing_by_key(paths: Any | None = None) -> dict[tuple[str, str], Any]:
+    rows, _ = load_gene_complex_mapping(paths)
+    return {(row.pichia_gene_id, row.complex_reaction_id): row for row in rows}
+
+
+def build_review_frame(target_id: str = "hLF") -> pd.DataFrame:
+    """待审队列：草稿 + 已保存的复核结果，**按模型预测效应降序**（先审最值钱的）。"""
+    existing = _existing_by_key()
+    try:
+        from app.services.screen_effect_lookup import load_screen_effect_lookup
+
+        effects = load_screen_effect_lookup(target_id)
+    except Exception:  # noqa: BLE001 - 效应只是排序依据，读不到就按原顺序
+        effects = {}
+
+    rows: list[dict[str, Any]] = []
+    for draft in build_draft_mapping_rows():
+        gene_id = str(draft.get("pichia_gene_id") or "")
+        reaction_id = str(draft.get("complex_reaction_id") or "")
+        saved = existing.get((gene_id, reaction_id))
+        effect = effects.get(("OE", reaction_id)) or effects.get(("KO", reaction_id))
+        rows.append(
             {
-                "复合体反应": str(row.get("complex_reaction_id") or ""),
-                "候选基因": str(row.get("pichia_gene_id") or ""),
-                "来源俗名": str(row.get("evidence_citation") or "").replace("策展俗名 ", ""),
-                "复核结论": str(row.get("review_status") or ""),
-                "亚基角色": str(row.get("subunit_role") or ""),
-                "化学计量": str(row.get("stoichiometry_status") or ""),
-                "备注": str(row.get("note") or ""),
+                "模型预测提升(%)": (effect[0] * 100.0) if effect else None,
+                "复合体反应": reaction_id,
+                "候选基因": gene_id,
+                "来源俗名": str(draft.get("evidence_citation") or "").replace("策展俗名 ", ""),
+                "复核结论": _CONTRACT_TO_REVIEW.get(
+                    saved.review_status if saved else "", REVIEW_CHOICES[0]
+                ),
+                "亚基角色": _CONTRACT_TO_ROLE.get(saved.subunit_role if saved else "", ROLE_CHOICES[0]),
+                "化学计量": _CONTRACT_TO_STOICHIOMETRY.get(
+                    saved.stoichiometry_status if saved else "", STOICHIOMETRY_CHOICES[0]
+                ),
+                "判断依据": (saved.note if saved else "") or "",
             }
-            for row in build_draft_mapping_rows()
-        ]
-    )
+        )
+    frame = pd.DataFrame(rows)
+    if frame.empty:
+        return frame
+    return frame.sort_values("模型预测提升(%)", ascending=False, na_position="last").reset_index(drop=True)
 
 
-def _rows_from_edited(edited: pd.DataFrame) -> list[dict[str, Any]]:
-    return [
-        {
-            "pichia_gene_id": str(row["候选基因"]),
-            "complex_reaction_id": str(row["复合体反应"]),
-            "subunit_role": str(row["亚基角色"]),
-            "stoichiometry_status": str(row["化学计量"]),
-            "review_status": str(row["复核结论"]),
-            "evidence_source": "curated_review",
-            "evidence_citation": f"策展俗名 {row['来源俗名']}" if str(row.get("来源俗名") or "") else "",
-            "note": str(row.get("备注") or ""),
-        }
-        for _, row in edited.iterrows()
-    ]
+def rows_to_contract_payload(edited: pd.DataFrame) -> list[dict[str, Any]]:
+    """界面中文选项 → 契约字段。仍是"待复核"的不落盘（没判断过的东西不该占位）。"""
+    payload: list[dict[str, Any]] = []
+    for _, row in edited.iterrows():
+        review = _REVIEW_TO_CONTRACT.get(str(row.get("复核结论") or ""), "pending_review")
+        if review == "pending_review":
+            continue
+        payload.append(
+            {
+                "pichia_gene_id": str(row.get("候选基因") or ""),
+                "complex_reaction_id": str(row.get("复合体反应") or ""),
+                "subunit_role": _ROLE_TO_CONTRACT.get(str(row.get("亚基角色") or ""), "auxiliary"),
+                "stoichiometry_status": _STOICHIOMETRY_TO_CONTRACT.get(str(row.get("化学计量") or ""), "unknown"),
+                "review_status": review,
+                "evidence_source": "curated_review",
+                "evidence_citation": f"策展俗名 {row.get('来源俗名')}" if str(row.get("来源俗名") or "") else "",
+                "note": str(row.get("判断依据") or ""),
+            }
+        )
+    return payload
 
 
-def render_gene_complex_mapping_review() -> None:
-    """策展回填入口。默认折叠——日常用不到，只有做映射策展时才展开。"""
-    existing, notes = load_gene_complex_mapping()
+def render_gene_complex_mapping_review(target_id: str = "hLF") -> None:
+    existing, _ = load_gene_complex_mapping()
+    reviewed_count = sum(1 for row in existing if row.is_reviewed)
     label = (
-        f"补全「实验时对应基因」映射 · 策展回填（当前已复核 {len(existing)} 条）"
-        if existing
-        else "补全「实验时对应基因」映射 · 策展回填（尚无策展数据）"
+        f"补全「实验时对应基因」映射 · 策展复核（已确认 {reviewed_count} 条）"
+        if reviewed_count
+        else "补全「实验时对应基因」映射 · 策展复核（还没人审过）"
     )
     with st.expander(label, expanded=False):
         st.markdown(
-            "**这是做什么的**：模型能说“过表达某个复合体有效”，但答不了“实验室该动哪个基因”——"
-            "因为分泌机器在模型里没有基因关联。这里把同源比对的候选自动列好，"
-            "**你只需逐条判断对不对**，改完导出给负责人提交。"
+            "模型能说“过表达某个复合体有效”，但答不了“实验室该动哪个基因”。"
+            "下面是同源比对给出的候选，**按模型预测提升排好序——先审最值钱的那几条**。"
+            "改完点保存即刻生效，不用导来导去。"
         )
         st.caption(
-            "草稿一律标为“待复核 / 辅助 / 计量未知”这一最保守组合，**不会自己生效**；"
-            "只有被改成“已复核 + 必需亚基 + 计量已知”的条目，才允许用于"
-            "“过表达这个基因＝提升该复合体容量”的判断。"
+            "只有改成「确认参与 + 必需亚基 + 计量已知」的条目，才允许用于"
+            "“过表达这个基因＝提升该复合体容量”的判断；其余组合只作参考、不解锁该结论。"
         )
 
         try:
-            draft = _draft_frame()
+            frame = build_review_frame(target_id)
         except Exception as exc:  # noqa: BLE001 - 策展面板失败不该拖垮主流程
-            st.caption(f"草稿生成失败：{exc}")
+            st.caption(f"待审队列生成失败：{exc}")
             return
-        if draft.empty:
-            st.caption("没有可起草的映射（同源比对未给出候选基因）。")
+        if frame.empty:
+            st.caption("没有可复核的映射（同源比对未给出候选基因）。")
             return
 
-        st.markdown(f"**自动起草 {len(draft)} 条**（覆盖 {draft['复合体反应'].nunique()} 个复合体反应）")
         edited = st.data_editor(
-            draft,
+            frame,
             width="stretch",
             hide_index=True,
-            disabled=["复合体反应", "候选基因", "来源俗名"],
+            disabled=["模型预测提升(%)", "复合体反应", "候选基因", "来源俗名"],
             column_config={
-                "复核结论": st.column_config.SelectboxColumn(
-                    "复核结论",
-                    options=["pending_review", "reviewed", "rejected"],
-                    help="reviewed=确认这个基因确实参与该复合体；rejected=同源猜错了。",
+                "模型预测提升(%)": st.column_config.NumberColumn(
+                    "模型预测提升(%)", format="%.3f", help="该复合体在模型里的相对效应，用来决定先审哪条。"
                 ),
-                "亚基角色": st.column_config.SelectboxColumn(
-                    "亚基角色",
-                    options=list(_ROLE_HELP),
-                    help=" / ".join(f"{key}：{value}" for key, value in _ROLE_HELP.items()),
-                ),
+                "复核结论": st.column_config.SelectboxColumn("复核结论", options=REVIEW_CHOICES, width="medium"),
+                "亚基角色": st.column_config.SelectboxColumn("亚基角色", options=ROLE_CHOICES, width="medium"),
                 "化学计量": st.column_config.SelectboxColumn(
-                    "化学计量",
-                    options=["unknown", "known"],
-                    help="亚基配比是否已知。未知时不得声称单基因过表达能提升复合体容量。",
+                    "化学计量", options=STOICHIOMETRY_CHOICES, help="亚基配比是否已知。"
                 ),
-                "备注": st.column_config.TextColumn("备注", help="写下判断依据 / 文献出处。"),
+                "判断依据": st.column_config.TextColumn("判断依据", help="文献 / 数据库出处，便于他人复查。"),
             },
             key="gene_complex_mapping_review_editor",
         )
 
-        reviewed = int((edited["复核结论"] == "reviewed").sum())
-        rejected = int((edited["复核结论"] == "rejected").sum())
-        st.caption(f"当前：已复核 {reviewed} 条、否决 {rejected} 条、待复核 {len(edited) - reviewed - rejected} 条。")
-
-        keep = edited[edited["复核结论"] != "rejected"]
-        payload = {
-            "schema_version": 1,
-            "mappings": _rows_from_edited(keep),
-        }
-        st.download_button(
-            "⬇️ 导出策展映射（JSON）",
-            data=json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8"),
-            file_name="gene_complex_mapping.json",
-            mime="application/json",
-            key="gene_complex_mapping_review_download",
-            type="primary",
-        )
+        payload = rows_to_contract_payload(edited)
+        decided = len(payload)
+        confirmed = sum(1 for row in payload if row["review_status"] == "reviewed")
         st.caption(
-            f"导出后把文件放到仓库的 `{str(CURATED_MAPPING_RELATIVE_PATH).replace(chr(92), '/')}`，"
-            "重启应用即生效。（这一步由人显式提交：策展映射是长期科学资产，应用不自动写入受保护目录。）"
+            f"本次将保存 **{decided}** 条已判断的条目（确认参与 {confirmed}、否决 {decided - confirmed}）；"
+            f"仍为“待复核”的 {len(edited) - decided} 条不写入。"
         )
-        for note in notes:
-            st.caption(note)
+
+        agree = st.checkbox(
+            "我确认以上判断，写入并立即生效",
+            key="gene_complex_mapping_review_confirm",
+            disabled=decided == 0,
+        )
+        if st.button(
+            "保存复核结果",
+            key="gene_complex_mapping_review_save",
+            type="primary",
+            disabled=not agree or decided == 0,
+        ):
+            saved, problems = save_reviewed_mappings(payload)
+            st.success(f"已保存 {saved} 条并立即生效。")
+            for problem in problems:
+                st.warning(problem)
+            st.rerun()
+
+        st.caption(
+            f"保存位置：`{working_gene_complex_mapping_path()}`（运行工作区，随时可改）。"
+            f"要沉淀为长期科学资产，再由人显式提交到 `{str(CURATED_MAPPING_RELATIVE_PATH).replace(chr(92), '/')}`——"
+            "正式资产优先于工作副本。"
+        )
 
 
-__all__ = ["render_gene_complex_mapping_review"]
+__all__ = ["build_review_frame", "render_gene_complex_mapping_review", "rows_to_contract_payload"]
