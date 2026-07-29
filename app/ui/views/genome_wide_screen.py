@@ -70,7 +70,10 @@ def render_genome_wide_screen() -> None:
 SCOPE_LABELS = {
     "gene": "全基因组（约1025个基因，小时级）",
     "gene_limited": "小规模基因试跑（smoke/pilot，分钟级）",
-    "catalog": "策展复合体反应对照表（约30个反应，分钟级）",
+    # 数字曾写死成"约30个反应"，实际是 61 个唯一反应 × KO/OE 两向 = 122 个候选（少报一半、
+    # 连带把耗时预期也说小了）。test_scope_label_reaction_count_matches_curated_catalog 锁住这个数，
+    # 策展库增删条目时会直接测试失败，不会再悄悄变陈旧。
+    "catalog": "策展复合体反应对照表（61个复合体反应 × KO/OE，分钟级）",
     # complex_hypothesis 已从研究员视图移除（其过表达响应由 catalog 剂量响应曲线覆盖）；引擎/工具仍支持该 scope。
 }
 
@@ -84,9 +87,12 @@ def _render_launch_controls(paths, active_runs: list[RunInfo]) -> None:
         horizontal=True,
         key="genome_wide_screen_scope",
         help=(
-            "全基因组：逐一评估模型里所有基因的KO/OE，覆盖面完整，但是小时级任务。"
-            "策展复合体反应对照表：只测文献策展、有实验证据支持的约30个复合体级反应"
-            "（KAR2/PDI1/PMT等），分钟级出结果，适合先看一轮已知靶点有没有生长代价。"
+            "全基因组：逐一评估模型里所有基因的KO/OE，覆盖面完整，但是小时级任务；只走 GPR，"
+            "**够不到分泌机器复合体**。"
+            "策展复合体反应对照表：只测文献策展、有实验证据支持的 61 个复合体级反应"
+            "（KAR2/PDI1/PMT等），每个都测 KO 和 OE 两个方向，分钟级出结果，适合先看一轮已知靶点。"
+            "这 61 个就是仿真验证页「选择要改造的基因/复合体」里那批候选的全集——"
+            "那边按靶点筛过、且只显示策展建议的那一个方向。"
         ),
     )
     col_targets, col_mode, col_workers = st.columns(3)
