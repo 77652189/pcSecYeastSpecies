@@ -50,10 +50,37 @@ class TargetBuildFormState:
     carbon_source_id: str
 
 
+def _render_template_sequences(template) -> None:
+    """显示模板各段的实际氨基酸序列（此前只给长度，看不出自己选了什么）。"""
+    segments = [
+        ("信号肽", template.signal_peptide_sequence),
+        ("引导肽", template.leader_sequence),
+        ("成熟蛋白", template.mature_sequence),
+    ]
+    present = [(name, sequence) for name, sequence in segments if sequence]
+    if not present:
+        st.caption(
+            f"引导肽 {template.leader_length} aa；信号肽 {template.signal_peptide_length} aa；"
+            f"成熟链 {template.mature_sequence_length} aa；全长 {template.full_sequence_length} aa"
+        )
+        return
+    st.caption(
+        f"全长 {template.full_sequence_length} aa　·　信号肽 {template.signal_peptide_length} aa"
+        f"　·　引导肽 {template.leader_length} aa　·　成熟链 {template.mature_sequence_length} aa"
+        f"　·　参数状态：{template.parameter_status}"
+    )
+    with st.expander("查看序列", expanded=False):
+        for name, sequence in present:
+            st.markdown(f"**{name}**（{len(sequence)} aa）")
+            st.code(sequence, language="text")
+
+
 def render_target_build_form() -> TargetBuildFormState:
+    # 三段式排在最前：它把"信号肽 + 引导肽 + 成熟蛋白"三段拆开显式选择，研究员看得见自己在组装什么；
+    # 快速模板是打包好的整体，适合复现既有目标，故退居其次。
     build_mode = st.radio(
         "构建模式",
-        ["快速选择（内置模板）", "三段式构建（自定义组合）", "自定义 JSON"],
+        ["三段式构建（自定义组合）", "快速选择（内置模板）", "自定义 JSON"],
         horizontal=True,
         key="pichia_draft_build_mode",
     )
@@ -72,23 +99,21 @@ def render_target_build_form() -> TargetBuildFormState:
         target_id = choice
         target_name = choice
         selected_template = templates[choice]
-        st.caption(
-            f"引导肽 {selected_template.leader_length} aa；"
-            f"信号肽 {selected_template.signal_peptide_length} aa；"
-            f"成熟链 {selected_template.mature_sequence_length} aa；"
-            f"全长 {selected_template.full_sequence_length} aa；"
-            f"参数状态：{selected_template.parameter_status}"
-        )
-        st.caption(
-            "目标语义："
-            f"{target_semantics_label(selected_template.alignment_target_kind)}；"
-            f"序列角色：{target_semantics_label(selected_template.sequence_role)}；"
-            f"规范化：{target_semantics_label(selected_template.normalization_mode)}"
-        )
+        # 快速模板此前只给各段长度，看不到实际序列——三段式反而看得见，两种模式信息不对等。
+        _render_template_sequences(selected_template)
         if selected_template.note:
             st.info(selected_template.note)
-        if selected_template.target_warning:
-            st.warning(selected_template.target_warning)
+        # 目标语义与历史对照（含与旧 MATLAB 实现的差异说明）是溯源信息，研究员日常用不到，
+        # 收进折叠区，别用 st.warning 在主流程上制造噪声。
+        with st.expander("数据来源与历史对照（溯源信息）", expanded=False):
+            st.caption(
+                "目标语义："
+                f"{target_semantics_label(selected_template.alignment_target_kind)}；"
+                f"序列角色：{target_semantics_label(selected_template.sequence_role)}；"
+                f"规范化：{target_semantics_label(selected_template.normalization_mode)}"
+            )
+            if selected_template.target_warning:
+                st.caption(selected_template.target_warning)
 
     elif build_mode == "三段式构建（自定义组合）":
         from app.services.pichia_target_catalog_service import (

@@ -798,7 +798,7 @@ def _lp_floor_bottleneck_frame(lp_attribution: dict[str, object]) -> pd.DataFram
 
 def _render_lp_attribution(lp_attribution: dict[str, object]) -> None:
     st.markdown("**约束归因证据（进阶：模型为什么这么排）**")
-    st.caption("进阶证据：Python 草稿版约束灵敏度（“限制强度”即影子价格，基于 SciPy HiGHS）；数值未与 MATLAB/SoPlex 完全对齐，看相对大小即可。")
+    st.caption("进阶证据：约束灵敏度草稿（“限制强度”＝该约束有多吃紧）；只看相对大小与名次，不要当精确数值用。")
     objective = lp_attribution.get("objective_evidence") if isinstance(lp_attribution.get("objective_evidence"), dict) else {}
     c1, c2, c3 = st.columns([1, 1, 1])
     with c1:

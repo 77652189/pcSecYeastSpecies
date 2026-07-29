@@ -95,6 +95,11 @@ class BuiltinTargetTemplate:
     mature_sequence_length: int = 0
     target_warning: str = ""
     note: str = ""
+    # 实际序列：快速模板此前只显示各段长度，看不到自己到底选了什么。三段式构建能看到序列，
+    # 快速模板反而看不到——补齐后两种模式信息对等。
+    signal_peptide_sequence: str = ""
+    leader_sequence: str = ""
+    mature_sequence: str = ""
 
 
 __all__ = [

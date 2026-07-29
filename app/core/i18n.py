@@ -329,8 +329,10 @@ SIMULATION_RESULT_WARNING_RULES = (
     ("oe_actionable_bottlenecks lists only binding UPPER-bound",
      "OE 可缓解瓶颈只列当前解处 binding 的上限天花板（OE 真能放宽的）；下界 floor 由“为什么受限”单列、OE 动不了。"
      "OE 可缓解天花板只是线索不是保证：放宽后耦合结构会让瓶颈转移，用前请与真实 reaction_oe_tradeoff 交叉验证。"),
+    # 去掉"未与 MATLAB/SoPlex 完全对齐"这类对照历史实现的说法——研究员不关心也无从判断，
+    # 真正要传达的是"这是相对强弱信号、看名次不看绝对值"。（测试只锁前缀"LP 灵敏度"。）
     ("LP sensitivity is a Python draft",
-     "LP 灵敏度是基于 SciPy HiGHS 影子价格的 Python 草稿，不是 MATLAB/SoPlex 完全对齐的影子价格。"),
+     "LP 灵敏度是草稿级证据：只反映各约束的相对吃紧程度，看名次、不要当精确数值用。"),
     ("maximization problem is solved through SciPy minimization",
      "最大化问题通过 SciPy 最小化求解，符号应按“草稿灵敏度证据”来理解。"),
     ("Only compressed top-N attribution rows",

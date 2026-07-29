@@ -178,6 +178,9 @@ def list_builtin_target_templates(paths: ProjectPaths | None = None) -> list[Bui
                 mature_sequence_length=len(spec.mature_sequence),
                 target_warning=semantics["target_warning"],
                 note=_builtin_target_note(summary.target_id),
+                signal_peptide_sequence=spec.signal_peptide_sequence,
+                leader_sequence=spec.leader_sequence,
+                mature_sequence=spec.mature_sequence,
             )
         )
     return templates

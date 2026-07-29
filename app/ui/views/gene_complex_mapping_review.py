@@ -108,7 +108,7 @@ def render_gene_complex_mapping_review(target_id: str = "hLF") -> None:
     label = (
         f"补全「实验时对应基因」映射 · 策展复核（已确认 {reviewed_count} 条）"
         if reviewed_count
-        else "补全「实验时对应基因」映射 · 策展复核（还没人审过）"
+        else "补全「实验时对应基因」映射 · 策展复核"
     )
     with st.expander(label, expanded=False):
         st.markdown(
