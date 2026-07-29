@@ -86,6 +86,20 @@ def lab_gene_hint_for_complex(complex_reaction_id: str, *, paths: Any | None = N
     return "、".join(parts)
 
 
+def build_draft_mapping_rows(paths: Any | None = None) -> list[dict[str, Any]]:
+    """从策展候选自动起草映射，返回纯 dict 供 UI 渲染（UI 不得直接 import 引擎）。
+
+    草稿一律 pending_review + auxiliary + unknown，**不会自己生效**——判定逻辑在引擎，这里只搬运。
+    """
+    ensure_python_pichia_on_path()
+    from pcsec_pichia.services.gene_complex_mapping import build_draft_mappings_from_candidates
+
+    from app.services.pichia_gene_catalog_service import load_hlf_opn_candidate_genes
+
+    candidates = load_hlf_opn_candidate_genes(target_context=None, include_shared=True)
+    return [row.to_dict() for row in build_draft_mappings_from_candidates(candidates)]
+
+
 def gene_complex_mapping_summary(paths: Any | None = None) -> dict[str, Any]:
     rows, notes = load_gene_complex_mapping(paths)
     ensure_python_pichia_on_path()

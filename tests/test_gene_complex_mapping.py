@@ -108,6 +108,58 @@ def test_both_query_directions_and_reviewed_only_gate() -> None:
     assert mapping.complexes_for_gene(rows, "") == ()
 
 
+def test_draft_from_candidates_never_self_activates() -> None:
+    """草稿的意义是把"从零查"降成"打勾"，但**绝不能自己生效**：
+    一律最保守三档 → may_enter_executable_single_gene_oe 恒 False。"""
+    drafts = mapping.build_draft_mappings_from_candidates(
+        [
+            {
+                "gene_id": "PAS_chr4_0844",
+                "source_common_name": "PDI1（单独）",
+                "review_reactions": ["sec_Pdi1p_complex_formation"],
+                "homology_review_status": "rbh_not_in_model",
+            }
+        ]
+    )
+
+    assert len(drafts) == 1
+    draft = drafts[0]
+    assert draft.review_status == mapping.REVIEW_PENDING
+    assert draft.subunit_role == mapping.SUBUNIT_ROLE_AUXILIARY
+    assert draft.stoichiometry_status == mapping.STOICHIOMETRY_UNKNOWN
+    assert draft.may_enter_executable_single_gene_oe is False
+    assert draft.is_reviewed is False
+    assert "同源" in draft.note and "PDI1" in draft.evidence_citation
+
+
+def test_draft_skips_entries_without_a_resolved_gene_and_dedupes() -> None:
+    """复合体/家族名（OST 复合体、KTR）没有单一基因，软件不猜——留给人工查。"""
+    drafts = mapping.build_draft_mappings_from_candidates(
+        [
+            {"gene_id": "", "source_common_name": "OST 复合体", "review_reactions": ["sec_OSTC_complex_formation"]},
+            {"gene_id": "PAS_A", "review_reactions": ["sec_X_complex_formation"]},
+            {"gene_id": "PAS_A", "review_reactions": ["sec_X_complex_formation"]},
+        ]
+    )
+
+    assert [(row.pichia_gene_id, row.complex_reaction_id) for row in drafts] == [
+        ("PAS_A", "sec_X_complex_formation")
+    ]
+
+
+def test_draft_round_trips_through_the_contract_validator() -> None:
+    """起草 → 序列化 → 再校验必须无损，否则导出的文件读不回来。"""
+    drafts = mapping.build_draft_mappings_from_candidates(
+        [{"gene_id": "PAS_A", "review_reactions": ["sec_X_complex_formation", "sec_Y_complex_formation"]}]
+    )
+    payload = mapping.serialize_gene_complex_mappings(drafts)
+    reloaded, problems = mapping.validate_gene_complex_mapping_payloads(payload["mappings"])
+
+    assert problems == ()
+    assert len(reloaded) == len(drafts) == 2
+    assert payload["schema_version"] == mapping.GENE_COMPLEX_MAPPING_SCHEMA_VERSION
+
+
 def test_missing_curation_file_degrades_gracefully(tmp_path) -> None:
     """策展数据未到位是**预期状态**（待拍板），不能抛异常。"""
     rows, notes = mapping.load_gene_complex_mapping_file(tmp_path / "nope.json")

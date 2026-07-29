@@ -166,6 +166,66 @@ def load_gene_complex_mapping_file(path: Path) -> tuple[tuple[GeneComplexMapping
     return validate_gene_complex_mapping_payloads(rows)
 
 
+DRAFT_NOTE = "草稿：基因来自同源比对，角色与化学计量待人工判断"
+
+
+def build_draft_mappings_from_candidates(
+    candidate_rows: list[dict[str, Any]] | tuple[dict[str, Any], ...],
+) -> tuple[GeneComplexMapping, ...]:
+    """从策展候选行自动起草映射，供人工复核——把"从零查"变成"打勾/否决"。
+
+    草稿一律取**最保守**的三档：`auxiliary` + `unknown` + `pending_review`，因此
+    `may_enter_executable_single_gene_oe` 恒为 False——**草稿绝不会自己生效**，必须有人复核后
+    才可能进入可执行路径。角色与化学计量是生物学判断，软件不猜。
+    """
+    drafts: list[GeneComplexMapping] = []
+    seen: set[tuple[str, str]] = set()
+    for row in candidate_rows:
+        gene_id = str(row.get("gene_id") or "").strip()
+        if not gene_id:
+            continue  # 复合体/家族名（OST 复合体、KTR 等）没有单一基因，只能人工查
+        reactions = [
+            str(item).strip()
+            for item in (
+                row.get("review_reactions")
+                or row.get("executable_oe_proxy_reactions")
+                or row.get("executable_ko_reactions")
+                or []
+            )
+            if str(item).strip()
+        ]
+        homology_status = str(row.get("homology_review_status") or "")
+        common_name = str(row.get("source_common_name") or "").strip()
+        for reaction_id in reactions:
+            key = (gene_id, reaction_id)
+            if key in seen:
+                continue
+            seen.add(key)
+            drafts.append(
+                GeneComplexMapping(
+                    pichia_gene_id=gene_id,
+                    complex_reaction_id=reaction_id,
+                    subunit_role=SUBUNIT_ROLE_AUXILIARY,
+                    stoichiometry_status=STOICHIOMETRY_UNKNOWN,
+                    review_status=REVIEW_PENDING,
+                    evidence_source="homology_rbh_draft",
+                    evidence_citation=f"策展俗名 {common_name}" if common_name else "",
+                    note=f"{DRAFT_NOTE}；同源状态={homology_status or '未知'}",
+                )
+            )
+    return tuple(drafts)
+
+
+def serialize_gene_complex_mappings(
+    rows: tuple[GeneComplexMapping, ...] | list[GeneComplexMapping],
+) -> dict[str, Any]:
+    """按策展文件格式序列化（供导出 / 回填）。"""
+    return {
+        "schema_version": GENE_COMPLEX_MAPPING_SCHEMA_VERSION,
+        "mappings": [row.to_dict() for row in rows],
+    }
+
+
 def genes_for_complex(
     rows: tuple[GeneComplexMapping, ...] | list[GeneComplexMapping],
     complex_reaction_id: str,
@@ -217,7 +277,10 @@ def summarize_gene_complex_mapping_rows(
 
 
 __all__ = [
+    "DRAFT_NOTE",
     "GENE_COMPLEX_MAPPING_SCHEMA_VERSION",
+    "build_draft_mappings_from_candidates",
+    "serialize_gene_complex_mappings",
     "REVIEW_PENDING",
     "REVIEW_REJECTED",
     "REVIEW_REVIEWED",
