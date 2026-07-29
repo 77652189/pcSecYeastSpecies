@@ -148,9 +148,55 @@ def _attach_lab_gene_hints(frame: pd.DataFrame) -> pd.DataFrame:
     return frame
 
 
+def _attach_screen_effects(frame: pd.DataFrame, target_id: str) -> tuple[pd.DataFrame, bool]:
+    """把已跑筛查的真实效应接上，让"该先试哪个"由模型算的数字说了算而不是靠机制猜。
+
+    返回 (frame, 是否有筛查数据)。没跑过筛查时整列 `—`——策展 scope 是分钟级的，跑一轮即可填上。
+    """
+    if frame.empty:
+        return frame, False
+    try:
+        from app.services.screen_effect_lookup import load_screen_effect_lookup
+
+        effects = load_screen_effect_lookup(target_id)
+    except Exception:  # noqa: BLE001 - 效应只是加分项，读不到不该拖垮选择器
+        return frame, False
+    if not effects:
+        return frame, False
+
+    gains: list[str] = []
+    growths: list[str] = []
+    for _, row in frame.iterrows():
+        found = effects.get((str(row.get("改造方式") or "").upper(), str(row.get("模型对象") or "")))
+        if found is None:
+            gains.append("—")
+            growths.append("—")
+            continue
+        effect, growth = found
+        gains.append(f"{effect * 100:+.3g}%")
+        growths.append(f"{growth:.3f}")
+    frame = frame.copy()
+    frame["模型预测提升"] = gains
+    frame["生长保持"] = growths
+    return frame, True
+
+
 def render_candidate_selector(target_id: str, *, target_context: str) -> None:
     """勾选式候选选择器。放在输入框之前（见 apply_routed_candidates 的 session_state 约束）。"""
-    candidates = load_hlf_opn_candidate_genes(target_context=target_context, include_shared=True)
+    # 分靶点：策展库按目标蛋白自身的修饰化学过滤（二硫键/N-糖基化→hLF，O-糖基化→OPN，其余共享）。
+    # 这是**便利性启发式、不是科学门禁**——万一被过滤掉的机制其实有用就看不到了，故给逃生开关。
+    show_all = st.checkbox(
+        "显示全部环节（不按当前靶点过滤）",
+        value=False,
+        key=f"candidate_selector_show_all_{target_context}",
+        help=(
+            f"默认只显示与 {target_context} 的修饰化学相关的候选（如 O-糖基化机制只给 OPN）。"
+            "这是按机制的人为归类，勾选可看到全部策展候选。"
+        ),
+    )
+    candidates = load_hlf_opn_candidate_genes(
+        target_context=None if show_all else target_context, include_shared=True
+    )
     frame = build_unified_candidate_rows(candidates)
     if frame.empty:
         st.caption("当前目标没有可直接选择的策展候选。")
@@ -161,6 +207,17 @@ def render_candidate_selector(target_id: str, *, target_context: str) -> None:
         "不用自己判断该填哪个框**）。「把握」列说明模型能给到什么程度。"
     )
     frame = _attach_lab_gene_hints(frame)
+    frame, has_effects = _attach_screen_effects(frame, target_id)
+    if has_effects:
+        st.caption(
+            "「模型预测提升」来自已跑的筛查结果——**模型内部相对量、不是产量预测**，看名次比看绝对数值可靠。"
+            "KO 要连「生长保持」一起看：1.0＝不影响生长，明显低于 1 的即使提升也要额外补救。"
+        )
+    else:
+        st.caption(
+            "还没有可用的筛查结果，所以没有效应数字。想让这里显示"
+            "「模型预测提升」，去「全基因组KO/OE筛查」跑一轮**策展复合体反应对照表**（分钟级）。"
+        )
     processes = [ALL_PROCESSES, *sorted(frame["分泌环节"].unique())]
     chosen_process = st.selectbox(
         "按分泌环节筛选",
