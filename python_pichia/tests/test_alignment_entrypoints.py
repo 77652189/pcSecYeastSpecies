@@ -326,3 +326,70 @@ def test_hlf_project_710_artifact_does_not_override_original_hlf_status() -> Non
     assert "Target is missing" in original_hlf.diagnostic_message
     assert payload["is_fully_aligned"] is False
     assert payload["is_aligned_except_known_matlab_compatibility_differences"] is False
+
+
+# --- ADR-008 的守卫：与旧 MATLAB 实现「对照」的声称边界 -------------------------
+# 这些断言是**纯函数**的，不读任何产物文件——ADR-008 要守的是判定规则本身，
+# 而基线产物在 local_runs/（gitignored），依赖它就会在干净 clone 上静默变结论。
+
+
+def test_corrected_condition_never_yields_an_alignment_claim() -> None:
+    """ADR-008 决策 1：修正条件下恒 `pending`，与其余参数无关。
+
+    修正后的培养基与旧 MATLAB 基线不是同一个条件，跨条件比对即使数值接近也不
+    构成「对齐」。界面上的「待对齐」是这条边界的表现，不是缺陷——谁想把这行
+    「修好」，先撞这条守卫，再读 ADR-008。
+    """
+    for matlab_success in (True, False, None):
+        for objective_relative_diff in (0.0, 1e-9, 0.5, None):
+            for constraint_diff_status in ("matched", "pending", "known_matlab_compatibility_differences"):
+                status = classify_alignment_status(
+                    python_result_status="corrected_condition",
+                    baseline_available=True,
+                    matlab_success=matlab_success,
+                    objective_relative_diff=objective_relative_diff,
+                    constraint_diff_status=constraint_diff_status,
+                )
+                # matlab_failed 优先级更高（基线侧自己没跑成功，也谈不上对照）
+                expected = "matlab_failed" if matlab_success is False else "pending"
+                assert status == expected, (
+                    f"corrected_condition 下得到 {status!r}"
+                    f"（matlab_success={matlab_success}, diff={objective_relative_diff},"
+                    f" constraints={constraint_diff_status}）——违反 ADR-008 决策 1"
+                )
+
+
+def test_alignment_status_vocabulary_is_a_closed_set() -> None:
+    """ADR-008 决策 2：七个状态是封闭集合，各自只说一件事。
+
+    断言的是**集合相等**而不是包含：新增一个状态词必须是有意识的决定，
+    并且要同步更新 ADR-008 的状态表，否则界面和下游会各自解释。
+    """
+    assert ALIGNMENT_STATUSES == {
+        "pending",
+        "baseline_missing",
+        "matlab_failed",
+        "python_draft",
+        "aligned",
+        "not_aligned",
+        "aligned_except_known_matlab_compatibility_differences",
+    }
+
+
+def test_known_compatibility_status_requires_registered_exceptions() -> None:
+    """ADR-008 决策 2 续：未登记的差异不得归入「已知兼容性差异」。
+
+    否则这个状态会退化成「凡是对不上的都算已知差异」。
+    """
+    common = dict(
+        python_result_status="matlab_aligned",
+        baseline_available=True,
+        matlab_success=True,
+        constraint_diff_status="known_matlab_compatibility_differences",
+    )
+    assert classify_alignment_status(has_compatibility_exceptions=True, **common) == (
+        "aligned_except_known_matlab_compatibility_differences"
+    )
+    assert classify_alignment_status(has_compatibility_exceptions=False, **common) != (
+        "aligned_except_known_matlab_compatibility_differences"
+    )
