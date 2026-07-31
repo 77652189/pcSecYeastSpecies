@@ -64,16 +64,36 @@ def test_completed_reference_docs_are_not_active_entries() -> None:
 
 
 def test_obsolete_migration_plans_are_deleted_not_kept_as_active_debt() -> None:
-    docs_root = REPO_ROOT / "docs"
-    archive_root = docs_root / "archive"
-    python_pichia_docs_root = REPO_ROOT / "python_pichia" / "docs"
-    all_doc_names = {
-        path.name
-        for root in (docs_root, archive_root, python_pichia_docs_root)
-        for path in root.glob("*.md")
+    """只扫仓库里真实存在、且被版本控制跟踪的文档目录。
+
+    此前还扫了 docs/archive/ 和 python_pichia/docs/，两个都是空转：
+    前者被 .gitignore 排除（内容因机器而异，干净 clone 上不存在），
+    后者压根没有这个目录。两个 glob 都静默返回空，于是这条断言在别人机器上
+    “通过”的理由和在本机完全不同——依赖未跟踪本地状态的测试没有检测力，只有摩擦。
+    """
+    scanned_roots = (REPO_ROOT / "docs", REPO_ROOT / "docs" / "adr")
+
+    # 防空转：扫描目标消失时必须红，而不是悄悄通过。上面那个 bug 就是这么藏住的。
+    for root in scanned_roots:
+        assert root.is_dir(), f"扫描目标不存在，测试会静默通过：{root}"
+
+    doc_names = {path.name for root in scanned_roots for path in root.glob("*.md")}
+
+    assert doc_names.isdisjoint(DELETED_OBSOLETE_MIGRATION_DOCS)
+
+
+def test_private_archive_stays_out_of_version_control() -> None:
+    """docs/archive/ 放的是不对外的设计文档（2026-07-07 保密清理 0df8f92 的产物）。
+
+    保护它的只有 .gitignore 里的一行。那行没了，下一次 `git add -A` 就会把这批
+    私有文档提交进公开仓库。把“私有文件保持 gitignore”这个决定焊死在这里。
+    """
+    ignored_lines = {
+        line.strip()
+        for line in (REPO_ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
     }
 
-    assert all_doc_names.isdisjoint(DELETED_OBSOLETE_MIGRATION_DOCS)
+    assert "docs/archive/" in ignored_lines
 
 
 def test_docs_readme_routes_to_current_slice() -> None:
