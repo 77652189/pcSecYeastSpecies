@@ -1,11 +1,13 @@
 # pcSecPichia 文档索引
 
 状态：active  
-最后更新：2026-07-28
+最后更新：2026-07-31
 
 项目文档围绕一个原始研发目标组织：通过 KO/OE 和分泌路径改造，提高 hLF、OPN 等目标蛋白在 Pichia 中的分泌表现。
 
-当前系统已具备 KO/OE 候选生成、证据复核、实验反馈回放、reaction proxy 与相对未校准 gene-capacity 求解、外部 baseline capacity 审核链路、相对信号深化 R1–R4（瓶颈归因 / 剂量响应 / 排序稳健性 / 价值-of-information）、碳源条件标定 + 短名单跨条件稳健性、以及改造后候选系统（叠 KO/OE 重解 + 分层复用短名单）；但不承诺真实发酵产量、mg/L 绝对值或实验成功率。方向 1、2 产品分层已验收，方向 3 分泌资源 Round 0 与 ERAD 决定已完成（约束保持可选），绝对容量恒 unavailable。**当前阶段：候选生成侧已完成；当前 slice = 可用性 + 可达性（阶段④，非数据门控）**——2026-07-28 查实真正的杠杆（分泌机器复合体）此前在界面上基本不可达，见 [ADR-007](adr/007-secretory-machinery-gene-complex-reachability.md)。#2 实验反馈一致性验证、RNA-seq 表达约束、碳源升 corrected、绝对容量仍数据门控。方向 4 组合设计与目标蛋白降解通路建模明确不做。五方向完整状态见架构文档，当前任务见执行计划 / handoff。
+**本文件只路由，不复述状态。** 能力清单见 [架构](architecture.md)，当前进展 / 待启动 / 仍数据门控的部分见 [执行计划](EXECUTION_PLAN.md)，正在做的那一片见 [handoff](handoff.md)。索引里再抄一份状态就是双权威，而那份副本没人会记得更新。
+
+**永久边界**（不衰减，所以留在索引里）：模型只产折叠 / 分泌容量这一片的**相对**候选信号，**不承诺真实发酵产量、mg/L 绝对值或实验成功率**；绝对容量恒 unavailable（[ADR-002](adr/002-relative-oe-and-absolute-capacity-layers.md)）；方向 4 组合设计与目标蛋白降解通路建模明确不做。
 
 ## 当前入口
 

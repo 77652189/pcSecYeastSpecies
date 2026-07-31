@@ -1,9 +1,36 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+# handoff 的 yaml 状态块允许的取值。断言「取值在枚举内」而不是「等于当前值」：
+# slice 从 in_progress 推进到 done 不该让测试变红，只有冒出一个没见过的状态词才该红。
+SLICE_STATUS_VALUES = {"not_started", "in_progress", "blocked", "done"}
+REQUIRED_HANDOFF_STATE_KEYS = (
+    "current_slice",
+    "slice_status",
+    "previous_slice",
+    "previous_slice_status",
+    "absolute_capacity_status",
+)
+
+
+def _handoff_state_block() -> dict[str, str]:
+    """取 handoff 里那个 ```yaml 状态块，解析成 key -> value。"""
+    text = (REPO_ROOT / "docs" / "handoff.md").read_text(encoding="utf-8")
+    match = re.search(r"```yaml\n(.*?)```", text, re.DOTALL)
+    assert match is not None, "handoff 里找不到 yaml 状态块，后续断言会全部落空"
+
+    fields = {}
+    for line in match.group(1).splitlines():
+        if ":" in line:
+            key, _, value = line.partition(":")
+            fields[key.strip()] = value.strip()
+    assert fields, "yaml 状态块解析出 0 个字段，解析口径可能已失效"
+    return fields
 
 ACTIVE_DOCS = {
     "EXECUTION_PLAN.md",
@@ -101,28 +128,58 @@ def test_private_archive_stays_out_of_version_control() -> None:
     assert "docs/archive/" in ignored_lines
 
 
-def test_docs_readme_routes_to_current_slice() -> None:
+def test_docs_readme_routes_instead_of_restating_state() -> None:
+    """索引只负责路由。
+
+    当前 slice、能力清单、门控项分别属于 handoff / 架构 / 执行计划；索引各抄一份
+    就是双权威，而且那份副本没人会记得更新（审计当天它的「最后更新」已经落后 3 天）。
+    """
     text = (REPO_ROOT / "docs" / "README.md").read_text(encoding="utf-8")
 
-    assert "碳源条件标定 + 短名单跨条件稳健性" in text
-    assert "方向 4 组合设计与目标蛋白降解通路建模明确不做" in text
+    for doc in ACTIVE_DOCS - {"README.md"} | {"adr/README.md"}:
+        assert f"({doc})" in text, f"文档索引里没有指向 {doc} 的链接"
+
+    # 永久边界可以留（不衰减）；当前状态不行。
+    assert "方向 4" in text and "明确不做" in text
+    assert "当前 slice" not in text, "索引复制了 handoff 的当前 slice —— 双权威，改成指针"
 
 
-def test_handoff_points_to_current_slice() -> None:
-    # handoff 精简为"当前目标 + 下一步 + 必读 + 验证"；current_slice 随推进更新
-    # （direction_3_erad → direction_5 碳源标定 → 改造后分层短名单 → 当前的可用性/可达性）。
+def test_handoff_state_block_is_wellformed() -> None:
+    """断言状态块的**形状**合法，不断言它当前是什么。
+
+    早先这里写的是 `assert "slice_status: in_progress" in text` 这类当前值断言：
+    slice 一推进就红，而修法永远是改测试去迎合文档——那是家务，检测力为零。
+    现在只有「字段缺失」或「冒出没见过的状态词」才会红。
+    """
+    fields = _handoff_state_block()
+
+    missing = [key for key in REQUIRED_HANDOFF_STATE_KEYS if key not in fields]
+    assert missing == [], f"handoff 状态块缺字段：{missing}"
+
+    for key in ("slice_status", "previous_slice_status"):
+        assert fields[key] in SLICE_STATUS_VALUES, (
+            f"{key}={fields[key]!r} 不在合法枚举内 {sorted(SLICE_STATUS_VALUES)}；"
+            "若确实新增了状态词，改枚举而不是删断言"
+        )
+
+    for key in ("current_slice", "previous_slice"):
+        assert re.fullmatch(r"[a-z0-9_]+", fields[key]), f"{key} 不是 snake_case 标识：{fields[key]!r}"
+
+    # 绝对容量恒 unavailable 是 ADR-002 定下的**永久边界**，不是当前值——
+    # 具体后缀（等哪种证据）可以变，"unavailable" 这个前缀不能变。
+    assert fields["absolute_capacity_status"].startswith("unavailable"), (
+        f"绝对容量声称成了 {fields['absolute_capacity_status']!r}，"
+        "这违反 ADR-002 的永久边界；要改先改 ADR"
+    )
+
+
+def test_handoff_states_the_hard_boundaries_verbatim() -> None:
+    """硬约束必须以**原文**在场——这些是不变量，不是状态。"""
     text = (REPO_ROOT / "docs" / "handoff.md").read_text(encoding="utf-8")
 
-    # 2026-07-28：迭代2 D1–D6 已全 push，slice 推进到阶段④ 可用性 + 可达性（ADR-007）。
-    # 此前"剩余全部数据门控"的判断已被证伪——分泌机器复合体可跑但界面上不可达，属非数据门控。
-    assert "current_slice: usability_and_secretory_machinery_reachability" in text
-    assert "slice_status: in_progress" in text
-    assert "previous_slice: modified_strain_ko_oe_layered_shortlist" in text
-    assert "absolute_capacity_status: unavailable_waiting_for_qualified_evidence" in text
-    assert "碳源条件标定 + 跨条件稳健性" in text
-    # 硬边界必须在场
     assert "glucose 的 corrected_reference 结果不得改动" in text
     assert "保密湿实验数据只存仓库外本地私有区" in text
+    assert "方向 4 组合搜索、目标蛋白降解通路建模、换默认 solver：明确不做" in text
 
 
 def test_active_architecture_indexes_layered_oe_decision() -> None:
