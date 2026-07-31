@@ -14,26 +14,20 @@ from pcsec_pichia.alignment import (
     opn_known_matlab_compatibility_exceptions,
     summarize_alignment,
 )
+from _local_artifacts import HLF_PROJECT_710_ARTIFACT, MATLAB_STAGE3_ARTIFACT, require_local_probe_artifact
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-ARTIFACT_PATH = REPO_ROOT / "local_runs" / "pichia_hlf_opn_probe" / "matlab_stage3_alignment" / "matlab_stage3_alignment_summary.json"
-HLF_PROJECT_710_ARTIFACT_PATH = (
-    REPO_ROOT
-    / "local_runs"
-    / "pichia_hlf_opn_probe"
-    / "hlf_project_sequence_matlab_harness_2026-06-26"
-    / "hlf_project_sequence_matlab_harness_summary.json"
-)
 
 
 def test_opn_alignment_artifact_is_loaded_but_not_marked_aligned() -> None:
-    artifact = load_matlab_alignment_artifact(ARTIFACT_PATH)
+    require_local_probe_artifact(MATLAB_STAGE3_ARTIFACT)
+    artifact = load_matlab_alignment_artifact(MATLAB_STAGE3_ARTIFACT)
 
     summary = build_alignment_summary(
         "OPN_ALPHA_FULL_PROJECT",
         python_result_status="draft",
-        artifact_path=ARTIFACT_PATH,
+        artifact_path=MATLAB_STAGE3_ARTIFACT,
         artifact=artifact,
         rows_python=24434,
         cols_python=29057,
@@ -57,10 +51,11 @@ def test_opn_alignment_artifact_is_loaded_but_not_marked_aligned() -> None:
 
 
 def test_opn_alignment_shape_can_match_when_python_ub_row_is_counted() -> None:
+    require_local_probe_artifact(MATLAB_STAGE3_ARTIFACT)
     summary = build_alignment_summary(
         "OPN_ALPHA_FULL_PROJECT",
         python_result_status="draft",
-        artifact_path=ARTIFACT_PATH,
+        artifact_path=MATLAB_STAGE3_ARTIFACT,
         rows_python=24435,
         cols_python=29057,
         objective_python=0.0021130308979533004,
@@ -74,10 +69,11 @@ def test_opn_alignment_shape_can_match_when_python_ub_row_is_counted() -> None:
 
 
 def test_hlf_alignment_preserves_matlab_failure_diagnostic() -> None:
+    require_local_probe_artifact(MATLAB_STAGE3_ARTIFACT)
     summary = build_alignment_summary(
         "hLF",
         python_result_status="draft",
-        artifact_path=ARTIFACT_PATH,
+        artifact_path=MATLAB_STAGE3_ARTIFACT,
     )
 
     assert summary.baseline_available is True
@@ -105,10 +101,11 @@ def test_missing_artifact_returns_baseline_missing_without_unclear_exception(tmp
 
 
 def test_corrected_condition_is_not_treated_as_old_matlab_baseline_equivalent() -> None:
+    require_local_probe_artifact(MATLAB_STAGE3_ARTIFACT)
     summary = build_alignment_summary(
         "OPN_ALPHA_FULL_PROJECT",
         python_result_status="corrected_condition",
-        artifact_path=ARTIFACT_PATH,
+        artifact_path=MATLAB_STAGE3_ARTIFACT,
         rows_python=25136,
         cols_python=29057,
         objective_python=0.0021130308979533004,
@@ -120,10 +117,11 @@ def test_corrected_condition_is_not_treated_as_old_matlab_baseline_equivalent() 
 
 
 def test_opn_known_compatibility_exceptions_are_explicit_and_not_fully_aligned() -> None:
+    require_local_probe_artifact(MATLAB_STAGE3_ARTIFACT)
     summary = build_alignment_summary(
         "OPN_ALPHA_FULL_PROJECT",
         python_result_status="corrected_condition",
-        artifact_path=ARTIFACT_PATH,
+        artifact_path=MATLAB_STAGE3_ARTIFACT,
         rows_python=24435,
         cols_python=29057,
         objective_python=0.0021130308979533004,
@@ -143,13 +141,14 @@ def test_opn_known_compatibility_exceptions_are_explicit_and_not_fully_aligned()
 
 
 def test_opn_corrected_alignment_regression_records_named_known_exceptions() -> None:
+    require_local_probe_artifact(MATLAB_STAGE3_ARTIFACT)
     corrected_opn_objective = 0.0021305196599992996
-    artifact = load_matlab_alignment_artifact(ARTIFACT_PATH)
+    artifact = load_matlab_alignment_artifact(MATLAB_STAGE3_ARTIFACT)
 
     summary = build_alignment_summary(
         "OPN_ALPHA_FULL_PROJECT",
         python_result_status="corrected_condition",
-        artifact_path=ARTIFACT_PATH,
+        artifact_path=MATLAB_STAGE3_ARTIFACT,
         artifact=artifact,
         rows_python=24435,
         cols_python=29057,
@@ -276,12 +275,13 @@ def test_hlf_matlab_failure_is_not_marked_aligned_when_historical_probe_artifact
 
 
 def test_hlf_project_710_artifact_can_be_marked_aligned_except_known_compatibility_differences() -> None:
-    artifact = load_matlab_alignment_artifact(HLF_PROJECT_710_ARTIFACT_PATH)
+    require_local_probe_artifact(HLF_PROJECT_710_ARTIFACT)
+    artifact = load_matlab_alignment_artifact(HLF_PROJECT_710_ARTIFACT)
 
     summary = build_alignment_summary(
         "hLF_PROJECT_710",
         python_result_status="corrected_condition",
-        artifact_path=HLF_PROJECT_710_ARTIFACT_PATH,
+        artifact_path=HLF_PROJECT_710_ARTIFACT,
         artifact=artifact,
         rows_python=24444,
         cols_python=29068,
@@ -310,7 +310,8 @@ def test_hlf_project_710_artifact_can_be_marked_aligned_except_known_compatibili
 
 
 def test_hlf_project_710_artifact_does_not_override_original_hlf_status() -> None:
-    artifact = load_matlab_alignment_artifact(HLF_PROJECT_710_ARTIFACT_PATH)
+    require_local_probe_artifact(HLF_PROJECT_710_ARTIFACT)
+    artifact = load_matlab_alignment_artifact(HLF_PROJECT_710_ARTIFACT)
 
     original_hlf = build_alignment_summary(
         "hLF",

@@ -25,16 +25,11 @@ from pcsec_pichia.screens import run_pcsec_ko_screen, run_pcsec_oe_screen
 from pcsec_pichia.secretion_plan import target_reaction_plan
 from pcsec_pichia.simulation import build_supported_target_model, solve_pcsec_maximize
 from pcsec_pichia.targets import TargetSpec, load_targets
+from _local_artifacts import require_local_probe_artifact
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PROBE_DIR = REPO_ROOT / "local_runs" / "pichia_hlf_opn_probe"
-
-
-def _require_local_probe_artifact(path: Path) -> None:
-    if not path.exists():
-        pytest.skip(f"local probe artifact is not available in this checkout: {path}")
-    assert path.stat().st_size > 0, f"empty Stage 3 artifact: {path}"
 
 
 def _tiny_exchange_model() -> CobraModel:
@@ -86,8 +81,6 @@ def test_formal_modules_expose_scope_freeze_entrypoints() -> None:
     assert AlignmentSummary(target_id="OPN", success=True, baseline_source="matlab").success is True
     assert PcSecPichiaInputs is not None
     assert callable(load_pcsec_pichia_inputs)
-
-
 
 
 def test_pichia_public_request_and_result_defaults_are_explicit() -> None:
@@ -201,7 +194,7 @@ def test_stage3_optional_constraint_artifacts_remain_valid() -> None:
         candidates_path = PROBE_DIR / f"{prefix}_candidates.csv"
         tradeoff_path = PROBE_DIR / f"{prefix}_tradeoff.csv"
         for path in (summary_path, report_path, candidates_path, tradeoff_path):
-            _require_local_probe_artifact(path)
+            require_local_probe_artifact(path)
 
         summary = json.loads(summary_path.read_text(encoding="utf-8"))
         for target in summary["targets"]:
@@ -230,7 +223,7 @@ def test_stage3_optional_constraint_artifacts_remain_valid() -> None:
 
 def test_matlab_alignment_summary_preserves_hlf_diagnostic() -> None:
     summary_path = PROBE_DIR / "matlab_stage3_alignment" / "matlab_stage3_alignment_summary.json"
-    _require_local_probe_artifact(summary_path)
+    require_local_probe_artifact(summary_path)
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
     by_target = {item["target_id"]: item for item in summary}
 

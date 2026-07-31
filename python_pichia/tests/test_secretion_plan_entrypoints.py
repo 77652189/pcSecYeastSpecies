@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from pcsec_pichia.secretion_plan import (
     SecretionPlanResult,
     build_secretion_plan,
@@ -9,6 +11,7 @@ from pcsec_pichia.secretion_plan import (
     summarize_secretion_plan,
 )
 from pcsec_pichia.targets import TargetSpec, load_builtin_targets, load_custom_targets_json
+from _local_artifacts import TARGETS_EXAMPLE, require_local_probe_artifact
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -71,6 +74,7 @@ def test_hlf_builtin_builds_soluble_secretory_plan_with_dsb_and_ng() -> None:
 
 
 def test_custom_json_targets_build_matching_secretion_plans() -> None:
+    require_local_probe_artifact(TARGETS_EXAMPLE)
     targets = _by_id(load_custom_targets_json(REPO_ROOT / "local_runs" / "pichia_hlf_opn_probe" / "targets.example.json"))
 
     opn_custom = build_secretion_plan(targets["OPN_CUSTOM"])

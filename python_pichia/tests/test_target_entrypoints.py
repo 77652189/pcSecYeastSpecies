@@ -14,6 +14,7 @@ from pcsec_pichia.targets import (
     load_opn_candidate_targets,
     target_spec_from_input,
 )
+from _local_artifacts import TARGETS_EXAMPLE, require_local_probe_artifact
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -94,6 +95,7 @@ def test_load_opn_candidate_target_preserves_baseline_compatibility() -> None:
 
 
 def test_load_custom_targets_json_returns_target_specs() -> None:
+    require_local_probe_artifact(TARGETS_EXAMPLE)
     targets = load_custom_targets_json(REPO_ROOT / "local_runs" / "pichia_hlf_opn_probe" / "targets.example.json")
     by_id = {target.target_id: target for target in targets}
 
