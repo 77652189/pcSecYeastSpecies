@@ -90,7 +90,9 @@ SIMULATION_RESULT_COLUMN_LABELS = {
     "secretory_process": "分泌资源层",
     # "影子价格/绝对值"是线性规划术语，对湿实验研究员没有意义。这里统一换成它的**生物学含义**：
     # 这条约束把分泌卡得有多紧（松开它能让分泌多出多少）。数值仍是同一个量，只是说法可懂。
-    "marginal": "限制强度",
+    # 两者会**同时出现在同一张表**（bound_marginals），必须给不同名字——
+    # 否则 DataFrame 重命名后撞名，直接抛 ValueError: Duplicate column names。
+    "marginal": "限制强度（带正负号）",
     "abs_marginal": "限制强度",
     "oe_actionable": "OE 可缓解",
     "flux": "通量",
