@@ -61,7 +61,8 @@ REVIEW_PACKAGES = {
         "scripts/repair_pcSecYeastSpecies_desktop_shortcut.ps1",
     ],
     "active_docs": [
-        "docs/pichia_current_architecture_and_requirements.md",
+        "docs/requirements.md",
+        "docs/architecture.md",
     ],
     "boundary_tests": [
         "tests/test_pichia_secretion_service_contract.py",
@@ -104,10 +105,16 @@ def test_pichia_app_orchestration_files_stay_outside_formal_engine_package() -> 
 
 
 def test_all_pichia_app_service_modules_are_in_review_package() -> None:
+    services_root = REPO_ROOT / "app" / "services"
+    # 防空转：目录被改名时 glob 静默返回空，`discovered <= reviewed` 会因空集恒真而通过，
+    # "所有 pichia 服务模块都必须进复核包"这条约束就无声失效了。
+    assert services_root.is_dir(), f"扫描目标不存在，测试会静默通过：{services_root}"
+
     discovered = {
         str(path.relative_to(REPO_ROOT)).replace("\\", "/")
-        for path in (REPO_ROOT / "app" / "services").glob("pichia_*.py")
+        for path in services_root.glob("pichia_*.py")
     }
+    assert discovered, "app/services 下一个 pichia_*.py 都没有 —— 扫描口径已失效"
     reviewed = {
         path.replace("\\", "/")
         for path in REVIEW_PACKAGES["app_service_facade"]
@@ -190,8 +197,12 @@ def test_direct_probe_imports_in_formal_engine_are_explicit_migration_debt() -> 
         # single-source-of-truth, not new independent probe reliance.
         "python_pichia/src/pcsec_pichia/analysis/__init__.py",
     }
+    engine_root = REPO_ROOT / "python_pichia" / "src" / "pcsec_pichia"
+    # 防空转：引擎目录不在时 rglob 返回空，整条 probe 依赖约束会静默变绿。
+    assert engine_root.is_dir(), f"扫描目标不存在，测试会静默通过：{engine_root}"
+
     discovered_probe_backed_modules: set[str] = set()
-    for source_path in (REPO_ROOT / "python_pichia" / "src" / "pcsec_pichia").rglob("*.py"):
+    for source_path in engine_root.rglob("*.py"):
         relative_path = str(source_path.relative_to(REPO_ROOT)).replace("\\", "/")
         if "/probe/" in relative_path:
             continue

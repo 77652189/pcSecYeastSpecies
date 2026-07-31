@@ -68,7 +68,10 @@ def test_fastapi_package_stays_at_service_facade_boundary() -> None:
         "app.adapters",
     )
 
-    for path in (REPO_ROOT / "app" / "api").rglob("*.py"):
+    api_root = REPO_ROOT / "app" / "api"
+    assert api_root.is_dir(), f"扫描目标不存在，测试会静默通过：{api_root}"
+
+    for path in api_root.rglob("*.py"):
         imported_modules = _imported_modules_from_source(path.read_text(encoding="utf-8"))
         for module_name in sorted(imported_modules):
             if module_name.startswith(forbidden_prefixes):

@@ -15,8 +15,11 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_app_no_longer_imports_deleted_process_runner_adapter() -> None:
+    app_root = REPO_ROOT / "app"
+    assert app_root.is_dir(), f"扫描目标不存在，测试会静默通过：{app_root}"
+
     deleted_adapter_imports: list[str] = []
-    for path in (REPO_ROOT / "app").rglob("*.py"):
+    for path in app_root.rglob("*.py"):
         module_ast = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(module_ast):
             imported: list[str] = []

@@ -32,7 +32,7 @@ def test_runtime_outputs_and_solver_artifacts_are_ignored() -> None:
 
 
 def test_data_results_policy_documents_current_ownership() -> None:
-    policy = _read_repo_text("docs/pichia_current_architecture_and_requirements.md")
+    policy = _read_repo_text("docs/architecture.md")
 
     assert "`Results/` 是 legacy MATLAB results" in policy
     assert "不是当前 Python 或 Streamlit 的默认输出目录" in policy
@@ -42,7 +42,7 @@ def test_data_results_policy_documents_current_ownership() -> None:
 
 
 def test_current_docs_keep_runtime_outputs_out_of_science_assets() -> None:
-    architecture = _read_repo_text("docs/pichia_current_architecture_and_requirements.md")
+    architecture = _read_repo_text("docs/architecture.md")
 
     assert "`Results/` 保留为 legacy MATLAB results" in architecture
     assert "统一落地目录，默认 ignored" in architecture
@@ -74,6 +74,12 @@ def test_runtime_write_lines_do_not_target_protected_science_asset_dirs() -> Non
         "Export-Csv",
     )
     scanned_roots = (REPO_ROOT / "app", REPO_ROOT / "python_pichia", REPO_ROOT / "scripts")
+
+    # 防空转：任一根目录被改名/移走时 rglob 静默返回空，"不许写保护目录"这条安全约束
+    # 就会在无人察觉的情况下失效。边界测试最不能静默变绿。
+    for root in scanned_roots:
+        assert root.is_dir(), f"扫描目标不存在，测试会静默通过：{root}"
+
     suspicious: list[str] = []
 
     for root in scanned_roots:

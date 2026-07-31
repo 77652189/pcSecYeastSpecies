@@ -8,7 +8,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 ACTIVE_DOCS = {
     "EXECUTION_PLAN.md",
     "handoff.md",
-    "pichia_current_architecture_and_requirements.md",
+    "requirements.md",
+    "architecture.md",
     "README.md",
 }
 
@@ -49,6 +50,8 @@ DELETED_OBSOLETE_MIGRATION_DOCS = {
 
 def test_docs_root_contains_only_reviewed_active_pichia_docs() -> None:
     docs_root = REPO_ROOT / "docs"
+    assert docs_root.is_dir(), f"扫描目标不存在，测试会静默通过：{docs_root}"
+
     root_markdown_files = {
         path.name for path in docs_root.glob("*.md") if path.is_file()
     }
@@ -58,6 +61,8 @@ def test_docs_root_contains_only_reviewed_active_pichia_docs() -> None:
 
 def test_completed_reference_docs_are_not_active_entries() -> None:
     docs_root = REPO_ROOT / "docs"
+    assert docs_root.is_dir(), f"扫描目标不存在，测试会静默通过：{docs_root}"
+
     root_markdown_files = {path.name for path in docs_root.glob("*.md")}
 
     assert root_markdown_files.isdisjoint(NON_ACTIVE_REFERENCE_DOCS)
@@ -122,7 +127,7 @@ def test_handoff_points_to_current_slice() -> None:
 
 def test_active_architecture_indexes_layered_oe_decision() -> None:
     architecture = (
-        REPO_ROOT / "docs" / "pichia_current_architecture_and_requirements.md"
+        REPO_ROOT / "docs" / "requirements.md"
     ).read_text(encoding="utf-8")
     adr_index = (REPO_ROOT / "docs" / "adr" / "README.md").read_text(
         encoding="utf-8"
@@ -140,3 +145,56 @@ def test_active_architecture_indexes_layered_oe_decision() -> None:
     assert "相对、未校准的 OE 决策层" in adr
     assert "绝对 gene-capacity 研究层" in adr
     assert "补充 ADR-001" in adr
+
+
+# 「随决策变」的小节：回答"我们要什么、不能碰什么"。它们消失通常意味着
+# 有人把需求或边界当成过期状态一起删了。
+# 2026-07-31 需求与架构按衰减率拆开后，这批小节分属两份文档。
+SLOW_LAYER_SECTIONS = {
+    "requirements.md": (
+        "## 原始研发目标",
+        "## 核心证据边界",
+        "## 产品验收分层",
+        "## 项目成功标准",
+    ),
+    "architecture.md": (
+        "## 架构边界",
+        "## 数据与产物治理",
+    ),
+}
+
+
+def _read_doc(name: str) -> str:
+    return (REPO_ROOT / "docs" / name).read_text(encoding="utf-8")
+
+
+def test_architecture_doc_keeps_its_slow_layer_sections() -> None:
+    """慢层小节必须在场。
+
+    快层（当前状态 / 进度 / 待办）**故意不做**标题断言：那类内容本来就该随进度变，
+    锁住它只会退化成家务——每次推进都红，而修法永远是改测试去迎合文档，检测力为零。
+    """
+    # 必须按**整行**比对，不能用子串：`"## 核心证据边界" in text` 会被
+    # `## 核心证据边界_DELETED` 满足，于是"改名"这种最常见的失效方式漏网。
+    # （这条是变异检验当场抓出来的——第一版就是子串匹配。）
+    missing: list[str] = []
+    for doc_name, sections in SLOW_LAYER_SECTIONS.items():
+        headings = {line.strip() for line in _read_doc(doc_name).splitlines()}
+        missing += [f"{doc_name}::{s}" for s in sections if s not in headings]
+
+    assert missing == [], f"需求/边界类小节不见了或被改名：{missing}"
+
+
+def test_current_state_has_exactly_one_authority() -> None:
+    """状态只能有一个权威，否则必然分叉。
+
+    2026-07-31 之前：架构文档写"此处为权威状态"、执行计划写"只列当前状态"——两处双权威。
+    同一件事各记一份的后果已经在 handoff 里现形过（被证伪的结论没删干净，与更正并存）。
+    现在状态权威归执行计划，架构文档显式交出。
+    """
+    for doc_name in ("requirements.md", "architecture.md"):
+        text = _read_doc(doc_name)
+        assert "不持有当前状态的权威" in text, f"{doc_name} 没有显式交出状态权威"
+        assert "此处为权威状态" not in text, f"{doc_name} 双权威回流了"
+
+    assert "状态的唯一权威" in _read_doc("EXECUTION_PLAN.md")

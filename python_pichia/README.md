@@ -73,6 +73,6 @@ The active project-level docs are:
 
 - `../docs/README.md`
 - `../docs/EXECUTION_PLAN.md`
-- `../docs/pichia_current_architecture_and_requirements.md`
+- `../docs/requirements.md`（需求与能力边界）、`../docs/architecture.md`（分层与产物治理）
 - `../docs/handoff.md`
 - `../docs/adr/README.md`

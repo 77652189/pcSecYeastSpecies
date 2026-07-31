@@ -16,6 +16,10 @@ def test_user_facing_python_files_have_no_mojibake() -> None:
     checked_roots = [Path("app/ui"), Path("app/services"), Path("app/core")]
     bad_fragments = ["�", "閰", "绋", "鐢", "鍙", "杩", "鏂", "浠跨湡", "鍛戒护"]
 
+    # 防空转：目录被改名/移走时 rglob 静默返回空，offenders == [] 会 vacuously 通过。
+    for root in checked_roots:
+        assert root.is_dir(), f"扫描目标不存在，测试会静默通过：{root}"
+
     offenders: list[str] = []
     for root in checked_roots:
         for path in root.rglob("*.py"):

@@ -172,16 +172,17 @@ python -m pytest -q python_pichia\tests\test_pipeline_entrypoints.py python_pich
 python -m pytest -q tests\test_pichia_secretion_service_contract.py
 ```
 
-Slow solver/model checks are intentionally gated by environment variables. See [Current Requirements And Architecture](docs/pichia_current_architecture_and_requirements.md#慢速测试网关).
+Slow solver/model checks are intentionally gated by environment variables. See [Current Requirements And Architecture](docs/architecture.md#慢速测试网关).
 
 ## Documentation
 
 | Document | Use it for |
 |---|---|
 | [Docs Index](docs/README.md) | Current document entry points and archived notes |
-| [Current Requirements And Architecture](docs/pichia_current_architecture_and_requirements.md) | Active target-protein workflow, boundaries, and system layering |
+| [Requirements And Capability Boundaries](docs/requirements.md) | Active target-protein workflow and scientific boundaries |
+| [Architecture And Boundaries](docs/architecture.md) | System layering, module ownership, and artifact governance |
 | [Execution Plan](docs/EXECUTION_PLAN.md) | Current stage, data-gated next work, and scope boundaries |
-| [Data And Artifact Governance](docs/pichia_current_architecture_and_requirements.md#数据与产物治理) | Protected directories, runtime artifacts, and archive rules |
+| [Data And Artifact Governance](docs/architecture.md#数据与产物治理) | Protected directories, runtime artifacts, and archive rules |
 
 ## Citation And Contact
 

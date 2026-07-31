@@ -9,7 +9,7 @@
   故 1017/1025 命中 `high_exact_locus_tag`，8 个无注释。
 - **但精确匹配只保证【名字 ↔ 位点】对得上，不保证【位点 ↔ 研究员心里的那个基因】**。
   项目文档已记录一类反例：策展俗名 → 模型位点的对应本身低置信待复核
-  （见 docs/pichia_current_architecture_and_requirements.md 的 PEP4/PRB1/YPS 条目）。
+  （见 docs/requirements.md 的 PEP4/PRB1/YPS 条目）。
   这类位点单独打 `identity_review`，UI 必须显式提示。
 - **描述性注释 ≠ 正式基因符号**：只有 ~46/1025 有真正的 symbol（如 SEC11），其余是蛋白
   描述串；另有约 56 个是 `uncharacterized / domain-containing protein` 这类泛化自动注释
@@ -66,7 +66,7 @@ GENERIC_ANNOTATION_MARKERS: tuple[str, ...] = (
 )
 
 # 策展俗名 → 模型位点的对应**本身**低置信待复核（不是名字错，是"这个位点是不是那个基因"存疑）。
-# 来源：docs/pichia_current_architecture_and_requirements.md（PEP4/PRB1 模型基因 ID 标注为
+# 来源：docs/requirements.md（PEP4/PRB1 模型基因 ID 标注为
 # 低置信度待复核；YPS1-3 尚未进入基因目录，故此处无位点可标）。这类位点上外部库给出的
 # 名字是**该位点真实的**功能注释，可能与团队口头说的俗名完全不同 —— 必须显式提示，
 # 否则研究员会以为工具在说"这就是 PEP4"。

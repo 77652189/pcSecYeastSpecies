@@ -146,8 +146,11 @@ def test_pichia_secretion_facade_stays_thin_and_imports_owner_modules_only() -> 
 
 
 def test_pichia_app_services_use_central_python_pichia_bootstrap() -> None:
+    services_root = REPO_ROOT / "app" / "services"
+    assert services_root.is_dir(), f"扫描目标不存在，测试会静默通过：{services_root}"
+
     offenders: list[str] = []
-    for path in (REPO_ROOT / "app" / "services").glob("pichia_*.py"):
+    for path in services_root.glob("pichia_*.py"):
         source = path.read_text(encoding="utf-8")
         if "sys.path" in source or "import sys" in source:
             offenders.append(str(path.relative_to(REPO_ROOT)))
@@ -178,8 +181,11 @@ def test_target_catalog_service_uses_formal_targets_not_probe_private_module() -
 
 
 def test_pichia_app_services_do_not_import_probe_private_modules() -> None:
+    services_root = REPO_ROOT / "app" / "services"
+    assert services_root.is_dir(), f"扫描目标不存在，测试会静默通过：{services_root}"
+
     offenders: list[str] = []
-    for path in (REPO_ROOT / "app" / "services").glob("pichia_*.py"):
+    for path in services_root.glob("pichia_*.py"):
         module_ast = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(module_ast):
             imported: list[str] = []
@@ -209,8 +215,11 @@ def test_service_contract_uses_facade_for_public_entrypoints_only() -> None:
 
 
 def test_streamlit_ui_does_not_import_engine_directly() -> None:
+    ui_root = REPO_ROOT / "app" / "ui"
+    assert ui_root.is_dir(), f"扫描目标不存在，测试会静默通过：{ui_root}"
+
     direct_engine_imports: list[str] = []
-    for path in (REPO_ROOT / "app" / "ui").rglob("*.py"):
+    for path in ui_root.rglob("*.py"):
         module_ast = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(module_ast):
             imported: list[str] = []
@@ -669,9 +678,12 @@ def test_python_draft_service_does_not_depend_on_legacy_app_engines() -> None:
 
 
 def test_legacy_matlab_runtime_imports_stay_in_reference_boundaries() -> None:
+    app_root = REPO_ROOT / "app"
+    assert app_root.is_dir(), f"扫描目标不存在，测试会静默通过：{app_root}"
+
     matlab_adapter_imports: list[str] = []
     legacy_engine_imports: list[str] = []
-    for path in (REPO_ROOT / "app").rglob("*.py"):
+    for path in app_root.rglob("*.py"):
         module_ast = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(module_ast):
             imported: list[str] = []

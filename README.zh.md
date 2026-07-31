@@ -172,16 +172,17 @@ python -m pytest -q python_pichia\tests\test_pipeline_entrypoints.py python_pich
 python -m pytest -q tests\test_pichia_secretion_service_contract.py
 ```
 
-慢速求解/模型检查由环境变量显式开启，详见 [当前需求与架构](docs/pichia_current_architecture_and_requirements.md#慢速测试网关)。
+慢速求解/模型检查由环境变量显式开启，详见 [当前需求与架构](docs/architecture.md#慢速测试网关)。
 
 ## 文档
 
 | 文档 | 用途 |
 |---|---|
 | [文档索引](docs/README.md) | 当前文档入口和归档记录 |
-| [当前需求与架构](docs/pichia_current_architecture_and_requirements.md) | 目标蛋白工作流、科学边界和系统分层 |
+| [需求与能力边界](docs/requirements.md) | 目标蛋白工作流与科学边界 |
+| [架构与边界](docs/architecture.md) | 系统分层、模块所有权与产物治理 |
 | [执行计划](docs/EXECUTION_PLAN.md) | 当前阶段、待数据工作和范围边界 |
-| [数据与产物治理](docs/pichia_current_architecture_and_requirements.md#数据与产物治理) | 保护目录、运行产物和归档规则 |
+| [数据与产物治理](docs/architecture.md#数据与产物治理) | 保护目录、运行产物和归档规则 |
 
 ## 引用与联系人
 
