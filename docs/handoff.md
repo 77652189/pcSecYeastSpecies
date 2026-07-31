@@ -1,7 +1,6 @@
 # pcSecPichia Handoff
 
 状态：active
-最后更新：2026-07-31
 
 ## 当前目标
 

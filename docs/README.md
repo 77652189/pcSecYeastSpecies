@@ -1,7 +1,6 @@
 # pcSecPichia 文档索引
 
-状态：active  
-最后更新：2026-07-31
+状态：active
 
 项目文档围绕一个原始研发目标组织：通过 KO/OE 和分泌路径改造，提高 hLF、OPN 等目标蛋白在 Pichia 中的分泌表现。
 

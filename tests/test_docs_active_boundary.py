@@ -132,7 +132,7 @@ def test_docs_readme_routes_instead_of_restating_state() -> None:
     """索引只负责路由。
 
     当前 slice、能力清单、门控项分别属于 handoff / 架构 / 执行计划；索引各抄一份
-    就是双权威，而且那份副本没人会记得更新（审计当天它的「最后更新」已经落后 3 天）。
+    就是双权威，而那份副本没人会记得更新——这不是假设，上一轮审计当场抓到过。
     """
     text = (REPO_ROOT / "docs" / "README.md").read_text(encoding="utf-8")
 
