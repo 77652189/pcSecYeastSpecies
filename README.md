@@ -1,200 +1,75 @@
-<div align="center">
+# pcSecPichia Secretion Model
 
-# pcSecYeastSpecies
+[English](README.md) · [中文](README.zh.md) · [日本語](README.ja.md) · [한국어](README.ko.md)
 
-**Cross-species yeast secretion models and a Python pcSecPichia workbench for target-protein secretion-engineering decisions**
+> **evidence-ranked KO/OE and secretion-pathway candidates for Pichia protein secretion.** It is built for reviewable decisions, not unqualified claims.
 
-[![MATLAB](https://img.shields.io/badge/MATLAB-reference%20models-E16737)](https://www.mathworks.com/products/matlab.html)
-[![Python](https://img.shields.io/badge/Python-pcSecPichia%20engine-3776AB?logo=python&logoColor=white)](https://www.python.org/)
-[![Streamlit](https://img.shields.io/badge/Streamlit-local%20workbench-FF4B4B?logo=streamlit&logoColor=white)](https://streamlit.io/)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+## Why it matters
 
-**Language:** English | [Chinese](README.zh.md)
+This project makes a high-stakes research or product decision inspectable: inputs, constraints, evidence, and the final human decision remain visible.
 
-</div>
+## What makes it strong
 
----
+> **Project-specific spotlight:** Secretion-model candidate screening combines KO/OE simulation, curated complex reachability, protein constraints, and risk disclosure.
 
-## Overview
-
-This repository contains two related layers:
-
-| Layer | Purpose |
-|---|---|
-| Original research model | MATLAB code and data for cross-species proteome-constrained modeling of yeast protein secretion in *Saccharomyces cerevisiae*, *Komagataella phaffii*, and *Kluyveromyces marxianus* |
-| Current product workbench | A Python `pcSecPichia` engine plus Streamlit/FastAPI facades focused on *K. phaffii* target-protein secretion-design support |
-
-The current applied workflow supports R&D discussions around specific target-protein expression in *Pichia/Komagataella*. It helps compare secretion burden, growth trade-offs, and candidate KO/OE interventions before wet-lab validation.
-
-The Python layer is not a full rewrite of the three-species MATLAB project. It deliberately migrates only the capabilities needed for the current target-protein productivity workflow.
-
-## What It Does
-
-| Capability | Current status |
-|---|---|
-| Cross-species MATLAB models | Reference model construction, simulation scripts, figure scripts, enzyme data, and processed results are retained under the original folders |
-| Python pcSecPichia engine | Loads Pichia model inputs, applies media conditions, builds target-protein secretion plans, adds constraints, solves secretion-capacity scenarios, and summarizes results |
-| Target proteins | Supports built-in reference targets, project-specific targets, candidate targets, and custom target inputs |
-| Medium conditions | Supports baseline and carbon-source conditions, including mixed-carbon objective probes and internal carbon-source condition calibration |
-| KO/OE analysis | Supports candidate preview, screen rows, small candidate screens, genome-wide KO/OE screen tooling, and modified-strain re-solve shortlists with layered reuse |
-| Decision-support signals | Relative-signal deepening: shadow-price bottleneck attribution, OE dose-response shape, ranking robustness, and value-of-information (relative comparison only, never absolute capacity) |
-| Evidence layer | Adds gene catalog, gene-rule overlays, phenotype-evidence tiers, and recommendation wording for manual review |
-| Local workbench | Streamlit UI for biology users, with service-layer request mapping, background task support, and report-style outputs |
+| Design choice | Value for an interviewer |
+| --- | --- |
+| Evidence before recommendation | Results retain source, constraint, and failure context |
+| Human decision boundary | The system narrows choices; it does not authorize scientific, compliance, or deployment action |
+| Explicit non-goals | Unsupported claims are documented rather than implied by a polished UI |
+| Canon + tests | Requirements, architecture, status, handoff, and long-lived decisions remain separately reviewable |
 
 ## Workflow
 
 ```mermaid
 flowchart LR
-    A["Target protein input"] --> B["Target secretion plan"]
-    C["Medium condition"] --> D["pcSecPichia model loading"]
-    B --> E["pcSec constraints"]
-    D --> E
-    E --> F["Secretion simulation"]
-    F --> G["Growth trade-off"]
-    F --> H["KO/OE screen"]
-    H --> I["Evidence-aware recommendation"]
-    G --> I
-    I --> J["R&D report / experiment discussion"]
+  A[Input or source data] --> B[Domain workflow]
+  B --> C[Constraints and evidence]
+  C --> D[Human review]
+  D --> E[Traceable output]
 ```
 
-Upstream tools such as codon optimization and signal peptide screening can provide target-design inputs, but this repository focuses on secretion modeling and KO/OE decision support.
-
-## Architecture
+## Architecture boundary
 
 ```mermaid
-flowchart TD
-    MATLAB["Reference MATLAB folders<br/>Code / Model / Enzymedata / Results"]
-    UI["Streamlit UI<br/>app/ui"]
-    API["FastAPI facade<br/>app/api"]
-    SERVICES["Application services<br/>app/services"]
-    ENGINE["python_pichia engine"]
-    CORE["loading / media / targets / secretion_plan<br/>constraints / simulation / screens / analysis / reports"]
-    LOCAL["local_runs<br/>runtime artifacts and validation evidence"]
-
-    UI --> SERVICES
-    API --> SERVICES
-    SERVICES --> ENGINE
-    ENGINE --> CORE
-    ENGINE -.reference data.-> MATLAB
-    SERVICES --> LOCAL
+flowchart TB
+  UI[User or API entry] --> APP[Application workflow]
+  APP --> DOMAIN[Domain rules]
+  APP --> PORTS[External-service boundary]
+  DOMAIN --> OUT[Reviewable result]
+  OUT --> HUMAN[Human decision]
 ```
 
-| Area | Key path | Responsibility |
-|---|---|---|
-| Original reference model | [`Code/`](Code/), [`Model/`](Model/), [`Enzymedata/`](Enzymedata/), [`Results/`](Results/) | MATLAB model construction, source datasets, and manuscript analysis artifacts |
-| Python engine | [`python_pichia/src/pcsec_pichia/`](python_pichia/src/pcsec_pichia/) | Pichia model loading, target construction, secretion constraints, simulation, screens, and reports |
-| Screen tooling | [`python_pichia/tools/`](python_pichia/tools/) | Genome-wide and focused KO/OE screen runners |
-| Service layer | [`app/services/`](app/services/) | Request mapping, background tasks, gene catalog, screen preview, and simulation facade |
-| UI layer | [`app/ui/`](app/ui/) | Streamlit pages and biology-facing presentation |
-| Working docs | [`docs/README.md`](docs/README.md) | Active scope, current architecture, and execution plan documents |
+## Quick start
 
-## Quick Start
-
-### Python workbench
-
-Install dependencies:
-
-```powershell
-pip install -r requirements.txt
-```
-
-Start the local Streamlit app:
+Prepare the supported local environment, then run:
 
 ```powershell
 python -m streamlit run app/ui/streamlit_app.py --server.address 0.0.0.0 --server.port 8502
 ```
 
-Or use the Windows launcher:
+## Engineering evidence
 
-```powershell
-.\start_pcSecYeastSpecies_lan.bat
-```
+| Checkpoint | Evidence | Boundary |
+| --- | --- | --- |
+| Product behavior | Run the focused tests named in Handoff | No output becomes a validated real-world outcome automatically |
+| Documentation | Run the repository documentation guard | Current status belongs to the execution plan, not this README |
+| Current direction | Read the execution plan before extending scope | RNA-seq data and curator-approved complex-to-gene mappings are still required. |
 
-Open:
-
-```text
-http://localhost:8502
-```
-
-### MATLAB reference workflows
-
-The original MATLAB model requires:
-
-- MATLAB R2020b or later
-- [COBRA Toolbox](https://github.com/opencobra/cobratoolbox)
-- [RAVEN Toolbox](https://github.com/SysBioChalmers/RAVEN)
-- [SoPlex](https://soplex.zib.de/) or the local Docker helper route
-
-Local helpers:
-
-```powershell
-.\local_preflight.ps1
-.\run_matlab_checks.ps1 -SmokeOnly
-.\run_soplex_docker.ps1 -TimeoutSeconds 300
-```
-
-Runtime LP files, solver outputs, reports, and UI artifacts are written under `local_runs/` and should remain untracked.
-
-## Scientific Boundaries
-
-- Outputs are for **relative model comparison and candidate prioritization**, not absolute mg/L yield prediction.
-- KO/OE results are not wet-lab success guarantees.
-- OE can be represented by reaction-level capacity proxies; that is not the same as a full gene-expression regulation model.
-- External database annotations support interpretation but do not alone prove phenotype effects.
-- Conclusions are target-specific and require alignment checks and experimental validation for each target protein.
-- The Python implementation is scoped to current Pichia work and is not a complete migration of all original MATLAB species/features.
-
-## Project Map
-
-```text
-pcSecYeastSpecies/
-+-- Code/                         # Original MATLAB scripts by species and figures
-+-- Model/                        # MATLAB model files
-+-- Enzymedata/                   # Species-specific enzyme data
-+-- Results/                      # Processed manuscript/reference results
-+-- app/
-|   +-- services/                 # Python service facades
-|   +-- ui/                       # Streamlit workbench
-+-- python_pichia/
-|   +-- src/pcsec_pichia/         # Python pcSecPichia engine
-|   +-- tests/                    # Engine tests
-|   +-- tools/                    # KO/OE screen runners
-+-- docs/                         # Active planning docs and archived notes
-+-- local_runs/                   # Runtime artifacts, ignored by Git
-```
-
-## Tests
-
-Focused Python checks:
-
-```powershell
-python -m pytest -q python_pichia\tests\test_pipeline_entrypoints.py python_pichia\tests\test_reports_entrypoints.py
-python -m pytest -q tests\test_pichia_secretion_service_contract.py
-```
-
-Slow solver/model checks are intentionally gated by environment variables. See [Current Requirements And Architecture](docs/architecture.md#慢速测试网关).
-
-## Documentation
+## Authoritative project documents
 
 | Document | Use it for |
-|---|---|
-| [Docs Index](docs/README.md) | Current document entry points and archived notes |
-| [Requirements And Capability Boundaries](docs/requirements.md) | Active target-protein workflow and scientific boundaries |
-| [Architecture And Boundaries](docs/architecture.md) | System layering, module ownership, and artifact governance |
-| [Execution Plan](docs/EXECUTION_PLAN.md) | Current stage, data-gated next work, and scope boundaries |
-| [Data And Artifact Governance](docs/architecture.md#数据与产物治理) | Protected directories, runtime artifacts, and archive rules |
+| --- | --- |
+| [Requirements](docs/requirements.md) | Scope and capability boundary |
+| [Architecture](docs/architecture.md) | Layer rules and protected boundaries |
+| [Execution plan](docs/EXECUTION_PLAN.md) | Current authority, gates, and blockers |
+| [Handoff](docs/handoff.md) | Current slice and verification |
+| [ADR index](docs/adr/README.md) | Long-lived decisions and alternatives |
 
-## Citation And Contact
+<details>
+<summary>Technical interview lens</summary>
 
-This repository originates from the pcSecYeastSpecies research model:
+The strongest discussion point is not a framework name: it is the explicit boundary between evidence, computation, and the person who remains accountable for the final decision. Current status and blockers are intentionally linked rather than copied here.
+</details>
 
-**Cross-species proteome-constrained modeling reveals trade-offs in yeast protein secretion under temperature and glycosylation stress**
-
-Original contacts:
-
-- **Lizheng Liu** ([GitHub: @Zephyr-112](https://github.com/Zephyr-112)), Institute of Biopharmaceutical and Health Engineering, Tsinghua Shenzhen International Graduate School, Tsinghua University, Shenzhen, China
-- **Feiran Li** ([GitHub: @feiranl](https://github.com/feiranl)), Institute of Biopharmaceutical and Health Engineering, Tsinghua Shenzhen International Graduate School, Tsinghua University, Shenzhen, China
-
-## License
-
-This repository is released under the [MIT License](LICENSE).
+> **Reflection:** Reliable tools do not hide uncertainty; they make the next decision easier to defend. Explore more work at [my personal site](https://77652189.github.io).
