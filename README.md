@@ -31,7 +31,7 @@ flowchart TB
     C3[screens · analysis · reports]
     C4[oe_capacity · secretory_resources]
   end
-  ADP["adapters/soplex_solver<br/>DockerSoplexSolver"]
+  ADP["pcsec_pichia/adapters/soplex_solver<br/>DockerSoplexSolver"]
 
   UI --> SVC --> CORE --> ADP
 ```
@@ -65,7 +65,8 @@ python -m streamlit run app/ui/streamlit_app.py --server.address 0.0.0.0 --serve
 ```
 
 **Browsing existing screening results needs no solver.** Running a *new* simulation needs SoPlex,
-reached through Docker (`adapters/soplex_solver.py`). The split is deliberate: the expensive
+reached through Docker ([`adapters/soplex_solver.py`](python_pichia/src/pcsec_pichia/adapters/soplex_solver.py)).
+The split is deliberate: the expensive
 dependency is confined to one adapter, so the read path stays runnable anywhere.
 
 ## Engineering decisions

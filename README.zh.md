@@ -30,7 +30,7 @@ flowchart TB
     C3[screens · analysis · reports]
     C4[oe_capacity · secretory_resources]
   end
-  ADP["adapters/soplex_solver<br/>DockerSoplexSolver"]
+  ADP["pcsec_pichia/adapters/soplex_solver<br/>DockerSoplexSolver"]
 
   UI --> SVC --> CORE --> ADP
 ```
@@ -64,7 +64,8 @@ python -m streamlit run app/ui/streamlit_app.py --server.address 0.0.0.0 --serve
 ```
 
 **浏览已有筛查结果不需要求解器。** 跑**新**仿真才需要 SoPlex，
-经 Docker 调用（`adapters/soplex_solver.py`）。这个切分是刻意的：
+经 Docker 调用（[`adapters/soplex_solver.py`](python_pichia/src/pcsec_pichia/adapters/soplex_solver.py)）。
+这个切分是刻意的：
 把重依赖关在一个 adapter 里，读取路径才能在任何机器上跑起来。
 
 ## 工程要点
