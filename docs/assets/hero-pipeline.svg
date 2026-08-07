@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 310" width="1000" height="310" role="img" aria-labelledby="t d">
+<title id="t">pcSecPichia pipeline: from target protein to ranked candidates, and what it refuses to answer</title>
+<desc id="d">A target protein sequence feeds constraint construction, then an LP solve that exposes the dual solution. The result forks: four relative signals that can be compared, and absolute capacity which is permanently unavailable by design.</desc>
+<defs>
+  <marker id="ar" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+    <path d="M0,0 L9,4.5 L0,9 z" class="arh"/>
+  </marker>
+</defs>
+<style>
+  .bg{fill:#ffffff}
+  .box{fill:#f4f2ec;stroke:#d8d5cc;stroke-width:1}
+  .okbox{fill:#e1f5ee;stroke:#0F766E;stroke-width:1.5}
+  .nobox{fill:#f1efe8;stroke:#b4b2a9;stroke-width:1.5;stroke-dasharray:5 3}
+  .flow{stroke:#8b8b85;stroke-width:1.6;fill:none}
+  .arh{fill:#8b8b85}
+  .cap{fill:#5f5e5a;font:400 14px system-ui,-apple-system,'Segoe UI',sans-serif}
+  .h{fill:#2c2c2a;font:500 18px system-ui,-apple-system,'Segoe UI',sans-serif}
+  .s{fill:#5f5e5a;font:400 13.5px system-ui,-apple-system,'Segoe UI',sans-serif}
+  .hok{fill:#0b5c4f;font:500 18px system-ui,-apple-system,'Segoe UI',sans-serif}
+  .sok{fill:#0F766E;font:400 13.5px system-ui,-apple-system,'Segoe UI',sans-serif}
+  .hno{fill:#5f5e5a;font:500 18px system-ui,-apple-system,'Segoe UI',sans-serif}
+  .mono{fill:#8b6d1f;font:500 15px ui-monospace,'Cascadia Mono',Consolas,monospace}
+  .note{fill:#8b8b85;font:400 13px system-ui,-apple-system,'Segoe UI',sans-serif}
+  @media (prefers-color-scheme:dark){
+    .bg{fill:#0d1117}
+    .box{fill:#1c1f26;stroke:#3a3d44}
+    .okbox{fill:#0d2e28;stroke:#2fa88f}
+    .nobox{fill:#1a1a1e;stroke:#5f5e5a}
+    .flow{stroke:#8b8b85}
+    .arh{fill:#8b8b85}
+    .cap{fill:#b4b2a9}
+    .h{fill:#e8e6e0}
+    .s{fill:#b4b2a9}
+    .hok{fill:#7fd9c2}
+    .sok{fill:#5DCAA5}
+    .hno{fill:#b4b2a9}
+    .mono{fill:#EF9F27}
+    .note{fill:#8b8b85}
+  }
+</style>
+<rect class="bg" x="0" y="0" width="1000" height="310"/>
+<text class="cap" x="30" y="34">从目标蛋白序列，到可排序的改造候选 —— 以及明确拒绝回答的那部分</text>
+
+<rect class="box" x="30" y="95" width="185" height="80" rx="8"/>
+<text class="h" x="122" y="129" text-anchor="middle">目标蛋白</text>
+<text class="s" x="122" y="152" text-anchor="middle">序列 · 二硫键 · 糖基化位点</text>
+
+<path class="flow" d="M 220 135 H 249" marker-end="url(#ar)"/>
+
+<rect class="box" x="255" y="95" width="185" height="80" rx="8"/>
+<text class="h" x="347" y="129" text-anchor="middle">约束构建</text>
+<text class="s" x="347" y="152" text-anchor="middle">8 个约束块 · 培养基 · 固定 μ</text>
+
+<path class="flow" d="M 445 135 H 474" marker-end="url(#ar)"/>
+
+<rect class="box" x="480" y="95" width="155" height="80" rx="8"/>
+<text class="h" x="557" y="129" text-anchor="middle">LP 求解</text>
+<text class="s" x="557" y="152" text-anchor="middle">HiGHS · 取对偶解</text>
+
+<path class="flow" d="M 635 135 H 670 V 83 H 694" marker-end="url(#ar)"/>
+<path class="flow" d="M 635 135 H 670 V 221 H 694" marker-end="url(#ar)"/>
+
+<rect class="okbox" x="700" y="40" width="272" height="86" rx="8"/>
+<text class="hok" x="718" y="70">相对信号</text>
+<text class="sok" x="718" y="92">瓶颈归因 · 剂量响应形状</text>
+<text class="sok" x="718" y="112">排序稳健性 · 价值-of-information</text>
+
+<rect class="nobox" x="700" y="178" width="272" height="86" rx="8"/>
+<text class="hno" x="718" y="208">绝对容量</text>
+<text class="mono" x="718" y="232">unavailable</text>
+<text class="s" x="718" y="252">公开来源永久缺失，无审核锚点</text>
+
+<text class="note" x="30" y="292">四条相对信号都不依赖绝对锚点即可计算；绝对容量恒为 unavailable —— 这是设计，不是待办。</text>
+</svg>

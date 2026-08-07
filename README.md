@@ -4,6 +4,8 @@
 
 ### Ranks what to engineer next — and refuses to answer what the data cannot support.
 
+![Pipeline: target protein to ranked candidates, with absolute capacity permanently unavailable](docs/assets/hero-pipeline.svg)
+
 ![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=flat-square&logo=python&logoColor=white)
 ![NumPy](https://img.shields.io/badge/NumPy-013243?style=flat-square&logo=numpy&logoColor=white)
 ![SciPy](https://img.shields.io/badge/SciPy-8CAAE6?style=flat-square&logo=scipy&logoColor=white)
