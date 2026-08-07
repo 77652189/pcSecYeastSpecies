@@ -4,7 +4,7 @@
 
 ### 排出下一步该改造什么——数据支撑不了的，它拒绝回答。
 
-![流程：从目标蛋白到候选排序，绝对容量恒为 unavailable](docs/assets/hero-pipeline.svg)
+![稀疏约束矩阵导出候选排序，下方一条满宽的条形被刻意留空——那是模型拒绝给出的绝对量](docs/assets/hero-pipeline.svg)
 
 ![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=flat-square&logo=python&logoColor=white)
 ![NumPy](https://img.shields.io/badge/NumPy-013243?style=flat-square&logo=numpy&logoColor=white)

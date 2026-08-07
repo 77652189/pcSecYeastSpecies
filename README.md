@@ -4,7 +4,7 @@
 
 ### Ranks what to engineer next — and refuses to answer what the data cannot support.
 
-![Pipeline: target protein to ranked candidates, with absolute capacity permanently unavailable](docs/assets/hero-pipeline.svg)
+![A sparse constraint matrix feeding a ranked candidate list, above one full-width bar left deliberately empty — the absolute quantity the model declines to report](docs/assets/hero-pipeline.svg)
 
 ![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=flat-square&logo=python&logoColor=white)
 ![NumPy](https://img.shields.io/badge/NumPy-013243?style=flat-square&logo=numpy&logoColor=white)
@@ -63,7 +63,7 @@ Overexpression is swept across a factor grid and the **shape** of the response i
 is the output, not a single number. A shape class survives the fact that the true expression
 multiple is unknown, which a fixed `2.0×` point does not.
 
-![OE dose–response curves, classified by shape](docs/assets/oe-dose-response.svg)
+![OE dose–response curves, classified by shape](docs/assets/oe-dose-response-en.svg)
 
 Bottleneck attribution reads the LP's dual solution and reports which constraint is binding, at row
 granularity. The catch is visible in the figure: **the two strongest constraints are lower bounds**,
@@ -71,7 +71,7 @@ and overexpression relaxes upper bounds — so ranking by magnitude alone nomina
 provably cannot move. `bound_type` is therefore carried through every aggregation level, and the
 rule is emitted in the function's own warnings rather than left in a document.
 
-![Constraint marginals split by bound type](docs/assets/bottleneck-attribution.svg)
+![Constraint marginals split by bound type](docs/assets/bottleneck-attribution-en.svg)
 
 ## Quick start
 
