@@ -4,12 +4,21 @@
 
 ### Ranks what to engineer next — and refuses to answer what the data cannot support.
 
-[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
-[![Streamlit](https://img.shields.io/badge/UI-Streamlit-FF4B4B?logo=streamlit&logoColor=white)](https://streamlit.io/)
-[![SciPy HiGHS](https://img.shields.io/badge/LP-SciPy%20HiGHS-8CAAE6?logo=scipy&logoColor=white)](https://docs.scipy.org/doc/scipy/reference/optimize.linprog-highs.html)
-[![SoPlex](https://img.shields.io/badge/reference%20solver-SoPlex%20via%20Docker-2496ED?logo=docker&logoColor=white)](https://soplex.zib.de/)
-[![Tests](https://img.shields.io/badge/tests-152%20files-brightgreen)](python_pichia/tests)
-[![Absolute capacity](https://img.shields.io/badge/absolute%20capacity-unavailable%20by%20design-lightgrey)](docs/adr/002-relative-oe-and-absolute-capacity-layers.md)
+![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=flat-square&logo=python&logoColor=white)
+![NumPy](https://img.shields.io/badge/NumPy-013243?style=flat-square&logo=numpy&logoColor=white)
+![SciPy](https://img.shields.io/badge/SciPy-8CAAE6?style=flat-square&logo=scipy&logoColor=white)
+![pandas](https://img.shields.io/badge/pandas-150458?style=flat-square&logo=pandas&logoColor=white)
+![Streamlit](https://img.shields.io/badge/Streamlit-FF4B4B?style=flat-square&logo=streamlit&logoColor=white)
+![Plotly](https://img.shields.io/badge/Plotly-3F4F75?style=flat-square&logo=plotly&logoColor=white)
+![Pydantic](https://img.shields.io/badge/Pydantic-E92063?style=flat-square&logo=pydantic&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-2496ED?style=flat-square&logo=docker&logoColor=white)
+![pytest](https://img.shields.io/badge/pytest-0A9EDC?style=flat-square&logo=pytest&logoColor=white)
+
+[![LP solver](https://img.shields.io/badge/LP-HiGHS%20%C2%B7%20dual%20solution%20exposed-8CAAE6?style=flat-square)](https://docs.scipy.org/doc/scipy/reference/optimize.linprog-highs.html)
+[![Reference solver](https://img.shields.io/badge/reference%20solver-SoPlex%20on%20Ubuntu%2024.04-E95420?style=flat-square&logo=ubuntu&logoColor=white)](https://soplex.zib.de/)
+[![Tests](https://img.shields.io/badge/tests-152%20files-brightgreen?style=flat-square)](python_pichia/tests)
+[![Absolute capacity](https://img.shields.io/badge/absolute%20capacity-unavailable%20by%20design-lightgrey?style=flat-square)](docs/adr/002-relative-oe-and-absolute-capacity-layers.md)
 
 [What it does](#what-it-does) · [Quick start](#quick-start) · [Tech stack](#tech-stack) · [Architecture](#architecture) · [The port](#the-port-from-matlab) · [Engineering decisions](#engineering-decisions) · [Boundaries](#boundaries)
 

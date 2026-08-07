@@ -4,12 +4,21 @@
 
 ### 排出下一步该改造什么——数据支撑不了的，它拒绝回答。
 
-[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
-[![Streamlit](https://img.shields.io/badge/界面-Streamlit-FF4B4B?logo=streamlit&logoColor=white)](https://streamlit.io/)
-[![SciPy HiGHS](https://img.shields.io/badge/求解-SciPy%20HiGHS-8CAAE6?logo=scipy&logoColor=white)](https://docs.scipy.org/doc/scipy/reference/optimize.linprog-highs.html)
-[![SoPlex](https://img.shields.io/badge/参照求解器-SoPlex%20via%20Docker-2496ED?logo=docker&logoColor=white)](https://soplex.zib.de/)
-[![Tests](https://img.shields.io/badge/测试-152%20个文件-brightgreen)](python_pichia/tests)
-[![Absolute capacity](https://img.shields.io/badge/绝对容量-按设计恒为%20unavailable-lightgrey)](docs/adr/002-relative-oe-and-absolute-capacity-layers.md)
+![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=flat-square&logo=python&logoColor=white)
+![NumPy](https://img.shields.io/badge/NumPy-013243?style=flat-square&logo=numpy&logoColor=white)
+![SciPy](https://img.shields.io/badge/SciPy-8CAAE6?style=flat-square&logo=scipy&logoColor=white)
+![pandas](https://img.shields.io/badge/pandas-150458?style=flat-square&logo=pandas&logoColor=white)
+![Streamlit](https://img.shields.io/badge/Streamlit-FF4B4B?style=flat-square&logo=streamlit&logoColor=white)
+![Plotly](https://img.shields.io/badge/Plotly-3F4F75?style=flat-square&logo=plotly&logoColor=white)
+![Pydantic](https://img.shields.io/badge/Pydantic-E92063?style=flat-square&logo=pydantic&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-2496ED?style=flat-square&logo=docker&logoColor=white)
+![pytest](https://img.shields.io/badge/pytest-0A9EDC?style=flat-square&logo=pytest&logoColor=white)
+
+[![LP solver](https://img.shields.io/badge/LP%20求解-HiGHS%20%C2%B7%20可取对偶解-8CAAE6?style=flat-square)](https://docs.scipy.org/doc/scipy/reference/optimize.linprog-highs.html)
+[![Reference solver](https://img.shields.io/badge/参照求解器-SoPlex%20on%20Ubuntu%2024.04-E95420?style=flat-square&logo=ubuntu&logoColor=white)](https://soplex.zib.de/)
+[![Tests](https://img.shields.io/badge/测试-152%20个文件-brightgreen?style=flat-square)](python_pichia/tests)
+[![Absolute capacity](https://img.shields.io/badge/绝对容量-按设计恒为%20unavailable-lightgrey?style=flat-square)](docs/adr/002-relative-oe-and-absolute-capacity-layers.md)
 
 [做什么](#做什么) · [快速开始](#快速开始) · [技术栈](#技术栈) · [架构](#架构) · [从 MATLAB 移植](#从-matlab-移植) · [工程要点](#工程要点) · [边界](#边界)
 
