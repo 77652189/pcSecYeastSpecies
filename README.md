@@ -52,6 +52,25 @@ fail loudly instead of quietly falling back to a plausible default.
 Three entry points share one core: a Streamlit UI (`app/ui`), an HTTP API (`app/api`), and 14 batch
 tools under `python_pichia/tools/`.
 
+### What the output looks like
+
+> Both figures below use **simulated data** and reproduce the axes, categories and colour coding of
+> the real views. Actual values are wet-lab-adjacent and are not published.
+
+Overexpression is swept across a factor grid and the **shape** of the response is classified — that
+is the output, not a single number. A shape class survives the fact that the true expression
+multiple is unknown, which a fixed `2.0×` point does not.
+
+![OE dose–response curves, classified by shape](docs/assets/oe-dose-response.svg)
+
+Bottleneck attribution reads the LP's dual solution and reports which constraint is binding, at row
+granularity. The catch is visible in the figure: **the two strongest constraints are lower bounds**,
+and overexpression relaxes upper bounds — so ranking by magnitude alone nominates targets that
+provably cannot move. `bound_type` is therefore carried through every aggregation level, and the
+rule is emitted in the function's own warnings rather than left in a document.
+
+![Constraint marginals split by bound type](docs/assets/bottleneck-attribution.svg)
+
 ## Quick start
 
 **Browsing existing screening results needs no solver.** That is the whole point of the split below —

@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 700 400" width="700" height="400" role="img" aria-labelledby="t d">
+<title id="t">Shadow-price bottleneck attribution, split by bound type</title>
+<desc id="d">Simulated constraint marginals ranked by magnitude. The two strongest are lower-bound constraints, which overexpression provably cannot relax; only the upper-bound rows below them are actionable OE targets.</desc>
+<style>
+  .bg{fill:#ffffff}
+  .ax{stroke:#8b8b85;stroke-width:1}
+  .ti{fill:#2c2c2a;font:500 15px system-ui,-apple-system,'Segoe UI',sans-serif}
+  .lb{fill:#5f5e5a;font:400 12px system-ui,-apple-system,'Segoe UI',sans-serif}
+  .rx{fill:#2c2c2a;font:400 12px ui-monospace,'Cascadia Mono',Consolas,monospace}
+  .rxm{fill:#8b8b85;font:400 12px ui-monospace,'Cascadia Mono',Consolas,monospace}
+  .tk{fill:#8b8b85;font:400 11px system-ui,-apple-system,'Segoe UI',sans-serif}
+  .sim{fill:#8b8b85;font:400 11px system-ui,-apple-system,'Segoe UI',sans-serif;font-style:italic}
+  .warn{fill:#8a5a00;font:500 11.5px system-ui,-apple-system,'Segoe UI',sans-serif}
+  .note{fill:#5f5e5a;font:400 11.5px system-ui,-apple-system,'Segoe UI',sans-serif}
+  .brk{stroke:#BA7517;stroke-width:1.5;fill:none}
+  @media (prefers-color-scheme:dark){
+    .bg{fill:#0d1117}
+    .ax{stroke:#6e6e68}
+    .ti{fill:#e8e6e0}
+    .lb{fill:#b4b2a9}
+    .rx{fill:#d8d6d0}
+    .rxm{fill:#8b8b85}
+    .tk{fill:#8b8b85}
+    .sim{fill:#8b8b85}
+    .warn{fill:#EF9F27}
+    .note{fill:#b4b2a9}
+    .brk{stroke:#EF9F27}
+  }
+</style>
+<rect class="bg" x="0" y="0" width="700" height="400"/>
+<text class="ti" x="20" y="28">影子价格瓶颈归因 — 限制强度最大的，未必是能动的</text>
+<text class="sim" x="20" y="47">模拟数据，仅示意图表形态与 bound_type 的区分方式</text>
+
+<rect x="290" y="85" width="284" height="24" rx="2" fill="#B4B2A9"/>
+<text class="rxm" x="282" y="102" text-anchor="end">ribosome_assembly</text>
+<text class="tk" x="582" y="102">0.86</text>
+
+<rect x="290" y="125" width="244" height="24" rx="2" fill="#B4B2A9"/>
+<text class="rxm" x="282" y="142" text-anchor="end">PDI1_dilution</text>
+<text class="tk" x="542" y="142">0.74</text>
+
+<rect x="290" y="165" width="135" height="24" rx="2" fill="#0F766E"/>
+<text class="rx" x="282" y="182" text-anchor="end">sec_Pdi1p_complex_formation</text>
+<text class="tk" x="433" y="182">0.41</text>
+
+<rect x="290" y="205" width="109" height="24" rx="2" fill="#0F766E"/>
+<text class="rx" x="282" y="222" text-anchor="end">sec_Ero1p_complex_formation</text>
+<text class="tk" x="407" y="222">0.33</text>
+
+<rect x="290" y="245" width="69" height="24" rx="2" fill="#0F766E"/>
+<text class="rx" x="282" y="262" text-anchor="end">protein_mass_total</text>
+<text class="tk" x="367" y="262">0.21</text>
+
+<rect x="290" y="285" width="40" height="24" rx="2" fill="#0F766E"/>
+<text class="rx" x="282" y="302" text-anchor="end">sec_Ost1p_complex_formation</text>
+<text class="tk" x="338" y="302">0.12</text>
+
+<line class="ax" x1="290" y1="320" x2="620" y2="320"/>
+<text class="lb" x="290" y="338">限制强度（|marginal|，越大越卡分泌）</text>
+
+<path class="brk" d="M 640 85 q 8 0 8 8 v 22 q 0 8 8 8 q -8 0 -8 8 v 22 q 0 8 -8 8"/>
+<text class="warn" x="600" y="70">↓ 这两条过表达松不动</text>
+
+<rect x="290" y="358" width="11" height="11" rx="2" fill="#0F766E"/>
+<text class="lb" x="308" y="368">上限约束 — OE 可缓解，是候选</text>
+<rect x="500" y="358" width="11" height="11" rx="2" fill="#B4B2A9"/>
+<text class="lb" x="518" y="368">下界约束 — OE 无效</text>
+
+<text class="note" x="20" y="390">过表达放宽的是上限产能，对「最低需求」类的下界可证明无效。按 |marginal| 排序会把下界排在最前——这是已确认过的假阳性来源，所以 bound_type 必须贯穿每一级汇总。</text>
+</svg>

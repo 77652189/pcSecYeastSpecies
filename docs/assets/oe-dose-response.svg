@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 700 400" width="700" height="400" role="img" aria-labelledby="t d">
+<title id="t">OE dose-response curves classified by shape</title>
+<desc id="d">Three simulated overexpression dose-response curves. One saturates quickly, one rises monotonically, one stays flat. The shape class is the output, not the absolute value.</desc>
+<style>
+  .bg{fill:#ffffff}
+  .ax{stroke:#8b8b85;stroke-width:1}
+  .grid{stroke:#e6e4dd;stroke-width:1}
+  .ti{fill:#2c2c2a;font:500 15px system-ui,-apple-system,'Segoe UI',sans-serif}
+  .lb{fill:#5f5e5a;font:400 12px system-ui,-apple-system,'Segoe UI',sans-serif}
+  .tk{fill:#8b8b85;font:400 11px system-ui,-apple-system,'Segoe UI',sans-serif}
+  .sim{fill:#8b8b85;font:400 11px system-ui,-apple-system,'Segoe UI',sans-serif;font-style:italic}
+  .note{fill:#5f5e5a;font:400 11.5px system-ui,-apple-system,'Segoe UI',sans-serif}
+  @media (prefers-color-scheme:dark){
+    .bg{fill:#0d1117}
+    .ax{stroke:#6e6e68}
+    .grid{stroke:#26262b}
+    .ti{fill:#e8e6e0}
+    .lb{fill:#b4b2a9}
+    .tk{fill:#8b8b85}
+    .sim{fill:#8b8b85}
+    .note{fill:#b4b2a9}
+  }
+</style>
+<rect class="bg" x="0" y="0" width="700" height="400"/>
+<text class="ti" x="20" y="28">OE 剂量响应曲线 — 输出的是曲线形状，不是绝对数值</text>
+<text class="sim" x="20" y="47">模拟数据，仅示意图表形态；真实取值随目标蛋白与条件变化</text>
+
+<line class="grid" x1="100" y1="70" x2="620" y2="70"/>
+<line class="grid" x1="100" y1="112" x2="620" y2="112"/>
+<line class="grid" x1="100" y1="154" x2="620" y2="154"/>
+<line class="grid" x1="100" y1="196" x2="620" y2="196"/>
+<line class="grid" x1="100" y1="238" x2="620" y2="238"/>
+<line class="ax" x1="100" y1="280" x2="620" y2="280"/>
+<line class="ax" x1="100" y1="70" x2="100" y2="280"/>
+
+<text class="tk" x="92" y="74" text-anchor="end">10</text>
+<text class="tk" x="92" y="116" text-anchor="end">8</text>
+<text class="tk" x="92" y="158" text-anchor="end">6</text>
+<text class="tk" x="92" y="200" text-anchor="end">4</text>
+<text class="tk" x="92" y="242" text-anchor="end">2</text>
+<text class="tk" x="92" y="284" text-anchor="end">0</text>
+<text class="lb" x="20" y="176" transform="rotate(-90 20 176)" text-anchor="middle">分泌相对提升（%）</text>
+
+<text class="tk" x="100" y="299" text-anchor="middle">1×</text>
+<text class="tk" x="230" y="299" text-anchor="middle">2×</text>
+<text class="tk" x="360" y="299" text-anchor="middle">4×</text>
+<text class="tk" x="490" y="299" text-anchor="middle">8×</text>
+<text class="tk" x="620" y="299" text-anchor="middle">16×</text>
+<text class="lb" x="360" y="320" text-anchor="middle">过表达倍数（×，1 = 不过表达）</text>
+
+<polyline points="100,280 230,183 360,133 490,112 620,104" fill="none" stroke="#66C2A5" stroke-width="2.5"/>
+<circle cx="100" cy="280" r="3.5" fill="#66C2A5"/><circle cx="230" cy="183" r="3.5" fill="#66C2A5"/><circle cx="360" cy="133" r="3.5" fill="#66C2A5"/><circle cx="490" cy="112" r="3.5" fill="#66C2A5"/><circle cx="620" cy="104" r="3.5" fill="#66C2A5"/>
+
+<polyline points="100,280 230,242 360,207 490,167 620,129" fill="none" stroke="#FC8D62" stroke-width="2.5"/>
+<circle cx="100" cy="280" r="3.5" fill="#FC8D62"/><circle cx="230" cy="242" r="3.5" fill="#FC8D62"/><circle cx="360" cy="207" r="3.5" fill="#FC8D62"/><circle cx="490" cy="167" r="3.5" fill="#FC8D62"/><circle cx="620" cy="129" r="3.5" fill="#FC8D62"/>
+
+<polyline points="100,280 230,278 360,277 490,277 620,276" fill="none" stroke="#8DA0CB" stroke-width="2.5"/>
+<circle cx="100" cy="280" r="3.5" fill="#8DA0CB"/><circle cx="230" cy="278" r="3.5" fill="#8DA0CB"/><circle cx="360" cy="277" r="3.5" fill="#8DA0CB"/><circle cx="490" cy="277" r="3.5" fill="#8DA0CB"/><circle cx="620" cy="276" r="3.5" fill="#8DA0CB"/>
+
+<rect x="100" y="340" width="11" height="11" rx="2" fill="#66C2A5"/>
+<text class="lb" x="118" y="350">快速饱和 — 弱表达即足够</text>
+<rect x="290" y="340" width="11" height="11" rx="2" fill="#FC8D62"/>
+<text class="lb" x="308" y="350">单调上升 — 值得做候选</text>
+<rect x="470" y="340" width="11" height="11" rx="2" fill="#8DA0CB"/>
+<text class="lb" x="488" y="350">平坦 — 非瓶颈</text>
+
+<text class="note" x="100" y="376">形状分类对「真实表达倍数未知」是稳健的——这正是它替代固定 2.0× 单点的理由。</text>
+</svg>
